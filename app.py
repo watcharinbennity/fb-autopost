@@ -1,292 +1,194 @@
 import os
 import json
-import time
 import random
-import datetime as dt
-from typing import Dict, Any, Optional, List, Tuple
-
+import time
+import io
 import requests
 import pandas as pd
+from datetime import datetime, timedelta
 
+# =========================
+# ENV
+# =========================
+PAGE_ID = os.getenv("PAGE_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL")
+
+REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "15"))
+POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "2"))
+
+if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
+    raise Exception("❌ Missing PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL")
 
 STATE_FILE = "state.json"
 
-
-def today_th_date_str() -> str:
-    # แสดงเป็น "วันที่ เดือน ปี" แบบไทย (ปี พ.ศ.)
-    thai_months = [
-        "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
-    ]
-    now = dt.datetime.now()
-    day = now.day
-    month_name = thai_months[now.month - 1]
-    year_be = now.year + 543
-    return f"{day} {month_name} {year_be}"
-
-
-def load_state() -> Dict[str, Any]:
+# =========================
+# LOAD / SAVE STATE
+# =========================
+def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"last_posted": {}, "category_monthly": {}, "caption_stats": {}}
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data.setdefault("last_posted", {})
-        data.setdefault("category_monthly", {})
-        data.setdefault("caption_stats", {})
-        return data
-    except Exception:
-        return {"last_posted": {}, "category_monthly": {}, "caption_stats": {}}
+        return {"last_posted": {}}
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-
-def save_state(state: Dict[str, Any]) -> None:
+def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
+state = load_state()
 
-def env_required(name: str) -> str:
-    v = os.getenv(name, "").strip()
-    if not v:
-        raise Exception(f"❌ Missing env var: {name}")
-    return v
+# =========================
+# LOAD CSV
+# =========================
+print("⬇️ Downloading Shopee CSV...")
+r = requests.get(SHOPEE_CSV_URL, timeout=60)
+r.raise_for_status()
 
+df = pd.read_csv(io.BytesIO(r.content), low_memory=False)
+print(f"✅ CSV loaded: {len(df)} rows")
 
-def pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    cols = {c.lower(): c for c in df.columns}
-    for cand in candidates:
-        if cand.lower() in cols:
-            return cols[cand.lower()]
+# =========================
+# NORMALIZE COLUMNS
+# =========================
+def col(name):
+    for c in df.columns:
+        if name.lower() in c.lower():
+            return c
     return None
 
+COL_NAME = col("product") or col("name")
+COL_PRICE = col("price")
+COL_SALES = col("sold") or col("sales")
+COL_RATING = col("rating")
+COL_LINK = col("link")
+COL_IMAGE = col("image")
 
-def to_float(x) -> float:
+# =========================
+# FILTER CANDIDATES
+# =========================
+now = datetime.utcnow()
+candidates = []
+
+for _, row in df.iterrows():
+    pid = str(row.get(COL_LINK, "")).strip()
+    if not pid:
+        continue
+
+    last = state["last_posted"].get(pid)
+    if last:
+        last_dt = datetime.fromisoformat(last)
+        if now - last_dt < timedelta(days=REPOST_AFTER_DAYS):
+            continue
+
+    candidates.append(row)
+
+if not candidates:
+    print("⚠️ ไม่มีสินค้าที่เข้าเงื่อนไข")
+    exit(0)
+
+# =========================
+# SORT BY PERFORMANCE
+# =========================
+def score(row):
+    score = 0
     try:
-        if pd.isna(x):
-            return 0.0
-        s = str(x).strip()
-        s = s.replace(",", "")
-        s = s.replace("%", "")
-        return float(s)
-    except Exception:
-        return 0.0
-
-
-def to_int(x) -> int:
-    try:
-        if pd.isna(x):
-            return 0
-        s = str(x).strip().replace(",", "")
-        return int(float(s))
-    except Exception:
-        return 0
-
-
-def normalize_url(u: str) -> str:
-    if not u:
-        return ""
-    u = str(u).strip()
-    return u
-
-
-def get_month_key(now: Optional[dt.datetime] = None) -> str:
-    now = now or dt.datetime.now()
-    return f"{now.year:04d}-{now.month:02d}"
-
-
-def download_csv(url: str) -> pd.DataFrame:
-    print("⬇️ Downloading Shopee CSV...")
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    df = pd.read_csv(pd.io.common.BytesIO(r.content))
-    print(f"✅ CSV loaded: {len(df)} rows")
-    return df
-
-
-def build_score(row: Dict[str, Any], rating: float, sold: int, discount_pct: float, price: float) -> float:
-    # สเกลคะแนนให้เน้น: เรตติ้ง + ยอดขาย + ส่วนลด + ราคาตัดสินใจง่าย
-    score = 0.0
-    score += max(0.0, (rating - 4.5)) * 40.0        # เรต 4.5->0, 5.0->20
-    score += min(50.0, (sold / 1000.0) * 50.0)      # sold 1000 = +50
-    score += min(40.0, (discount_pct / 50.0) * 40.0)  # ลด 50% = +40
-
-    # ราคา: ชอบช่วงกลาง/ไม่แพงเกิน (ปรับได้)
-    if 49 <= price <= 799:
-        score += 12.0
-    elif price <= 1500:
-        score += 6.0
-
-    # กันของเสี่ยง: ดาวต่ำ/ขายน้อย
-    if rating > 0 and rating < 4.3:
-        score -= 25.0
-    if sold > 0 and sold < 30:
-        score -= 10.0
-
+        score += float(row.get(COL_SALES, 0)) * 2
+        score += float(row.get(COL_RATING, 0)) * 10
+    except:
+        pass
     return score
 
+candidates.sort(key=score, reverse=True)
+selected = candidates[:POSTS_PER_RUN]
 
-def caption_templates() -> List[Tuple[str, str]]:
-    # (template_id, template_text)
-    # NOTE: ไม่ใส่เวลา (ตามที่คุณขอเอาเวลาออก)
-    templates = [
-        ("A", "วันนี้เจอของน่าใช้มาก ⭐ รีวิวดี / คนซื้อเยอะ\n🔥 ช่วงนี้ลดอยู่ด้วย คุ้มจัด\nกดดูราคากับรายละเอียดได้เลย 👇\n{url}"),
-        ("B", "ของฮิตจริง… เห็นยอดขายแล้วไม่แปลกใจ 💰\n⭐ เรตติ้งดี ใช้งานง่าย\n🔥 โปรแรงอยู่ตอนนี้ รีบเช็คราคา 👇\n{url}"),
-        ("C", "ใครกำลังหา “ของคุ้มๆ” แนะนำตัวนี้เลย\n⭐ คะแนนรีวิวดีมาก\n🔥 ลดแรง (คุ้มกว่าปกติ)\nลิงก์อยู่ตรงนี้ 👇\n{url}"),
-        ("D", "ตัวนี้เหมาะกับคนอยากได้ของดีแต่ไม่อยากจ่ายแพง\n⭐ รีวิวแน่น / 💰 ขายดี\nกดดูราคา ณ ตอนนี้ได้เลย 👇\n{url}"),
-        ("E", "โปรมาแล้ว 🔥 ลดแรงกว่าที่คิด\nของขายดี + รีวิวดี ⭐\nสนใจลองกดเข้าไปดูรายละเอียดได้เลย 👇\n{url}"),
-        ("F", "แปะของน่าซื้อให้ดูครับ/ค่ะ 😊\n⭐ เรตติ้งดี / 💰 ยอดขายสูง / 🔥 ราคาดี\nดูรายละเอียด+ราคาได้ที่ลิงก์ 👇\n{url}"),
-        ("G", "ถ้าอยากได้ของที่ “คนใช้จริงแล้วชอบ” ตัวนี้น่าสนใจมาก ⭐\nช่วงนี้ลดอยู่ด้วย 🔥\nกดดูราคาได้เลย 👇\n{url}"),
-        ("H", "ตัวนี้คัดมาให้แล้วว่าคุ้ม ✅\n⭐ รีวิวสูง 🔥 ลดแรง 💰 ขายดี\nไปดูรายละเอียดก่อนตัดสินใจได้เลย 👇\n{url}"),
-    ]
-    return templates
+# =========================
+# CAPTION GENERATOR
+# =========================
+HOOKS = [
+    "🔥 ตัวนี้กำลังมาแรง!",
+    "⭐ รีวิวแน่น คนซื้อเพียบ",
+    "💥 ราคาดีจนต้องรีบกด",
+    "📦 ของมันต้องมี",
+]
 
+CTA = [
+    "กดดูรายละเอียดเลย 👇",
+    "เช็คราคาได้ที่ลิงก์นี้ 👇",
+    "ของหมดไว อย่าช้า 👇",
+]
 
-def build_caption(url: str, state: Dict[str, Any]) -> Tuple[str, str]:
-    templates = caption_templates()
-    tid, text = random.choice(templates)
+EXTRAS = [
+    "เหมาะกับใช้เองและซื้อฝาก",
+    "ส่งไว แพ็คดี",
+    "ร้านคะแนนสูง น่าเชื่อถือ",
+]
 
-    # สุ่มประโยคเปิดเล็กๆ ให้ดูมนุษย์ขึ้น
-    openers = [
-        "อัปเดตของน่าซื้อวันนี้ 😊",
-        "แนะนำของคุ้มๆ อีกตัวครับ/ค่ะ",
-        "เจอโปรดีเลยเอามาแปะให้",
-        "ของนี้มาแรงช่วงนี้",
-        "ตัวนี้คนถามเยอะ เลยรวมให้",
-    ]
-    if random.random() < 0.6:
-        text = random.choice(openers) + "\n\n" + text
+def build_caption(row):
+    parts = []
+    parts.append(random.choice(HOOKS))
 
-    msg = text.format(url=url)
+    name = str(row.get(COL_NAME, "")).strip()
+    if name:
+        parts.append(f"🛒 {name}")
 
-    # เก็บสถิติ template
-    state["caption_stats"][tid] = state["caption_stats"].get(tid, 0) + 1
-    return tid, msg
+    price = row.get(COL_PRICE)
+    if pd.notna(price):
+        parts.append(f"💰 ราคาเพียง {price}")
 
+    rating = row.get(COL_RATING)
+    if pd.notna(rating):
+        parts.append(f"⭐ เรตติ้ง {rating}/5")
 
-def should_repost(last_posted_iso: Optional[str], repost_after_days: int) -> bool:
-    if not last_posted_iso:
-        return True
-    try:
-        last_dt = dt.datetime.fromisoformat(last_posted_iso)
-        return (dt.datetime.now() - last_dt).days >= repost_after_days
-    except Exception:
-        return True
+    sales = row.get(COL_SALES)
+    if pd.notna(sales):
+        parts.append(f"🔥 ขายแล้ว {sales}+ ชิ้น")
 
+    if random.random() < 0.7:
+        parts.append(random.choice(EXTRAS))
 
-def post_to_facebook_feed(page_id: str, token: str, message: str, link: str) -> Dict[str, Any]:
-    url = f"https://graph.facebook.com/v25.0/{page_id}/feed"
-    payload = {"message": message, "link": link, "access_token": token}
-    r = requests.post(url, data=payload, timeout=60)
-    try:
-        data = r.json()
-    except Exception:
-        data = {"raw": r.text}
-    return {"status_code": r.status_code, "data": data}
+    parts.append(random.choice(CTA))
 
+    return "\n".join(parts)
 
-def post_to_facebook_photo(page_id: str, token: str, caption: str, image_url: str) -> Dict[str, Any]:
-    url = f"https://graph.facebook.com/v25.0/{page_id}/photos"
+# =========================
+# POST TO FACEBOOK
+# =========================
+GRAPH_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
+
+posted = 0
+
+for row in selected:
+    link = str(row.get(COL_LINK, "")).strip()
+    image = str(row.get(COL_IMAGE, "")).strip()
+
+    caption = build_caption(row)
+    caption += f"\n\n👉 {link}"
+
     payload = {
-        "url": image_url,
+        "access_token": PAGE_ACCESS_TOKEN,
         "caption": caption,
         "published": "true",
-        "access_token": token
     }
-    r = requests.post(url, data=payload, timeout=60)
-    try:
-        data = r.json()
-    except Exception:
-        data = {"raw": r.text}
-    return {"status_code": r.status_code, "data": data}
 
+    files = None
+    if image and image.startswith("http"):
+        payload["url"] = image
+    else:
+        payload["caption"] += "\n(ไม่มีรูปสินค้า)"
 
-def main():
-    page_id = env_required("PAGE_ID")
-    token = env_required("PAGE_ACCESS_TOKEN")
-    csv_url = env_required("SHOPEE_CSV_URL")
+    print("📤 Posting to Facebook...")
+    res = requests.post(GRAPH_URL, data=payload, files=files, timeout=60)
+    if res.status_code != 200:
+        print("❌ Post failed:", res.text)
+        continue
 
-    repost_after_days = int(os.getenv("REPOST_AFTER_DAYS", "15"))
-    posts_per_run = int(os.getenv("POSTS_PER_RUN", "2"))
-    min_delay = int(os.getenv("MIN_DELAY_SECONDS", "120"))
-    max_delay = int(os.getenv("MAX_DELAY_SECONDS", "360"))
+    result = res.json()
+    print("✅ Posted:", result.get("id"))
 
-    state = load_state()
+    state["last_posted"][link] = now.isoformat()
+    posted += 1
+    time.sleep(5)
 
-    df = download_csv(csv_url)
+save_state(state)
 
-    # เดาคอลัมน์ (รองรับหลายชื่อ)
-    col_name = pick_col(df, ["product_name", "name", "title", "สินค้า", "ชื่อสินค้า"])
-    col_url = pick_col(df, ["product_link", "url", "link", "affiliate_link", "ลิงก์"])
-    col_img = pick_col(df, ["image_link", "image", "img", "image_url", "รูป", "ลิงก์รูป"])
-    col_rating = pick_col(df, ["rating", "คะแนน", "ดาว", "avg_rating"])
-    col_sold = pick_col(df, ["sold", "ยอดขาย", "total_sold", "orders", "ยอดสั่งซื้อ"])
-    col_disc = pick_col(df, ["discount", "discount_percent", "เปอร์เซ็นต์ส่วนลด", "ส่วนลด", "discount_pct"])
-    col_price = pick_col(df, ["price", "ราคา", "sale_price", "ราคาขาย"])
-    col_cat = pick_col(df, ["category", "หมวดหมู่", "cat", "หมวด"])
-
-    if not col_url:
-        raise Exception("❌ หา column ลิงก์สินค้าไม่เจอ (ต้องมี url/link/product_link อย่างน้อย 1 ชื่อ)")
-
-    # ทำ list candidates
-    candidates = []
-    for i, row in df.iterrows():
-        url = normalize_url(row.get(col_url, ""))
-        if not url:
-            continue
-
-        name = str(row.get(col_name, "")).strip() if col_name else ""
-        image_url = normalize_url(row.get(col_img, "")) if col_img else ""
-        rating = to_float(row.get(col_rating, 0)) if col_rating else 0.0
-        sold = to_int(row.get(col_sold, 0)) if col_sold else 0
-        discount_pct = to_float(row.get(col_disc, 0)) if col_disc else 0.0
-        price = to_float(row.get(col_price, 0)) if col_price else 0.0
-        category = str(row.get(col_cat, "")).strip() if col_cat else ""
-
-        # product_id ใช้ url เป็นหลัก (กันซ้ำ)
-        product_id = url
-
-        last_posted_iso = state["last_posted"].get(product_id)
-        if not should_repost(last_posted_iso, repost_after_days):
-            continue
-
-        score = build_score(row, rating, sold, discount_pct, price)
-
-        candidates.append({
-            "product_id": product_id,
-            "name": name,
-            "url": url,
-            "image_url": image_url,
-            "rating": rating,
-            "sold": sold,
-            "discount_pct": discount_pct,
-            "price": price,
-            "category": category,
-            "score": score
-        })
-
-    if not candidates:
-        print("ℹ️ ไม่มีสินค้าที่เข้าเงื่อนไข (อาจเพราะยังไม่ครบ 15 วันหรือ CSV ว่าง)")
-        return
-
-    # เลือก top และสุ่มเล็กน้อยให้ไม่ซ้ำ pattern
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    top_pool = candidates[: max(20, posts_per_run * 5)]
-    picks = random.sample(top_pool, k=min(posts_per_run, len(top_pool)))
-
-    month_key = get_month_key()
-    state["category_monthly"].setdefault(month_key, {})
-
-    print(f"🗓️ {today_th_date_str()}")
-    print(f"🧠 Selected {len(picks)} posts this run (pool={len(candidates)})")
-
-    for idx, item in enumerate(picks, start=1):
-        tid, msg = build_caption(item["url"], state)
-
-        # เพิ่มรายละเอียดสั้นๆ ให้ดูมนุษย์ขึ้น (ไม่ยาว ไม่เป็นบอท)
-        extras = []
-        if item["rating"] > 0:
-            extras.append(f"⭐ {item['rating']:.1f}")
-        if item["discount_pct"] > 0:
-            extras.append(f"🔥 ลด {item['discount_pct']:.0f}%")
-        if item["sold"] > 0:
-            extras.append(f"💰 ขาย {item['sold']:,}+")
-        if extras and random.random() < 0.7:
+print(f"🎉 เสร็จสิ้น โพสต์ทั้งหมด {posted} รายการ")
