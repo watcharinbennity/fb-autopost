@@ -3,11 +3,15 @@ name: fb-autopost
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 5 * * *"    # 12:00 Thailand
-    - cron: "30 11 * * *"  # 18:30 Thailand
+    - cron: "0 5 * * *"   # 12:00 Thailand (UTC+7)
+    - cron: "30 11 * * *" # 18:30 Thailand (UTC+7)
 
 permissions:
   contents: write
+
+concurrency:
+  group: fb-autopost
+  cancel-in-progress: true
 
 jobs:
   run:
@@ -15,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,15 +37,18 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          POSTS_PER_RUN: "1"
           REPOST_AFTER_DAYS: "15"
-        run: |
-          python app.py
+          POSTS_PER_RUN: "1"
+        run: python app.py
 
-      - name: Commit updated state.json (if changed)
+      - name: Commit state.json (if changed)
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add state.json || true
-          git diff --cached --quiet || git commit -m "Update state.json"
-          git push
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "Update state.json"
+            git push
+          else
+            echo "No changes to commit"
+          fi
