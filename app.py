@@ -2,273 +2,270 @@ import os
 import json
 import math
 import random
-import re
-from datetime import datetime, timezone, timedelta
+import datetime as dt
+from typing import Dict, Any, Optional
 
 import requests
 import pandas as pd
 
+
+# -------------------------
+# Config
+# -------------------------
+PAGE_ID = os.getenv("PAGE_ID", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
+
+REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "15"))
+POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
+
 STATE_FILE = "state.json"
 
-TH_MONTHS = [
-    "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
-]
 
-def thai_date_no_time(dt: datetime) -> str:
-    tz_th = timezone(timedelta(hours=7))
-    dt_th = dt.astimezone(tz_th)
-    return f"{dt_th.day} {TH_MONTHS[dt_th.month]} {dt_th.year + 543}"
+# -------------------------
+# Helpers
+# -------------------------
+def today_str_th() -> str:
+    # รูปแบบ: วันที่ เดือน ปี (ไม่มีเวลา)
+    # ตัวอย่าง: 1/3/2569 (พ.ศ.)
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))  # Thailand
+    buddhist_year = now.year + 543
+    return f"{now.day}/{now.month}/{buddhist_year}"
 
-def now_th():
-    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
 
-def must_env(name: str) -> str:
-    v = os.getenv(name, "").strip()
-    if not v:
-        raise Exception(f"❌ Missing env: {name}")
-    return v
+def load_state() -> Dict[str, Any]:
+    if not os.path.exists(STATE_FILE):
+        return {"last_posted": {}}
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            data = {"last_posted": {}}
+    if "last_posted" not in data or not isinstance(data["last_posted"], dict):
+        data["last_posted"] = {}
+    return data
 
-def safe_float(x, default=0.0):
+
+def save_state(state: Dict[str, Any]) -> None:
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def parse_date_ymd(s: str) -> Optional[dt.date]:
     try:
-        if pd.isna(x): return default
+        return dt.datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def can_repost(last_posted_ymd: Optional[str], days: int) -> bool:
+    if not last_posted_ymd:
+        return True
+    d = parse_date_ymd(last_posted_ymd)
+    if not d:
+        return True
+    return (dt.date.today() - d).days >= days
+
+
+def safe_float(x, default=0.0) -> float:
+    try:
+        if pd.isna(x):
+            return default
         return float(x)
     except Exception:
         return default
 
-def safe_int(x, default=0):
+
+def safe_int(x, default=0) -> int:
     try:
-        if pd.isna(x): return default
-        s = str(x).strip().lower().replace(",", "")
-        m = re.match(r"^(\d+(\.\d+)?)(k|m)?$", s)
-        if m:
-            num = float(m.group(1))
-            suf = m.group(3)
-            if suf == "k": num *= 1000
-            elif suf == "m": num *= 1000000
-            return int(num)
-        return int(float(s))
+        if pd.isna(x):
+            return default
+        return int(float(x))
     except Exception:
         return default
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {"last_posted": {}}
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if "last_posted" not in data:
-        data["last_posted"] = {}
+
+def pick_first_existing(row: pd.Series, keys) -> str:
+    for k in keys:
+        if k in row and pd.notna(row[k]) and str(row[k]).strip() != "":
+            return str(row[k]).strip()
+    return ""
+
+
+def build_caption(row: pd.Series) -> str:
+    name = pick_first_existing(row, ["name", "product_name", "title"])
+    price = pick_first_existing(row, ["price", "sale_price", "price_min", "discount_price"])
+    original = pick_first_existing(row, ["original_price", "price_before_discount"])
+    discount = pick_first_existing(row, ["discount", "discount_percent", "discount_rate"])
+    rating = pick_first_existing(row, ["rating", "rating_star"])
+    sold = pick_first_existing(row, ["sold", "historical_sold", "sold_count"])
+    category = pick_first_existing(row, ["category", "cat", "main_category"])
+    link = pick_first_existing(row, ["link", "affiliate_link", "product_link", "url"])
+
+    # ทำให้ดู "ขายจริง" ไม่เป็นบอท: ใช้สำนวนหลากหลาย + ไม่โฆษณาเกินจริง
+    hooks = [
+        "ของมันต้องมีรอบนี้ 😄",
+        "ใครกำลังหาอยู่… เจอตัวนี้พอดี",
+        "แวะมาป้ายยาชิ้นนึงแบบจริงใจ",
+        "คัดมาให้จากตัวที่คนซื้อเยอะ",
+        "ตัวนี้น่าหยิบมาก โดยเฉพาะช่วงโปร",
+    ]
+
+    bullets = []
+    if rating:
+        bullets.append(f"⭐ เรตติ้ง: {rating}")
+    if discount:
+        bullets.append(f"🔥 ลด: {discount}")
+    elif original and price:
+        bullets.append("🔥 มีโปร/ราคาดีกว่าเดิม (เช็คหน้าสินค้า)")
+    if sold:
+        bullets.append(f"💰 ยอดขาย: {sold}")
+    if category:
+        bullets.append(f"📦 หมวด: {category}")
+
+    cta = random.choice([
+        "กดดูรายละเอียด/โค้ดส่วนลดในลิงก์ได้เลยนะ",
+        "เช็คราคา ณ ตอนนี้ในลิงก์ได้เลย (บางทีโปรหมดไว)",
+        "ถ้าสนใจ รีบเช็คโปรก่อนหมดรอบนะ",
+        "ดูรีวิวจริง ๆ แล้วค่อยตัดสินใจก็ได้ ลิงก์นี้เลย",
+    ])
+
+    lines = []
+    lines.append(random.choice(hooks))
+    if name:
+        lines.append(f"✅ {name}")
+
+    if price:
+        if original and original != price:
+            lines.append(f"ราคา: {price} (จาก {original})")
+        else:
+            lines.append(f"ราคา: {price}")
+
+    if bullets:
+        lines.append("")
+        lines.extend([f"{b}" for b in bullets])
+
+    lines.append("")
+    lines.append(cta)
+    if link:
+        lines.append(link)
+
+    lines.append("")
+    lines.append(f"🗓️ อัปเดต: {today_str_th()}")
+    lines.append("#Shopee #โปรวันนี้ #ของมันต้องมี #ของดีบอกต่อ")
+
+    return "\n".join(lines).strip()
+
+
+def score_row(row: pd.Series) -> float:
+    # เน้นขายได้มากขึ้น: ให้คะแนนจาก rating + sold + discount
+    rating = safe_float(row.get("rating", row.get("rating_star", 0)), 0.0)  # 0-5
+    sold = safe_int(row.get("sold", row.get("historical_sold", row.get("sold_count", 0))), 0)
+    disc = row.get("discount", row.get("discount_percent", row.get("discount_rate", 0)))
+    disc_num = 0.0
+    if isinstance(disc, str):
+        # เช่น "35%" -> 35
+        disc_num = safe_float(disc.replace("%", "").strip(), 0.0)
+    else:
+        disc_num = safe_float(disc, 0.0)
+
+    # สูตรคะแนน (ปรับได้)
+    s = (rating * 2.0) + (math.log10(sold + 1) * 2.5) + (disc_num / 10.0)
+    return s
+
+
+def post_to_facebook(message: str, link: str) -> Dict[str, Any]:
+    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
+    payload = {
+        "message": message,
+        "link": link,
+        "access_token": PAGE_ACCESS_TOKEN,
+    }
+    r = requests.post(url, data=payload, timeout=60)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    print(f"STATUS: {r.status_code}")
+    print(f"RESPONSE: {data}")
+    r.raise_for_status()
     return data
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = [c.strip().lower() for c in df.columns]
-    return df
-
-def pick_cols(df: pd.DataFrame):
-    cols = set(df.columns)
-    def first_exist(candidates):
-        for c in candidates:
-            if c in cols:
-                return c
-        return None
-
-    return {
-        "itemid": first_exist(["itemid", "item_id", "itemid_str"]),
-        "name": first_exist(["item_name", "name", "product_name", "itemname"]),
-        "rating": first_exist(["item_rating", "rating", "itemrating"]),
-        "sold": first_exist(["itemsold", "sold", "historical_sold", "item_sold", "sold_count"]),
-        "price": first_exist(["item_price", "price", "sale_price", "current_price"]),
-        "price_before": first_exist(["item_price_before_discount", "price_before_discount", "original_price"]),
-        "image": first_exist(["image_link", "image", "image_url", "imageurl"]),
-        "link": first_exist(["product_link", "link", "item_link", "producturl", "product_url"]),
-        "video": first_exist(["video_link", "video_url", "videourl"]),
-    }
-
-def monthly_trend_keywords(month: int):
-    """
-    ให้บอทจัดการหมวด "เดือนนี้ทำยอด" ด้วยคีย์เวิร์ดตามฤดูกาลไทย
-    (ปรับ/เพิ่มได้ตามแนวเพจ)
-    """
-    if month == 3:
-        return ["สงกรานต์", "เที่ยว", "เดินทาง", "กระเป๋าเดินทาง", "รองเท้าแตะ", "กันน้ำ", "ครีมกันแดด", "พัดลม", "หน้าร้อน"]
-    if month == 4:
-        return ["สงกรานต์", "ปืนฉีดน้ำ", "กันน้ำ", "แว่นกันแดด", "หมวก", "รองเท้าแตะ", "พัดลม", "แอร์พกพา"]
-    if month == 5:
-        return ["หน้าฝน", "ร่ม", "เสื้อกันฝน", "รองเท้ากันลื่น", "กันเชื้อรา", "กันยุง", "ไล่ยุง"]
-    if month == 6:
-        return ["หน้าฝน", "ร่ม", "เสื้อกันฝน", "กันยุง", "ของใช้ในบ้าน", "จัดระเบียบ"]
-    if month == 10:
-        return ["10.10", "โปร", "ลดราคา", "ของมันต้องมี", "ของใช้ในบ้าน", "อุปกรณ์ครัว"]
-    if month == 11:
-        return ["11.11", "โปร", "ลดราคา", "ช้อปปิ้ง", "ของขวัญ", "ไอที", "แก็ดเจ็ต"]
-    if month == 12:
-        return ["ของขวัญ", "ปีใหม่", "คริสต์มาส", "ชุดเที่ยว", "กระเป๋า", "เครื่องใช้ไฟฟ้า"]
-    # ค่าเริ่มต้น (เดือนอื่น ๆ): เน้นขายง่ายทั่วไป
-    return ["ขายดี", "ฮิต", "ของใช้", "อุปกรณ์", "ราคาดี", "โปร", "ลด"]
-
-def match_trend(name: str, keywords: list[str]) -> bool:
-    n = name.lower()
-    return any(k.lower() in n for k in keywords)
-
-def score_item(rating: float, sold: int, discount_pct: float) -> float:
-    return (rating * 2.0) + (math.log1p(max(sold, 0)) * 1.7) + (discount_pct * 10.0)
-
-def build_caption(name: str, price: float, price_before: float, rating: float, sold: int, link: str) -> str:
-    today = thai_date_no_time(datetime.now(timezone.utc))
-    discount_pct = 0.0
-    if price_before and price_before > 0 and price_before > price > 0:
-        discount_pct = (price_before - price) / price_before
-
-    hooks = [
-        "🔥 ดีลวันนี้ต้องรีบเก็บ!",
-        "⭐ ของฮิตช่วงนี้ คนสั่งเยอะ",
-        "💥 ราคาลงแรง น่าโดนมาก",
-        "🛒 ตัวนี้กำลังมาแรง",
-        "⚡ ถ้าเล็งอยู่ แนะนำกดดูโปรตอนนี้",
-    ]
-    ctas = [
-        "กดดูโปร/สั่งซื้อที่ลิงก์ได้เลย 👇",
-        "เช็คส่วนลดในลิงก์ก่อนหมดโปร 👇",
-        "อยากได้ราคาโปร กดลิงก์ดูเลย 👇",
-        "กดลิงก์ดูรายละเอียด/ราคา 👇",
-    ]
-    hashtags = [
-        "#โปรดีบอกต่อ #ของมันต้องมี #ช้อปปี้ #ลดราคา",
-        "#ดีลคุ้ม #Shopee #ช้อปออนไลน์",
-        "#ของฮิต #ราคาดี #โปรแรง",
-    ]
-
-    hook = random.choice(hooks)
-    cta = random.choice(ctas)
-    tag = random.choice(hashtags)
-
-    price_txt = f"{price:,.0f} บาท" if price else "เช็คราคาในลิงก์"
-    before_txt = f"{price_before:,.0f} บาท" if price_before else ""
-    disc_txt = f"ลด {discount_pct*100:.0f}%" if discount_pct >= 0.10 else ""
-
-    lines = [
-        f"{hook}",
-        f"📅 {today}",
-        f"✅ {name}",
-        f"💰 ราคา: {price_txt}" + (f" (ปกติ {before_txt})" if before_txt and price_before > price else ""),
-        (f"🔥 {disc_txt}" if disc_txt else ""),
-        (f"⭐ เรตติ้ง: {rating:.1f} | 💰 ขายแล้ว: {sold:,} ชิ้น" if rating or sold else ""),
-        "",
-        f"{cta}",
-        f"{link}",
-        "",
-        f"{tag}",
-    ]
-    caption = "\n".join([x for x in lines if x and str(x).strip()])
-    return caption.strip()
-
-def fb_post_photo(page_id: str, token: str, image_url: str, caption: str):
-    url = f"https://graph.facebook.com/v25.0/{page_id}/photos"
-    data = {"access_token": token, "url": image_url, "caption": caption, "published": "true"}
-    return requests.post(url, data=data, timeout=60)
-
-def fb_post_feed(page_id: str, token: str, message: str, link: str):
-    url = f"https://graph.facebook.com/v25.0/{page_id}/feed"
-    data = {"access_token": token, "message": message, "link": link}
-    return requests.post(url, data=data, timeout=60)
-
+# -------------------------
+# Main
+# -------------------------
 def main():
-    page_id = must_env("PAGE_ID")
-    token = must_env("PAGE_ACCESS_TOKEN")
-    csv_url = must_env("SHOPEE_CSV_URL")
-
-    posts_per_run = int(os.getenv("POSTS_PER_RUN", "1"))
-    repost_after_days = int(os.getenv("REPOST_AFTER_DAYS", "15"))
+    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
+        raise Exception("❌ Missing PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL")
 
     state = load_state()
-    last_posted: dict[str, str] = state.get("last_posted", {})
-
-    # เงื่อนไข: โพสต์ซ้ำได้เมื่อครบ N วัน
-    cutoff = now_th() - timedelta(days=repost_after_days)
-
-    def recently_posted(item_id: str) -> bool:
-        ts = last_posted.get(item_id)
-        if not ts:
-            return False
-        try:
-            dt = datetime.fromisoformat(ts)
-        except Exception:
-            return False
-        return dt > cutoff
+    last_posted: Dict[str, str] = state.get("last_posted", {})
 
     print("⬇️ Downloading Shopee CSV...")
-    resp = requests.get(csv_url, timeout=180)
-    resp.raise_for_status()
+    csv_resp = requests.get(SHOPEE_CSV_URL, timeout=120)
+    csv_resp.raise_for_status()
 
-    best = []
-    best_limit = 400
+    # อ่าน CSV (กัน dtype warning)
+    df = pd.read_csv(pd.io.common.BytesIO(csv_resp.content), low_memory=False)
+    print(f"✅ CSV loaded: {len(df)} rows")
 
-    first_chunk = True
-    mapping = None
+    # คีย์สินค้าที่ไว้กันโพสต์ซ้ำ: พยายามหา item_id / id / product_id / link
+    def get_item_key(row: pd.Series) -> str:
+        key = pick_first_existing(row, ["item_id", "id", "product_id"])
+        if key:
+            return key
+        # fallback ใช้ลิงก์เป็น key
+        return pick_first_existing(row, ["link", "affiliate_link", "product_link", "url"])
 
-    # หมวดเดือนนี้ให้บอทเลือกเอง
-    month = now_th().month
-    trend_keys = monthly_trend_keywords(month)
+    # ทำ list ของสินค้าที่ "โพสต์ได้" (ยังไม่โพสต์ หรือโพสต์มาแล้ว >= 15 วัน)
+    candidates = []
+    for _, row in df.iterrows():
+        item_key = get_item_key(row)
+        link = pick_first_existing(row, ["link", "affiliate_link", "product_link", "url"])
+        name = pick_first_existing(row, ["name", "product_name", "title"])
 
-    for chunk in pd.read_csv(pd.io.common.BytesIO(resp.content), chunksize=50000, low_memory=False):
-        chunk = normalize_columns(chunk)
-        if first_chunk:
-            mapping = pick_cols(chunk)
-            first_chunk = False
-            if not mapping["name"] or not mapping["link"]:
-                raise Exception(f"❌ CSV columns not supported. Found columns: {list(chunk.columns)[:50]}")
+        if not item_key or not link:
+            continue
 
-        col_itemid = mapping["itemid"]
-        col_name = mapping["name"]
-        col_rating = mapping["rating"]
-        col_sold = mapping["sold"]
-        col_price = mapping["price"]
-        col_price_before = mapping["price_before"]
-        col_image = mapping["image"]
-        col_link = mapping["link"]
-        col_video = mapping["video"]
+        if not can_repost(last_posted.get(item_key), REPOST_AFTER_DAYS):
+            continue
 
-        for _, row in chunk.iterrows():
-            item_id = str(row[col_itemid]) if col_itemid and col_itemid in row else ""
-            name = str(row[col_name]) if col_name in row else ""
-            link = str(row[col_link]) if col_link in row else ""
+        # คัดของดูน่าเชื่อถือขึ้นนิดนึง (ปรับได้)
+        rating = safe_float(row.get("rating", row.get("rating_star", 0)), 0.0)
+        sold = safe_int(row.get("sold", row.get("historical_sold", row.get("sold_count", 0))), 0)
+        if rating > 0 and rating < 4.2:
+            continue
+        if sold > 0 and sold < 5:
+            continue
 
-            if not item_id or not name or not link:
-                continue
+        candidates.append((score_row(row), item_key, row))
 
-            # กันโพสต์ซ้ำภายใน 15 วัน
-            if recently_posted(item_id):
-                continue
+    if not candidates:
+        print("ℹ️ No eligible products to post (within repost window).")
+        return
 
-            # ให้บอท “เลือกหมวดเดือนนี้” ด้วย keyword match
-            # ถ้าไม่ match เลย ยังมีสิทธิ์ติดได้ แต่คะแนนจะน้อยกว่า
-            is_trend = match_trend(name, trend_keys)
+    candidates.sort(key=lambda x: x[0], reverse=True)
 
-            rating = safe_float(row[col_rating], 0.0) if col_rating and col_rating in row else 0.0
-            sold = safe_int(row[col_sold], 0) if col_sold and col_sold in row else 0
+    posted = 0
+    used_keys = set()
 
-            price = safe_float(row[col_price], 0.0) if col_price and col_price in row else 0.0
-            price_before = safe_float(row[col_price_before], 0.0) if col_price_before and col_price_before in row else 0.0
+    for score, item_key, row in candidates:
+        if posted >= POSTS_PER_RUN:
+            break
+        if item_key in used_keys:
+            continue
 
-            discount_pct = 0.0
-            if price_before and price_before > 0 and price_before > price > 0:
-                discount_pct = (price_before - price) / price_before
+        link = pick_first_existing(row, ["link", "affiliate_link", "product_link", "url"])
+        caption = build_caption(row)
 
-            # เกณฑ์ขั้นต่ำเพื่อ “ขายได้มากขึ้น”
-            if rating < 4.5:
-                continue
-            if sold < 50:
-                continue
-            if discount_pct < 0.10 and sold < 300:
-                continue
+        print("📣 Posting to Facebook...")
+        resp = post_to_facebook(caption, link)
 
-            image_url = str(row[col_image]) if col_image and col_image in row else ""
-            video_url = str(row[col_video]) if col_video and col_video in row else ""
+        # Update state: เก็บเป็น YYYY-MM-DD
+        last_posted[item_key] = dt.date.today().strftime("%Y-%m-%d")
+        used_keys.add(item_key)
+        posted += 1
 
-            base = score_item(rating, sold, discount_pct)
-            # trend boost: ถ้าเข้าหมวดเดือนนี้ เพิ่มคะแนน
-            s = base + (2.5 if is_trend else 0.0)
+        post_id = resp.get
