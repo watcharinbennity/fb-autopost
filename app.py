@@ -15,7 +15,7 @@ message = f"""
 เวลาโพสต์: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
-url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
+url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
 payload = {
     "message": message,
