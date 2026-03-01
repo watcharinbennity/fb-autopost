@@ -1,16 +1,27 @@
+import os
 import requests
+from datetime import datetime
 
-PAGE_ID = "110817595401376"
-PAGE_ACCESS_TOKEN = "EAAMU12USPiwBQyeUZBcacFDuo7Nw5fVSff0uP2L84HZCLjTuFsETOR8itLiPGOA0EgyKTLRM5kggt2CExjs4T1P2Mw5EeXZA1xDyZAbOc4OaOiEGPiB4h5fu7P0E9uLAYkVq8h7uXINAIbnP8PVL23rn7SUcsgUNgk8nXZC6pfe1F3GHstQwz202XIhwnX3AJW3Oi1PChaKKyDZCTWKi2emlzuNK7mzyf07l9erYASica34ZAZBbewvCZCdIZD"
+PAGE_ID = os.getenv("PAGE_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 
-def post_to_facebook(message):
-    url = f"https://graph.facebook.com/v18.0/{PAGE_ID}/feed"
-    payload = {
-        "message": message,
-        "access_token": PAGE_ACCESS_TOKEN
-    }
-    res = requests.post(url, data=payload)
-    print(res.json())
+if not PAGE_ID or not PAGE_ACCESS_TOKEN:
+    raise Exception("❌ Missing PAGE_ID or PAGE_ACCESS_TOKEN")
 
-if __name__ == "__main__":
-    post_to_facebook("ทดสอบโพสต์จากสคริปต์ 🚀")
+# ข้อความที่จะโพสต์
+message = f"""
+🔥 โปรโมชันประจำวัน
+โพสต์อัตโนมัติด้วยระบบ 🤖
+เวลาโพสต์: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
+
+payload = {
+    "message": message,
+    "access_token": PAGE_ACCESS_TOKEN
+}
+
+response = requests.post(url, data=payload)
+
+print(response.json())
