@@ -1,0 +1,21 @@
+name: fb-autopost
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 09:00 ไทย (UTC+7)
+    - cron: "0 11 * * *"  # 18:00 ไทย (UTC+7)
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - run: python app.py
+        env:
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
