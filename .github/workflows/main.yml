@@ -38,7 +38,7 @@ jobs:
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           REPOST_AFTER_DAYS: "15"
-          POSTS_PER_RUN: "1"
+          POSTS_PER_RUN: "2"
         run: python app.py
 
       - name: Commit state.json (if changed)
