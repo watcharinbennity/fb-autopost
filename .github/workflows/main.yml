@@ -2,6 +2,7 @@ name: fb-autopost
 
 on:
   schedule:
+    # GitHub cron = UTC
     # ไทย 12:00 (UTC+7) = UTC 05:00
     - cron: "0 5 * * *"
     # ไทย 18:30 (UTC+7) = UTC 11:30
@@ -19,7 +20,6 @@ jobs:
   post:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
           STATE_FILE: "state.json"
 
           CAPTION_STYLE: "short"
-          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #รวมดีล #Shopee"
+          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
         run: |
           python app.py
 
