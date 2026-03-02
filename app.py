@@ -3,10 +3,10 @@ import io
 import json
 import math
 import random
+import time          # 👈 เพิ่มบรรทัดนี้
 import datetime as dt
 import requests
 import pandas as pd
-
 STATE_FILE = "state.json"
 
 # -----------------------
