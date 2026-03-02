@@ -1,23 +1,6 @@
-# app.py
-# Facebook Page autopost (Shopee CSV) - BEN Home & Electrical
-#
-# Required ENV (GitHub Secrets):
-#   PAGE_ID
-#   PAGE_ACCESS_TOKEN
-#   SHOPEE_CSV_URL
-#
-# Optional ENV:
-#   TZ=Asia/Bangkok
-#   POSTS_PER_RUN=1
-#   TOP_POOL=200
-#   REPOST_AFTER_DAYS=14
-#   STATE_FILE=state.json
-#   CAPTION_STYLE=short|full
-#   HASHTAGS="#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
-
 import os
-import io
 import json
+import time
 import random
 import datetime as dt
 from zoneinfo import ZoneInfo
@@ -25,23 +8,26 @@ from zoneinfo import ZoneInfo
 import requests
 import pandas as pd
 
-GRAPH = "https://graph.facebook.com/v19.0"
 
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
+
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
 SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
-TZ = os.getenv("TZ", "Asia/Bangkok").strip()
+TZ = os.getenv("TZ", "Asia/Bangkok")
 POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
 TOP_POOL = int(os.getenv("TOP_POOL", "200"))
 REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
+
 CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()
 HASHTAGS = os.getenv("HASHTAGS", "").strip()
 
+UA = "fb-autopost/1.0 (+github-actions)"
 
-def die(msg: str):
-    raise SystemExit(msg)
+
+def now_local() -> dt.datetime:
+    return dt.datetime.now(tz=ZoneInfo(TZ))
 
 
 def load_state() -> dict:
@@ -49,183 +35,280 @@ def load_state() -> dict:
         return {"posted": {}}
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if "posted" not in data or not isinstance(data["posted"], dict):
+            data["posted"] = {}
+        return data
     except Exception:
         return {"posted": {}}
 
 
-def save_state(state: dict):
+def save_state(state: dict) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
 def fetch_csv(url: str) -> pd.DataFrame:
-    r = requests.get(url, timeout=30)
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
     r.raise_for_status()
 
-    # Some CSVs come as bytes or with BOM
-    content = r.content
-    try:
-        text = content.decode("utf-8-sig")
-    except Exception:
-        text = content.decode("utf-8", errors="ignore")
+    # pandas อ่านจาก bytes ได้โดยตรง
+    from io import BytesIO
+    bio = BytesIO(r.content)
 
-    df = pd.read_csv(io.StringIO(text))
-    # normalize columns
+    # รองรับ csv ที่อาจมี bom
+    try:
+        df = pd.read_csv(bio, encoding="utf-8-sig")
+    except Exception:
+        bio.seek(0)
+        df = pd.read_csv(bio)
+
+    # ทำชื่อคอลัมน์ให้เป็นมาตรฐาน (lower, strip)
     df.columns = [str(c).strip().lower() for c in df.columns]
     return df
 
 
 def pick_columns(df: pd.DataFrame) -> dict:
-    # Try common Shopee export column names
-    # You can customize mapping here if your CSV column names differ.
-    colmap = {
-        "name": ["name", "product_name", "title", "สินค้า", "ชื่อสินค้า"],
-        "url": ["url", "link", "product_url", "ลิงก์", "ลิงค์", "product link"],
-        "price": ["price", "sale_price", "current_price", "ราคา", "ราคาปัจจุบัน"],
-        "image": ["image", "image_url", "img", "thumbnail", "รูป", "รูปภาพ"],
-        "shop": ["shop", "shop_name", "ร้านค้า", "ชื่อร้าน"],
-    }
-
-    def find_col(cands):
-        for c in cands:
+    """
+    พยายาม map คอลัมน์จาก CSV ให้เข้ากับข้อมูลที่ต้องใช้:
+    - title/name
+    - price
+    - promo_price/sale_price
+    - url/link
+    - image
+    """
+    def find_col(candidates):
+        for c in candidates:
             if c in df.columns:
                 return c
         return None
 
-    out = {k: find_col(v) for k, v in colmap.items()}
-    if not out["name"] or not out["url"]:
-        die(
-            f"CSV ต้องมีคอลัมน์ชื่อสินค้าและลิงก์ (พบ columns: {list(df.columns)})\n"
-            "แก้โดยเปลี่ยนหัวคอลัมน์ให้มี name/title และ url/link อย่างน้อย"
-        )
-    return out
+    col_title = find_col(["title", "name", "product", "product_name", "สินค้า", "ชื่อสินค้า"])
+    col_price = find_col(["price", "original_price", "ราคาปกติ"])
+    col_sale = find_col(["sale_price", "promo_price", "discount_price", "ราคาขาย", "ราคาโปร"])
+    col_url = find_col(["url", "link", "product_url", "shopee_url"])
+    col_img = find_col(["image", "image_url", "img", "thumbnail", "thumb"])
+
+    return {
+        "title": col_title,
+        "price": col_price,
+        "sale": col_sale,
+        "url": col_url,
+        "img": col_img,
+    }
 
 
-def norm_id(s: str) -> str:
-    return str(s).strip()
+def to_number(x):
+    try:
+        if pd.isna(x):
+            return None
+        s = str(x).replace(",", "").strip()
+        if s == "":
+            return None
+        return float(s)
+    except Exception:
+        return None
 
 
-def is_recently_posted(state: dict, item_id: str, now: dt.datetime) -> bool:
+def score_row(row, cols: dict) -> float:
+    """
+    ให้คะแนนเพื่อสุ่มจาก TOP_POOL:
+    - ถ้ามีราคาปกติ + ราคาโปร จะให้คะแนนตาม % ลด
+    - ถ้าไม่มี ก็สุ่มคะแนนเล็กน้อย
+    """
+    p = to_number(row.get(cols["price"])) if cols["price"] else None
+    s = to_number(row.get(cols["sale"])) if cols["sale"] else None
+
+    if p and s and p > 0 and s > 0 and s <= p:
+        disc = (p - s) / p  # 0..1
+        return disc * 100.0
+    return random.random() * 5.0
+
+
+def item_key(row, cols: dict) -> str:
+    """
+    ใช้ key กันโพสต์ซ้ำ:
+    - ถ้ามี url ใช้ url
+    - ถ้าไม่มี ใช้ title
+    """
+    u = str(row.get(cols["url"])).strip() if cols["url"] else ""
+    t = str(row.get(cols["title"])).strip() if cols["title"] else ""
+    return u if u and u.lower() != "nan" else t
+
+
+def is_recently_posted(state: dict, key: str, now: dt.datetime) -> bool:
     posted = state.get("posted", {})
-    if item_id not in posted:
+    ts = posted.get(key)
+    if not ts:
         return False
     try:
-        last = dt.datetime.fromisoformat(posted[item_id])
+        last = dt.datetime.fromisoformat(ts)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=ZoneInfo(TZ))
+        delta_days = (now - last).total_seconds() / 86400.0
+        return delta_days < REPOST_AFTER_DAYS
     except Exception:
         return False
-    return (now - last).days < REPOST_AFTER_DAYS
 
 
-def build_caption(row: dict, cols: dict) -> str:
-    name = str(row.get(cols["name"], "")).strip()
-    url = str(row.get(cols["url"], "")).strip()
-    price = str(row.get(cols["price"], "")).strip() if cols.get("price") else ""
-    shop = str(row.get(cols["shop"], "")).strip() if cols.get("shop") else ""
+def format_caption(row, cols: dict) -> str:
+    title = str(row.get(cols["title"])).strip() if cols["title"] else "ดีลแนะนำ"
+    url = str(row.get(cols["url"])).strip() if cols["url"] else ""
+    p = to_number(row.get(cols["price"])) if cols["price"] else None
+    s = to_number(row.get(cols["sale"])) if cols["sale"] else None
 
-    # Business-style copy: "นายหน้า/รวมดีล" + no guarantee
-    lines = []
-    lines.append("🔥 รวมดีลของใช้ในบ้าน & อุปกรณ์ไฟฟ้า")
-    lines.append("🛒 ลิงก์จาก Shopee (นายหน้า) — ราคาอาจเปลี่ยนตามร้านค้า")
-    if shop:
-        lines.append(f"🏪 ร้าน: {shop}")
-    if price and price != "nan":
-        lines.append(f"💰 ราคา: {price}")
-    lines.append("")
-    lines.append(f"✅ {name}")
-    lines.append(f"👉 {url}")
+    # ทำราคาให้สวย
+    def fmt_price(x):
+        if x is None:
+            return None
+        if x.is_integer():
+            return f"฿{int(x):,}"
+        return f"฿{x:,.2f}"
+
+    p_txt = fmt_price(p)
+    s_txt = fmt_price(s)
+
+    # ข้อความแบบ “นายหน้า” ไม่รับประกัน/ให้เช็กกับร้าน
+    note = (
+        "📌 เราเป็นผู้รวบรวมดีล/ลิงก์จากร้านค้า (นายหน้า) ไม่ได้เป็นผู้ผลิต/ร้านโดยตรง\n"
+        "✅ ราคา/สต๊อก/เงื่อนไข อาจเปลี่ยนได้ โปรดตรวจสอบที่หน้าร้านก่อนสั่งซื้อ\n"
+        "💬 สอบถามแนะนำสินค้าได้ครับ"
+    )
 
     if CAPTION_STYLE == "full":
-        lines.append("")
-        lines.append("หมายเหตุ: เพจเป็นผู้รวบรวมดีล/นายหน้า การสั่งซื้อ-จัดส่ง-รับประกันเป็นของร้านค้า/แพลตฟอร์มโดยตรง")
+        parts = [f"🏠⚡ {title}"]
+        if s_txt and p_txt and p and s and p > 0 and s > 0 and s <= p:
+            disc_pct = int(round((p - s) / p * 100))
+            parts.append(f"🔥 โปร {s_txt} (จาก {p_txt}) ลด ~{disc_pct}%")
+        elif s_txt:
+            parts.append(f"🔥 ราคาโปร {s_txt}")
+        elif p_txt:
+            parts.append(f"ราคา {p_txt}")
 
+        if url and url.lower() != "nan":
+            parts.append(f"👉 ดูดีล/สั่งซื้อ: {url}")
+
+        parts.append("")
+        parts.append(note)
+        if HASHTAGS:
+            parts.append(HASHTAGS)
+
+        return "\n".join(parts).strip()
+
+    # short (ค่า default)
+    line1 = f"🏠⚡ {title}"
+    line2 = ""
+    if s_txt and p_txt and p and s and p > 0 and s > 0 and s <= p:
+        disc_pct = int(round((p - s) / p * 100))
+        line2 = f"🔥 {s_txt} (จาก {p_txt}) ลด ~{disc_pct}%"
+    elif s_txt:
+        line2 = f"🔥 ราคาโปร {s_txt}"
+    elif p_txt:
+        line2 = f"ราคา {p_txt}"
+
+    # short จะไม่ยาว แต่ยังใส่หมายเหตุสั้น ๆ
+    short_note = "📌 นายหน้า/รวมดีล ตรวจสอบราคา-สต๊อกที่หน้าร้าน | ทักสอบถามได้"
+    lines = [line1]
+    if line2:
+        lines.append(line2)
+    if url and url.lower() != "nan":
+        lines.append(f"👉 {url}")
+    lines.append(short_note)
     if HASHTAGS:
-        lines.append("")
         lines.append(HASHTAGS)
 
     return "\n".join(lines).strip()
 
 
-def post_to_facebook_page(message: str, link: str = "") -> dict:
-    # Using /{page_id}/feed with message (and optional link)
-    endpoint = f"{GRAPH}/{PAGE_ID}/feed"
-    data = {
+def post_to_facebook_page(message: str, link: str | None = None) -> str:
+    """
+    โพสต์ลงเพจผ่าน Graph API: /{page_id}/feed
+    คืนค่า post_id
+    """
+    if not PAGE_ID or not PAGE_ACCESS_TOKEN:
+        raise RuntimeError("Missing PAGE_ID or PAGE_ACCESS_TOKEN")
+
+    url = f"https://graph.facebook.com/v20.0/{PAGE_ID}/feed"
+    payload = {
         "message": message,
         "access_token": PAGE_ACCESS_TOKEN,
     }
+    # ถ้ามี link ในข้อความอยู่แล้ว ใส่ซ้ำก็ได้ แต่ให้ใส่แยกจะช่วย preview
     if link:
-        data["link"] = link
+        payload["link"] = link
 
-    r = requests.post(endpoint, data=data, timeout=30)
+    r = requests.post(url, data=payload, headers={"User-Agent": UA}, timeout=30)
     try:
-        payload = r.json()
+        data = r.json()
     except Exception:
-        payload = {"error": {"message": r.text}}
+        data = {"raw": r.text}
 
-    if r.status_code >= 400:
-        raise RuntimeError(f"Facebook API error {r.status_code}: {payload}")
-    return payload
+    if r.status_code >= 400 or "error" in data:
+        raise RuntimeError(f"Facebook API error: {data}")
+
+    post_id = data.get("id")
+    if not post_id:
+        raise RuntimeError(f"Facebook API response missing id: {data}")
+    return post_id
 
 
 def main():
-    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
-        die("Missing ENV: ต้องตั้ง PAGE_ID, PAGE_ACCESS_TOKEN, SHOPEE_CSV_URL ใน GitHub Secrets")
+    start = now_local()
+    print(f"[INFO] start: {start.isoformat()} TZ={TZ}")
+    print(f"[INFO] POSTS_PER_RUN={POSTS_PER_RUN} TOP_POOL={TOP_POOL} REPOST_AFTER_DAYS={REPOST_AFTER_DAYS}")
+    print(f"[INFO] CAPTION_STYLE={CAPTION_STYLE}")
 
-    tz = ZoneInfo(TZ)
-    now = dt.datetime.now(tz)
+    if not SHOPEE_CSV_URL:
+        raise RuntimeError("Missing SHOPEE_CSV_URL")
 
     state = load_state()
-    if "posted" not in state:
-        state["posted"] = {}
-
     df = fetch_csv(SHOPEE_CSV_URL)
+
+    if df.empty:
+        print("[WARN] CSV empty. exit.")
+        return
+
     cols = pick_columns(df)
+    if not cols["title"] or not cols["url"]:
+        print(f"[WARN] CSV columns found: {list(df.columns)}")
+        raise RuntimeError("CSV must have at least a title/name column and a url/link column.")
 
-    # Build pool
-    df2 = df.copy()
+    # score + sort
+    df["_score"] = df.apply(lambda r: score_row(r, cols), axis=1)
+    df = df.sort_values("_score", ascending=False)
 
-    # Optional: sort by price (if numeric) to prefer mid/low
-    if cols.get("price") and cols["price"] in df2.columns:
-        try:
-            df2["_price_num"] = pd.to_numeric(df2[cols["price"]], errors="coerce")
-            df2 = df2.sort_values(by="_price_num", ascending=True)
-        except Exception:
-            pass
+    pool = df.head(max(1, TOP_POOL)).copy()
 
-    # Limit to TOP_POOL
-    df2 = df2.head(TOP_POOL)
-
-    # Shuffle a bit so it doesn't always pick same row
-    idxs = list(df2.index)
-    random.shuffle(idxs)
+    # สุ่มใน pool เพื่อไม่ให้ซ้ำเดิมเกินไป
+    pool = pool.sample(frac=1.0, random_state=int(time.time()) % 2**32).reset_index(drop=True)
 
     posted_count = 0
-
-    for i in idxs:
-        row = df2.loc[i].to_dict()
-
-        # Determine item_id (use url if no id)
-        item_id = norm_id(row.get(cols["url"]))
-        if not item_id:
-            continue
-
-        if is_recently_posted(state, item_id, now):
-            continue
-
-        caption = build_caption(row, cols)
-        link = str(row.get(cols["url"], "")).strip()
-
-        res = post_to_facebook_page(message=caption, link=link)
-        print("Posted:", res)
-
-        state["posted"][item_id] = now.isoformat()
-        posted_count += 1
-
+    for _, row in pool.iterrows():
         if posted_count >= POSTS_PER_RUN:
             break
 
-    save_state(state)
-    print(f"Done. posted_count={posted_count}")
+        key = item_key(row, cols)
+        if not key or str(key).strip() == "" or str(key).lower() == "nan":
+            continue
+
+        now = now_local()
+        if is_recently_posted(state, key, now):
+            continue
+
+        caption = format_caption(row, cols)
+        link = str(row.get(cols["url"])).strip()
+
+        print(f"[INFO] posting: key={key[:80]}")
+        post_id = post_to_facebook_page(caption, link=link)
+
+        state["posted"][key] = now.isoformat()
+        save_state(state)
+
+        print(f"[OK] posted: {post_id}")
+        posted_count += 1
+        time.sleep(2)
+
+    print(f"[DONE] posted_count={posted_count}")
 
 
 if __name__ == "__main__":
