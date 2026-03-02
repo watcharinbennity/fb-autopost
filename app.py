@@ -8,24 +8,29 @@ from zoneinfo import ZoneInfo
 import requests
 import pandas as pd
 
-
-STATE_FILE = os.getenv("STATE_FILE", "state.json")
+# -----------------------------
+# ENV / Config
+# -----------------------------
+STATE_FILE = os.getenv("STATE_FILE", "state.json").strip()
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
 SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
-TZ = os.getenv("TZ", "Asia/Bangkok")
+TZ = os.getenv("TZ", "Asia/Bangkok").strip()
 POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
 TOP_POOL = int(os.getenv("TOP_POOL", "200"))
 REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
 
 CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()
-HASHTAGS = os.getenv("HASHTAGS", "").strip()
+HASHTAGS = os.getenv("HASHTAGS", "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee").strip()
 
-UA = "fb-autopost/1.0 (+github-actions)"
+UA = "fb-autopost/ben-home-electrical"
 
 
+# -----------------------------
+# Helpers: time/state
+# -----------------------------
 def now_local() -> dt.datetime:
     return dt.datetime.now(tz=ZoneInfo(TZ))
 
@@ -48,96 +53,83 @@ def save_state(state: dict) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+# -----------------------------
+# Helpers: CSV
+# -----------------------------
 def fetch_csv(url: str) -> pd.DataFrame:
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=60)
     r.raise_for_status()
 
-    # pandas อ่านจาก bytes ได้โดยตรง
-    from io import BytesIO
-    bio = BytesIO(r.content)
-
-    # รองรับ csv ที่อาจมี bom
+    # รองรับ BOM
+    content = r.content
     try:
-        df = pd.read_csv(bio, encoding="utf-8-sig")
+        text = content.decode("utf-8-sig")
     except Exception:
-        bio.seek(0)
-        df = pd.read_csv(bio)
+        text = content.decode("utf-8", errors="ignore")
 
-    # ทำชื่อคอลัมน์ให้เป็นมาตรฐาน (lower, strip)
-    df.columns = [str(c).strip().lower() for c in df.columns]
+    from io import StringIO
+    df = pd.read_csv(StringIO(text))
+
+    # normalize columns
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    df = df.fillna("")
     return df
 
 
-def pick_columns(df: pd.DataFrame) -> dict:
-    """
-    พยายาม map คอลัมน์จาก CSV ให้เข้ากับข้อมูลที่ต้องใช้:
-    - title/name
-    - price
-    - promo_price/sale_price
-    - url/link
-    - image
-    """
-    def find_col(candidates):
-        for c in candidates:
-            if c in df.columns:
-                return c
-        return None
+def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    cols = set(df.columns)
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
 
-    col_title = find_col(["title", "name", "product", "product_name", "สินค้า", "ชื่อสินค้า"])
-    col_price = find_col(["price", "original_price", "ราคาปกติ"])
-    col_sale = find_col(["sale_price", "promo_price", "discount_price", "ราคาขาย", "ราคาโปร"])
-    col_url = find_col(["url", "link", "product_url", "shopee_url"])
-    col_img = find_col(["image", "image_url", "img", "thumbnail", "thumb"])
 
-    return {
-        "title": col_title,
-        "price": col_price,
-        "sale": col_sale,
-        "url": col_url,
-        "img": col_img,
-    }
+def detect_columns(df: pd.DataFrame) -> dict:
+    # รองรับชื่อคอลัมน์หลายแบบ
+    title = pick_col(df, ["title", "name", "product_name", "item_name"])
+    url = pick_col(df, ["url", "link", "product_url", "product_link", "deeplink", "deep_link"])
+    price = pick_col(df, ["price", "current_price", "sale_price", "promo_price", "discount_price"])
+    original = pick_col(df, ["original_price", "list_price", "normal_price", "old_price"])
+
+    if not title or not url:
+        raise RuntimeError(
+            "CSV ต้องมีคอลัมน์ชื่อสินค้าและลิงก์ (title/name และ url/link)\n"
+            f"พบคอลัมน์: {list(df.columns)}"
+        )
+
+    return {"title": title, "url": url, "price": price, "original": original}
 
 
 def to_number(x):
     try:
-        if pd.isna(x):
-            return None
         s = str(x).replace(",", "").strip()
-        if s == "":
+        if s == "" or s.lower() == "nan":
             return None
         return float(s)
     except Exception:
         return None
 
 
-def score_row(row, cols: dict) -> float:
+def score_discount(row: dict, cols: dict) -> float:
     """
-    ให้คะแนนเพื่อสุ่มจาก TOP_POOL:
-    - ถ้ามีราคาปกติ + ราคาโปร จะให้คะแนนตาม % ลด
-    - ถ้าไม่มี ก็สุ่มคะแนนเล็กน้อย
+    ให้คะแนน: ถ้ามี original และ price จะคิด % ลด
+    ไม่มีข้อมูลลด -> ให้คะแนนสุ่มเล็กน้อย
     """
     p = to_number(row.get(cols["price"])) if cols["price"] else None
-    s = to_number(row.get(cols["sale"])) if cols["sale"] else None
+    o = to_number(row.get(cols["original"])) if cols["original"] else None
 
-    if p and s and p > 0 and s > 0 and s <= p:
-        disc = (p - s) / p  # 0..1
-        return disc * 100.0
+    if o and p and o > 0 and p > 0 and p <= o:
+        return (o - p) / o * 100.0
     return random.random() * 5.0
 
 
-def item_key(row, cols: dict) -> str:
-    """
-    ใช้ key กันโพสต์ซ้ำ:
-    - ถ้ามี url ใช้ url
-    - ถ้าไม่มี ใช้ title
-    """
-    u = str(row.get(cols["url"])).strip() if cols["url"] else ""
-    t = str(row.get(cols["title"])).strip() if cols["title"] else ""
-    return u if u and u.lower() != "nan" else t
+def make_key(url: str, title: str) -> str:
+    url = (url or "").strip()
+    title = (title or "").strip()
+    return url if url else title
 
 
-def is_recently_posted(state: dict, key: str, now: dt.datetime) -> bool:
-    posted = state.get("posted", {})
+def recently_posted(posted: dict, key: str, now: dt.datetime) -> bool:
     ts = posted.get(key)
     if not ts:
         return False
@@ -145,99 +137,80 @@ def is_recently_posted(state: dict, key: str, now: dt.datetime) -> bool:
         last = dt.datetime.fromisoformat(ts)
         if last.tzinfo is None:
             last = last.replace(tzinfo=ZoneInfo(TZ))
-        delta_days = (now - last).total_seconds() / 86400.0
-        return delta_days < REPOST_AFTER_DAYS
+        days = (now - last).total_seconds() / 86400.0
+        return days < REPOST_AFTER_DAYS
     except Exception:
         return False
 
 
-def format_caption(row, cols: dict) -> str:
-    title = str(row.get(cols["title"])).strip() if cols["title"] else "ดีลแนะนำ"
-    url = str(row.get(cols["url"])).strip() if cols["url"] else ""
-    p = to_number(row.get(cols["price"])) if cols["price"] else None
-    s = to_number(row.get(cols["sale"])) if cols["sale"] else None
+# -----------------------------
+# Caption (เอาคำว่า "นายหน้า" ออกแล้ว)
+# -----------------------------
+def format_money(x: float | None) -> str | None:
+    if x is None:
+        return None
+    if float(x).is_integer():
+        return f"฿{int(x):,}"
+    return f"฿{x:,.2f}"
 
-    # ทำราคาให้สวย
-    def fmt_price(x):
-        if x is None:
-            return None
-        if x.is_integer():
-            return f"฿{int(x):,}"
-        return f"฿{x:,.2f}"
 
-    p_txt = fmt_price(p)
-    s_txt = fmt_price(s)
+def build_caption(title: str, url: str, price: float | None, original: float | None) -> str:
+    title = (title or "").strip()
+    url = (url or "").strip()
 
-    # ข้อความแบบ “นายหน้า” ไม่รับประกัน/ให้เช็กกับร้าน
-    note = (
-        "📌 เราเป็นผู้รวบรวมดีล/ลิงก์จากร้านค้า (นายหน้า) ไม่ได้เป็นผู้ผลิต/ร้านโดยตรง\n"
-        "✅ ราคา/สต๊อก/เงื่อนไข อาจเปลี่ยนได้ โปรดตรวจสอบที่หน้าร้านก่อนสั่งซื้อ\n"
-        "💬 สอบถามแนะนำสินค้าได้ครับ"
-    )
+    price_txt = format_money(price)
+    orig_txt = format_money(original)
+
+    # คำนวณ % ลดถ้ามี
+    disc_line = ""
+    if original and price and original > 0 and price > 0 and price <= original:
+        disc_pct = int(round((original - price) / original * 100))
+        disc_line = f"🔥 {price_txt} (จาก {orig_txt}) ลด ~{disc_pct}%"
+    elif price_txt and orig_txt and price_txt != orig_txt:
+        disc_line = f"🔥 {price_txt} (จาก {orig_txt})"
+    elif price_txt:
+        disc_line = f"💸 ราคา {price_txt}"
+
+    note_short = "⚠️ ราคา/โปร/สต๊อกอาจเปลี่ยนแปลง โปรดตรวจสอบที่หน้าสินค้าก่อนสั่งซื้อ"
 
     if CAPTION_STYLE == "full":
-        parts = [f"🏠⚡ {title}"]
-        if s_txt and p_txt and p and s and p > 0 and s > 0 and s <= p:
-            disc_pct = int(round((p - s) / p * 100))
-            parts.append(f"🔥 โปร {s_txt} (จาก {p_txt}) ลด ~{disc_pct}%")
-        elif s_txt:
-            parts.append(f"🔥 ราคาโปร {s_txt}")
-        elif p_txt:
-            parts.append(f"ราคา {p_txt}")
+        lines = [
+            "🏠⚡ ดีลของใช้ในบ้าน & อุปกรณ์ไฟฟ้า",
+            f"✅ {title}" if title else "✅ ดีลแนะนำวันนี้",
+            disc_line if disc_line else "💸 เช็คราคาในลิงก์",
+            f"👉 {url}" if url else "",
+            "",
+            note_short,
+            HASHTAGS if HASHTAGS else "",
+        ]
+    else:
+        lines = [
+            f"🏠⚡ {title}" if title else "🏠⚡ ดีลแนะนำวันนี้",
+            disc_line if disc_line else "",
+            f"👉 {url}" if url else "",
+            note_short,
+            HASHTAGS if HASHTAGS else "",
+        ]
 
-        if url and url.lower() != "nan":
-            parts.append(f"👉 ดูดีล/สั่งซื้อ: {url}")
-
-        parts.append("")
-        parts.append(note)
-        if HASHTAGS:
-            parts.append(HASHTAGS)
-
-        return "\n".join(parts).strip()
-
-    # short (ค่า default)
-    line1 = f"🏠⚡ {title}"
-    line2 = ""
-    if s_txt and p_txt and p and s and p > 0 and s > 0 and s <= p:
-        disc_pct = int(round((p - s) / p * 100))
-        line2 = f"🔥 {s_txt} (จาก {p_txt}) ลด ~{disc_pct}%"
-    elif s_txt:
-        line2 = f"🔥 ราคาโปร {s_txt}"
-    elif p_txt:
-        line2 = f"ราคา {p_txt}"
-
-    # short จะไม่ยาว แต่ยังใส่หมายเหตุสั้น ๆ
-    short_note = "📌 นายหน้า/รวมดีล ตรวจสอบราคา-สต๊อกที่หน้าร้าน | ทักสอบถามได้"
-    lines = [line1]
-    if line2:
-        lines.append(line2)
-    if url and url.lower() != "nan":
-        lines.append(f"👉 {url}")
-    lines.append(short_note)
-    if HASHTAGS:
-        lines.append(HASHTAGS)
-
+    lines = [x for x in lines if x]
     return "\n".join(lines).strip()
 
 
-def post_to_facebook_page(message: str, link: str | None = None) -> str:
-    """
-    โพสต์ลงเพจผ่าน Graph API: /{page_id}/feed
-    คืนค่า post_id
-    """
+# -----------------------------
+# Facebook Post
+# -----------------------------
+def fb_post(message: str, link: str) -> dict:
     if not PAGE_ID or not PAGE_ACCESS_TOKEN:
         raise RuntimeError("Missing PAGE_ID or PAGE_ACCESS_TOKEN")
 
-    url = f"https://graph.facebook.com/v20.0/{PAGE_ID}/feed"
+    endpoint = f"https://graph.facebook.com/v20.0/{PAGE_ID}/feed"
     payload = {
         "message": message,
+        "link": link,
         "access_token": PAGE_ACCESS_TOKEN,
     }
-    # ถ้ามี link ในข้อความอยู่แล้ว ใส่ซ้ำก็ได้ แต่ให้ใส่แยกจะช่วย preview
-    if link:
-        payload["link"] = link
 
-    r = requests.post(url, data=payload, headers={"User-Agent": UA}, timeout=30)
+    r = requests.post(endpoint, data=payload, headers={"User-Agent": UA}, timeout=60)
     try:
         data = r.json()
     except Exception:
@@ -246,65 +219,79 @@ def post_to_facebook_page(message: str, link: str | None = None) -> str:
     if r.status_code >= 400 or "error" in data:
         raise RuntimeError(f"Facebook API error: {data}")
 
-    post_id = data.get("id")
-    if not post_id:
-        raise RuntimeError(f"Facebook API response missing id: {data}")
-    return post_id
+    return data
 
 
+# -----------------------------
+# Main
+# -----------------------------
 def main():
-    start = now_local()
-    print(f"[INFO] start: {start.isoformat()} TZ={TZ}")
+    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
+        raise SystemExit("Missing ENV: PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL")
+
+    now = now_local()
+    print(f"[INFO] now={now.isoformat()} TZ={TZ}")
     print(f"[INFO] POSTS_PER_RUN={POSTS_PER_RUN} TOP_POOL={TOP_POOL} REPOST_AFTER_DAYS={REPOST_AFTER_DAYS}")
     print(f"[INFO] CAPTION_STYLE={CAPTION_STYLE}")
 
-    if not SHOPEE_CSV_URL:
-        raise RuntimeError("Missing SHOPEE_CSV_URL")
-
     state = load_state()
-    df = fetch_csv(SHOPEE_CSV_URL)
+    posted = state.get("posted", {})
 
-    if df.empty:
-        print("[WARN] CSV empty. exit.")
+    df = fetch_csv(SHOPEE_CSV_URL)
+    cols = detect_columns(df)
+
+    # เตรียมแถวเป็น dict
+    rows = df.to_dict(orient="records")
+
+    # กรองที่มี title และ url
+    clean = []
+    for r in rows:
+        title = str(r.get(cols["title"], "")).strip()
+        url = str(r.get(cols["url"], "")).strip()
+        if title and url and url.lower() != "nan":
+            clean.append(r)
+
+    if not clean:
+        print("[WARN] No valid products in CSV.")
         return
 
-    cols = pick_columns(df)
-    if not cols["title"] or not cols["url"]:
-        print(f"[WARN] CSV columns found: {list(df.columns)}")
-        raise RuntimeError("CSV must have at least a title/name column and a url/link column.")
+    # ให้คะแนนตามส่วนลด แล้วเลือก top_pool
+    for r in clean:
+        r["_score"] = score_discount(r, cols)
 
-    # score + sort
-    df["_score"] = df.apply(lambda r: score_row(r, cols), axis=1)
-    df = df.sort_values("_score", ascending=False)
-
-    pool = df.head(max(1, TOP_POOL)).copy()
-
-    # สุ่มใน pool เพื่อไม่ให้ซ้ำเดิมเกินไป
-    pool = pool.sample(frac=1.0, random_state=int(time.time()) % 2**32).reset_index(drop=True)
+    clean.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    pool = clean[: min(TOP_POOL, len(clean))]
+    random.shuffle(pool)
 
     posted_count = 0
-    for _, row in pool.iterrows():
+
+    for r in pool:
         if posted_count >= POSTS_PER_RUN:
             break
 
-        key = item_key(row, cols)
-        if not key or str(key).strip() == "" or str(key).lower() == "nan":
+        title = str(r.get(cols["title"], "")).strip()
+        url = str(r.get(cols["url"], "")).strip()
+
+        key = make_key(url, title)
+        if not key:
             continue
 
-        now = now_local()
-        if is_recently_posted(state, key, now):
+        if recently_posted(posted, key, now):
             continue
 
-        caption = format_caption(row, cols)
-        link = str(row.get(cols["url"])).strip()
+        price = to_number(r.get(cols["price"])) if cols["price"] else None
+        original = to_number(r.get(cols["original"])) if cols["original"] else None
 
-        print(f"[INFO] posting: key={key[:80]}")
-        post_id = post_to_facebook_page(caption, link=link)
+        message = build_caption(title=title, url=url, price=price, original=original)
 
-        state["posted"][key] = now.isoformat()
+        print("[INFO] Posting preview:\n" + message + "\n")
+        res = fb_post(message, link=url)
+        print("[OK] Posted:", res)
+
+        posted[key] = now.isoformat()
+        state["posted"] = posted
         save_state(state)
 
-        print(f"[OK] posted: {post_id}")
         posted_count += 1
         time.sleep(2)
 
