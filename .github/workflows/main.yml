@@ -2,24 +2,18 @@ name: fb-autopost
 
 on:
   schedule:
-    # GitHub cron = UTC
+    # GitHub cron ใช้เวลา UTC
     # ไทย 12:00 (UTC+7) = UTC 05:00
     - cron: "0 5 * * *"
     # ไทย 18:30 (UTC+7) = UTC 11:30
     - cron: "30 11 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
-concurrency:
-  group: fb-autopost
-  cancel-in-progress: false
-
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,26 +33,29 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-
           TZ: Asia/Bangkok
+
           POSTS_PER_RUN: "1"
           TOP_POOL: "200"
           REPOST_AFTER_DAYS: "14"
-          STATE_FILE: "state.json"
 
           CAPTION_STYLE: "short"
           HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
+
+          # ปรับได้: ถ้าอยากบังคับให้โพสต์ public ใส่ "public"
+          FB_PRIVACY: "public"
+
+          # กันค้างโหลดรูป/โพสต์
+          HTTP_TIMEOUT: "25"
+          FB_API_VERSION: "v20.0"
         run: |
           python app.py
 
       - name: Commit updated state.json
+        if: always()
         run: |
-          if git status --porcelain | grep -q "state.json"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "Update state.json"
-            git push
-          else
-            echo "No state changes to commit."
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json || true
+          git diff --staged --quiet || git commit -m "Update state.json"
+          git push || true
