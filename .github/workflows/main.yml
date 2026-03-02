@@ -8,10 +8,15 @@ on:
     - cron: "30 11 * * *"
   workflow_dispatch:
 
+# กัน run ซ้อนแล้วโดน cancel -> "Error: The operation was canceled."
+concurrency:
+  group: fb-autopost
+  cancel-in-progress: false
+
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -23,9 +28,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run autopost
         env:
@@ -37,26 +40,13 @@ jobs:
           POSTS_PER_RUN: "1"
           TOP_POOL: "120"
           REPOST_AFTER_DAYS: "14"
+          STATE_FILE: "state.json"
 
-          # คัดหมวด/คีย์เวิร์ดให้ตรงเพจ (แก้ได้)
-          KEYWORDS_ALLOW: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|พัดลม|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|ชาร์จ|USB|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|ของใช้ในบ้าน|ครัว|จัดเก็บ|ทำความสะอาด"
-          KEYWORDS_BLOCK: "แชมพู|ครีม|อาหารเสริม|บุหรี่ไฟฟ้า|ยา|การพนัน"
-
-          BRAND_NAME: "BEN Home & Electrical"
-          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
+          BRAND: "BEN Home & Electrical"
           CAPTION_STYLE: "short"
+          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
 
-        run: |
-          python -u app.py
-
-      - name: Commit updated state.json
-        run: |
-          if git diff --quiet; then
-            echo "No state changes."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "Update state"
-            git push
-          fi
+          # คัดหมวดให้ตรงเพจ (ผ่าน/ไม่ผ่าน)
+          ALLOW_KEYWORDS: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|ไฟเพดาน|ไฟติดผนัง|พัดลม|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|หัวชาร์จ|สายชาร์จ|USB|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|กาว|ซิลิโคน|จัดเก็บ|ชั้นวาง|กล่อง|ครัว|ทำความสะอาด|ไม้ถู|ฟองน้ำ|น้ำยาล้างจาน|ถุงขยะ"
+          BLOCK_KEYWORDS: "แชมพู|ครีม|อาหารเสริม|บุหรี่ไฟฟ้า|ยา|การพนัน|เซ็กซ์|18\\+"
+        run: python -u app.py
