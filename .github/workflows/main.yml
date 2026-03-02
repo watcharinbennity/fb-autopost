@@ -1,61 +1,32 @@
 name: fb-autopost
 
 on:
-  workflow_dispatch:
   schedule:
-    # GitHub Actions ใช้เวลา UTC
-    # 12:00 ไทย (UTC+7) = 05:00 UTC
-    - cron: "0 5 * * *"
-    # 18:30 ไทย (UTC+7) = 11:30 UTC
-    - cron: "30 11 * * *"
-
-permissions:
-  contents: write
-
-concurrency:
-  group: fb-autopost
-  cancel-in-progress: true
+    - cron: "0 5 * * *"     # 12:00 Thailand (UTC+7)
+    - cron: "30 11 * * *"   # 18:30 Thailand (UTC+7)
+  workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run autopost
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-
-          # ปรับได้ตรงนี้
-          REPOST_AFTER_DAYS: "15"
-          POSTS_PER_RUN: "3"
-          MIN_DELAY_SECONDS: "120"
-          MAX_DELAY_SECONDS: "360"
+          POSTS_PER_RUN: ${{ secrets.POSTS_PER_RUN }}
+          REPOST_AFTER_DAYS: ${{ secrets.REPOST_AFTER_DAYS }}
+          TOP_POOL: ${{ secrets.TOP_POOL }}
         run: python app.py
-
-      - name: Commit state.json (if changed)
-        run: |
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "Update state.json"
-            git push
-          else
-            echo "No state.json changes."
-          fi
