@@ -1,11 +1,10 @@
-name: Facebook Autopost
+name: fb-autopost
 
 on:
   schedule:
-    # GitHub cron ใช้เวลา UTC
-    # ไทย (UTC+7) 12:00  => UTC 05:00
+    # ไทย 12:00 (UTC+7) = UTC 05:00
     - cron: "0 5 * * *"
-    # ไทย (UTC+7) 18:30  => UTC 11:30
+    # ไทย 18:30 (UTC+7) = UTC 11:30
     - cron: "30 11 * * *"
   workflow_dispatch:
 
@@ -23,8 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install requests pandas
+          pip install -r requirements.txt
 
       - name: Run autopost
         env:
@@ -32,8 +30,10 @@ jobs:
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           TZ: Asia/Bangkok
-          POSTS_PER_RUN: "3"
+          POSTS_PER_RUN: "1"
           TOP_POOL: "200"
           REPOST_AFTER_DAYS: "14"
+          CAPTION_STYLE: "short"
+          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
         run: |
           python app.py
