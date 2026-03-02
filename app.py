@@ -1,311 +1,375 @@
 import os
+import re
 import io
 import json
 import time
 import random
-import hashlib
 import datetime as dt
 from zoneinfo import ZoneInfo
+from typing import Dict, Any, List, Optional, Tuple
 
 import requests
 import pandas as pd
 
 
-# -----------------------------
-# ENV
-# -----------------------------
+# ---------------------------
+# Config
+# ---------------------------
+STATE_FILE = os.getenv("STATE_FILE", "state.json")
+
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
 SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
-TZ_NAME = os.getenv("TZ", "Asia/Bangkok")
-TZ = ZoneInfo(TZ_NAME)
-
+TZ = os.getenv("TZ", "Asia/Bangkok")
 POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
-TOP_POOL = int(os.getenv("TOP_POOL", "200"))
+TOP_POOL = int(os.getenv("TOP_POOL", "120"))
 REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
 
-CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()  # short|full
-HASHTAGS = os.getenv("HASHTAGS", "").strip()
+BRAND_NAME = os.getenv("BRAND_NAME", "BEN Home & Electrical").strip()
+HASHTAGS = os.getenv("HASHTAGS", "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า").strip()
+CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()
 
-FB_PRIVACY = os.getenv("FB_PRIVACY", "public").strip().lower()  # public|friends|... (page ปกติใช้ public)
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
-FB_API_VERSION = os.getenv("FB_API_VERSION", "v20.0")
+KEYWORDS_ALLOW = os.getenv("KEYWORDS_ALLOW", "").strip()
+KEYWORDS_BLOCK = os.getenv("KEYWORDS_BLOCK", "").strip()
 
-STATE_FILE = os.getenv("STATE_FILE", "state.json")
+GRAPH = "https://graph.facebook.com/v19.0"
+
+# Timeouts (กันค้างจน Action โดน cancel)
+CSV_TIMEOUT = (10, 25)      # connect, read
+IMG_TIMEOUT = (10, 25)
+API_TIMEOUT = (10, 25)
+
+USER_AGENT = "fb-autopost/1.0 (+github actions)"
 
 
-def die(msg: str, code: int = 1):
-    print(f"[FATAL] {msg}")
-    raise SystemExit(code)
+# ---------------------------
+# Helpers
+# ---------------------------
+def die(msg: str) -> None:
+    raise SystemExit(msg)
 
 
 def now_th() -> dt.datetime:
-    return dt.datetime.now(tz=TZ)
+    return dt.datetime.now(tz=ZoneInfo(TZ))
 
 
-def load_state() -> dict:
+def load_state() -> Dict[str, Any]:
     if not os.path.exists(STATE_FILE):
-        return {"posted_keys": {}, "last_run": ""}
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"posted_keys": {}, "last_run": ""}
+        return {"used": []}
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def save_state(state: dict):
+def save_state(state: Dict[str, Any]) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def sha1(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
-
-
-def http_get(url: str) -> bytes:
-    headers = {"User-Agent": "fb-autopost/1.0"}
-    r = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT)
-    r.raise_for_status()
-    return r.content
-
-
-def http_post(url: str, data=None, files=None) -> dict:
-    r = requests.post(url, data=data, files=files, timeout=HTTP_TIMEOUT)
-    # Facebook บางทีตอบ 200 แต่มี error ใน JSON -> ต้องเช็คด้วย
-    try:
-        js = r.json()
-    except Exception:
-        die(f"Facebook response not JSON. status={r.status_code}, text={r.text[:200]}")
-    if r.status_code >= 400 or ("error" in js):
-        die(f"Facebook API error: {js}")
-    return js
-
-
-def parse_shopee_csv(content: bytes) -> pd.DataFrame:
-    # พยายามอ่านแบบ utf-8 ก่อน ถ้าไม่ได้ fallback latin1
-    for enc in ("utf-8-sig", "utf-8", "latin1"):
+def prune_state(state: Dict[str, Any]) -> None:
+    """ลบของเก่าเกิน REPOST_AFTER_DAYS เพื่อให้วนโพสได้หลังครบกำหนด"""
+    cutoff = now_th() - dt.timedelta(days=REPOST_AFTER_DAYS)
+    used_new = []
+    for item in state.get("used", []):
+        ts = item.get("ts")
+        if not ts:
+            continue
         try:
-            text = content.decode(enc)
-            df = pd.read_csv(io.StringIO(text))
-            return df
+            t = dt.datetime.fromisoformat(ts)
         except Exception:
             continue
-    die("อ่าน CSV ไม่ได้ (encoding/format ไม่ถูกต้อง)")
+        if t >= cutoff:
+            used_new.append(item)
+    state["used"] = used_new
 
 
-def pick_candidates(df: pd.DataFrame) -> pd.DataFrame:
-    # รองรับหลายชื่อคอลัมน์ (เพื่อให้ใช้ได้กับ CSV หลายแบบ)
-    colmap = {c.lower(): c for c in df.columns}
+def normalize_text(s: Any) -> str:
+    if s is None:
+        return ""
+    return str(s).strip()
 
-    def col(*names):
-        for n in names:
-            if n in colmap:
-                return colmap[n]
+
+def compile_kw(pattern: str) -> Optional[re.Pattern]:
+    if not pattern:
         return None
-
-    title_c = col("title", "name", "product_name", "สินค้า", "ชื่อสินค้า")
-    url_c = col("url", "link", "product_url", "ลิงก์", "ลิ้ง", "link_url")
-    image_c = col("image", "image_url", "img", "img_url", "รูป", "รูปภาพ", "image_link")
-    price_c = col("price", "price_sale", "sale_price", "ราคา", "ราคาขาย", "promotion_price")
-
-    # ต้องมีอย่างน้อย title + url
-    if not title_c or not url_c:
-        die(f"CSV ต้องมีคอลัมน์อย่างน้อย title/name และ url/link (ตอนนี้มี: {list(df.columns)})")
-
-    # สร้างคอลัมน์มาตรฐาน
-    out = pd.DataFrame()
-    out["title"] = df[title_c].astype(str).fillna("").str.strip()
-    out["url"] = df[url_c].astype(str).fillna("").str.strip()
-
-    out["image"] = ""
-    if image_c:
-        out["image"] = df[image_c].astype(str).fillna("").str.strip()
-
-    out["price"] = ""
-    if price_c:
-        out["price"] = df[price_c].astype(str).fillna("").str.strip()
-
-    # กรองแถวที่จำเป็นต้องมี
-    out = out[(out["title"] != "") & (out["url"] != "")]
-    if len(out) == 0:
-        die("CSV ไม่มีแถวที่ใช้งานได้ (title/url ว่างหมด)")
-
-    # เลือก top pool
-    if TOP_POOL > 0 and len(out) > TOP_POOL:
-        out = out.head(TOP_POOL)
-
-    return out.reset_index(drop=True)
+    return re.compile(pattern, re.IGNORECASE)
 
 
-def is_repost_allowed(state: dict, key: str) -> bool:
-    posted_keys = state.get("posted_keys", {})
-    last = posted_keys.get(key)
-    if not last:
-        return True
+ALLOW_RE = compile_kw(KEYWORDS_ALLOW)
+BLOCK_RE = compile_kw(KEYWORDS_BLOCK)
+
+
+def match_keywords(title: str) -> bool:
+    """คัดหมวดแบบง่าย: ต้องผ่าน allow (ถ้ามี) และห้ามเจอ block"""
+    t = title or ""
+    if BLOCK_RE and BLOCK_RE.search(t):
+        return False
+    if ALLOW_RE:
+        return bool(ALLOW_RE.search(t))
+    return True
+
+
+def pick_first_existing(row: Dict[str, Any], keys: List[str]) -> str:
+    for k in keys:
+        v = normalize_text(row.get(k))
+        if v:
+            return v
+    return ""
+
+
+def detect_fields(df: pd.DataFrame) -> Tuple[str, str, str, str]:
+    """
+    พยายามเดา column ของ:
+    - title
+    - link
+    - image_url
+    - price
+    """
+    cols = {c.lower(): c for c in df.columns}
+
+    def find(candidates: List[str]) -> str:
+        for cand in candidates:
+            if cand in cols:
+                return cols[cand]
+        # หาแบบ contains
+        for cand in candidates:
+            for k_lower, k_orig in cols.items():
+                if cand in k_lower:
+                    return k_orig
+        return ""
+
+    title_col = find(["title", "name", "product_name", "item_name"])
+    link_col = find(["link", "url", "product_url", "product link", "product_link"])
+    img_col = find(["image", "image_url", "img", "thumbnail", "thumb", "image link", "image_link"])
+    price_col = find(["price", "sale_price", "final_price", "discount_price"])
+
+    return title_col, link_col, img_col, price_col
+
+
+def get_csv_df(url: str) -> pd.DataFrame:
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.get(url, headers=headers, timeout=CSV_TIMEOUT)
+    r.raise_for_status()
+
+    # รองรับ csv ปกติ + utf-8-sig
+    content = r.content
     try:
-        last_dt = dt.datetime.fromisoformat(last)
+        text = content.decode("utf-8-sig")
     except Exception:
-        return True
-    delta = now_th() - last_dt.astimezone(TZ)
-    return delta.days >= REPOST_AFTER_DAYS
+        text = content.decode("utf-8", errors="ignore")
+
+    bio = io.StringIO(text)
+    df = pd.read_csv(bio)
+    return df
 
 
-def build_caption(row: dict) -> str:
-    title = row.get("title", "").strip()
-    url = row.get("url", "").strip()
-    price = row.get("price", "").strip()
+def already_used(state: Dict[str, Any], key: str) -> bool:
+    for item in state.get("used", []):
+        if item.get("key") == key:
+            return True
+    return False
 
-    # ไม่ใช้คำว่า “เพจนายหน้า”
-    # โทน: รวมดีลของใช้ในบ้าน & อุปกรณ์ไฟฟ้า
+
+def add_used(state: Dict[str, Any], key: str, title: str) -> None:
+    state.setdefault("used", []).append({
+        "key": key,
+        "title": title,
+        "ts": now_th().isoformat()
+    })
+
+
+def http_post(url: str, data=None, files=None) -> Dict[str, Any]:
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.post(url, data=data, files=files, headers=headers, timeout=API_TIMEOUT)
+    try:
+        j = r.json()
+    except Exception:
+        j = {"raw": r.text}
+    if r.status_code >= 400 or ("error" in j):
+        raise RuntimeError(f"HTTP {r.status_code} error: {j}")
+    return j
+
+
+def http_get(url: str, params=None) -> Dict[str, Any]:
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.get(url, params=params, headers=headers, timeout=API_TIMEOUT)
+    try:
+        j = r.json()
+    except Exception:
+        j = {"raw": r.text}
+    if r.status_code >= 400 or ("error" in j):
+        raise RuntimeError(f"HTTP {r.status_code} error: {j}")
+    return j
+
+
+def download_image_bytes(img_url: str) -> bytes:
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.get(img_url, headers=headers, timeout=IMG_TIMEOUT, stream=True)
+    r.raise_for_status()
+    # จำกัดขนาดกันไฟล์ใหญ่ผิดปกติ (10MB)
+    max_bytes = 10 * 1024 * 1024
+    chunks = []
+    total = 0
+    for ch in r.iter_content(chunk_size=65536):
+        if not ch:
+            continue
+        chunks.append(ch)
+        total += len(ch)
+        if total > max_bytes:
+            raise RuntimeError("Image too large (>10MB)")
+    return b"".join(chunks)
+
+
+def build_caption(title: str, price: str, link: str) -> str:
+    title = title.strip()
+    price = price.strip()
+    link = link.strip()
+
     if CAPTION_STYLE == "full":
-        lines = [
-            "🛒 รวมดีลของใช้ในบ้าน & อุปกรณ์ไฟฟ้า",
+        parts = [
+            f"🏠⚡ {BRAND_NAME}",
             f"✅ {title}",
         ]
         if price:
-            lines.append(f"💰 ราคา: {price}")
-        lines += [
-            f"🔗 สั่งซื้อ/ดูรายละเอียด: {url}",
-            "📩 ทักแชทสอบถามได้เลย",
-        ]
-    else:
-        # short
-        lines = [
-            "🛒 ดีลของใช้ในบ้าน & อุปกรณ์ไฟฟ้า",
-            f"✅ {title}",
-        ]
-        if price:
-            lines.append(f"💰 {price}")
-        lines.append(f"🔗 {url}")
-        lines.append("📩 สอบถามได้เลย")
+            parts.append(f"💸 ราคา: {price}")
+        if link:
+            parts.append(f"🔗 ดูรายละเอียด: {link}")
+        parts.append(HASHTAGS)
+        return "\n".join(parts)
 
-    caption = "\n".join(lines).strip()
-    if HASHTAGS:
-        caption = f"{caption}\n\n{HASHTAGS}".strip()
-    return caption
+    # short
+    line1 = f"✅ {title}"
+    line2 = f"🔗 {link}" if link else ""
+    return "\n".join([x for x in [line1, line2, HASHTAGS] if x])
 
 
-def fb_upload_photo_unpublished(image_url: str) -> str:
+def upload_photo_unpublished(image_bytes: bytes, caption: str) -> str:
     """
-    อัปโหลดรูปแบบ unpublished เพื่อใช้แนบในโพสต์ feed
-    return photo_id
+    อัปโหลดรูปเข้าเพจแบบ unpublished เพื่อเอา media_fbid ไปแนบโพส
     """
-    api = f"https://graph.facebook.com/{FB_API_VERSION}/{PAGE_ID}/photos"
-    img_bytes = http_get(image_url)
-    files = {"source": ("image.jpg", img_bytes, "image/jpeg")}
+    url = f"{GRAPH}/{PAGE_ID}/photos"
+    files = {
+        "source": ("image.jpg", image_bytes, "image/jpeg")
+    }
     data = {
         "published": "false",
-        "access_token": PAGE_ACCESS_TOKEN,
+        "caption": caption,
+        "access_token": PAGE_ACCESS_TOKEN
     }
-    js = http_post(api, data=data, files=files)
-    photo_id = js.get("id")
-    if not photo_id:
-        die(f"upload photo failed: {js}")
-    return photo_id
+    j = http_post(url, data=data, files=files)
+    media_id = j.get("id")
+    if not media_id:
+        raise RuntimeError(f"Upload photo failed: {j}")
+    return media_id
 
 
-def fb_create_post(message: str, photo_id: str | None = None) -> str:
-    api = f"https://graph.facebook.com/{FB_API_VERSION}/{PAGE_ID}/feed"
+def create_feed_post_with_media(message: str, media_id: str) -> str:
+    """
+    สร้างโพสบนหน้าเพจ โดยแนบรูปที่อัปโหลดไว้
+    """
+    url = f"{GRAPH}/{PAGE_ID}/feed"
     data = {
         "message": message,
-        "access_token": PAGE_ACCESS_TOKEN,
+        "attached_media[0]": json.dumps({"media_fbid": media_id}),
+        "access_token": PAGE_ACCESS_TOKEN
     }
-
-    # privacy (page ส่วนใหญ่จะ public)
-    if FB_PRIVACY == "public":
-        # ไม่ต้องส่งก็ได้ แต่ส่งไปก็ไม่ผิดในหลายเคส
-        pass
-
-    if photo_id:
-        # แนบรูปเป็น attached_media
-        data["attached_media[0]"] = json.dumps({"media_fbid": photo_id})
-
-    js = http_post(api, data=data)
-    post_id = js.get("id")
+    j = http_post(url, data=data)
+    post_id = j.get("id")
     if not post_id:
-        die(f"create post failed: {js}")
+        raise RuntimeError(f"Create post failed: {j}")
     return post_id
 
 
-def main():
-    print("[INFO] fb-autopost start")
-    print(f"[INFO] now_th={now_th().isoformat()}")
-    print(f"[INFO] TZ={TZ_NAME}")
-    print(f"[INFO] POSTS_PER_RUN={POSTS_PER_RUN}, TOP_POOL={TOP_POOL}, REPOST_AFTER_DAYS={REPOST_AFTER_DAYS}")
-    print(f"[INFO] CAPTION_STYLE={CAPTION_STYLE}")
-    print(f"[INFO] HASHTAGS={HASHTAGS}")
+def main() -> None:
+    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
+        die("Missing env: PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL")
 
-    if not PAGE_ID:
-        die("Missing env: PAGE_ID")
-    if not PAGE_ACCESS_TOKEN:
-        die("Missing env: PAGE_ACCESS_TOKEN")
-    if not SHOPEE_CSV_URL:
-        die("Missing env: SHOPEE_CSV_URL")
+    print("== fb-autopost ==")
+    print("time(th):", now_th().strftime("%Y-%m-%d %H:%M:%S %Z"))
+    print("page_id:", PAGE_ID[:4] + "****")
+    print("tz:", TZ)
+    print("posts_per_run:", POSTS_PER_RUN)
+    print("top_pool:", TOP_POOL)
+    print("repost_after_days:", REPOST_AFTER_DAYS)
+    print("caption_style:", CAPTION_STYLE)
+    print("brand:", BRAND_NAME)
+    print("hashtags:", HASHTAGS)
+    print("allow:", KEYWORDS_ALLOW)
+    print("block:", KEYWORDS_BLOCK)
 
     state = load_state()
+    prune_state(state)
 
-    # โหลด CSV
-    print("[INFO] downloading CSV...")
-    csv_bytes = http_get(SHOPEE_CSV_URL)
-    df_raw = parse_shopee_csv(csv_bytes)
-    df = pick_candidates(df_raw)
+    # 1) load CSV
+    df = get_csv_df(SHOPEE_CSV_URL)
+    if df.empty:
+        die("CSV is empty")
 
-    # สุ่ม candidate ที่ยังไม่ติด repost window
-    print(f"[INFO] candidates={len(df)}")
+    title_col, link_col, img_col, price_col = detect_fields(df)
+    if not title_col:
+        die("Cannot detect title column in CSV")
+    if not img_col:
+        die("Cannot detect image column in CSV (ต้องมีรูปเท่านั้น)")
+
+    # 2) build candidates
     rows = df.to_dict(orient="records")
+    random.shuffle(rows)
 
-    # ทำ list ของที่ “โพสต์ได้”
-    usable = []
+    candidates = []
     for r in rows:
-        key = sha1((r.get("title", "") + "|" + r.get("url", "")).strip())
-        if is_repost_allowed(state, key):
-            r["_key"] = key
-            usable.append(r)
+        title = normalize_text(r.get(title_col))
+        if not title:
+            continue
+        if not match_keywords(title):
+            continue
 
-    if not usable:
-        print("[WARN] ไม่มีรายการที่โพสต์ได้ (ติด REPOST_AFTER_DAYS ทั้งหมด) -> ออกปกติ")
-        state["last_run"] = now_th().isoformat()
-        save_state(state)
-        return
+        img = normalize_text(r.get(img_col))
+        if not img or not img.lower().startswith(("http://", "https://")):
+            continue  # ต้องมีรูปเท่านั้น
 
-    random.shuffle(usable)
-    to_post = usable[: max(1, POSTS_PER_RUN)]
+        link = normalize_text(r.get(link_col)) if link_col else ""
+        price = normalize_text(r.get(price_col)) if price_col else ""
 
+        # key ใช้กันโพสซ้ำ
+        key = link or (title + "|" + img)
+        if already_used(state, key):
+            continue
+
+        candidates.append((title, price, link, img, key))
+        if len(candidates) >= TOP_POOL:
+            break
+
+    if not candidates:
+        die("No candidates found (อาจโดนคัดหมวด/หรือไม่มีรูป/หรือโพสไปแล้ว)")
+
+    # 3) post N items
     posted = 0
-    for r in to_post:
-        caption = build_caption(r)
-        image_url = (r.get("image") or "").strip()
+    for title, price, link, img, key in candidates:
+        if posted >= POSTS_PER_RUN:
+            break
 
-        print("--------------------------------------------------")
-        print("[INFO] Posting preview:")
-        print(caption[:800])
+        caption = build_caption(title=title, price=price, link=link)
+        print("\n---")
+        print("pick:", title)
+        print("img:", img)
+        print("link:", link)
 
-        photo_id = None
-        if image_url:
-            try:
-                print(f"[INFO] uploading image: {image_url}")
-                photo_id = fb_upload_photo_unpublished(image_url)
-                print(f"[INFO] photo_id={photo_id}")
-            except Exception as e:
-                # ถ้าอัปโหลดรูปไม่ได้ ยังโพสต์เป็นข้อความได้
-                print(f"[WARN] upload image failed -> post text only. err={e}")
+        # download image
+        image_bytes = download_image_bytes(img)
 
-        print("[INFO] creating post...")
-        post_id = fb_create_post(caption, photo_id=photo_id)
-        print(f"[OK] posted post_id={post_id}")
+        # upload photo unpublished -> create feed post with attached media
+        media_id = upload_photo_unpublished(image_bytes, caption)
+        post_id = create_feed_post_with_media(caption, media_id)
 
-        # update state
-        state.setdefault("posted_keys", {})
-        state["posted_keys"][r["_key"]] = now_th().isoformat()
+        print("posted:", post_id)
+        add_used(state, key, title)
         posted += 1
 
-        # กันยิงถี่เกิน
+        # หน่วงนิดกันโดน rate limit
         time.sleep(2)
 
-    state["last_run"] = now_th().isoformat()
     save_state(state)
-    print(f"[INFO] done. posted={posted}")
+    print("\nDone. posted:", posted)
 
 
 if __name__ == "__main__":
