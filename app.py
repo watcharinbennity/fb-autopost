@@ -7,125 +7,101 @@ import datetime as dt
 import requests
 import pandas as pd
 
-# =========================
+# ======================
 # CONFIG
-# =========================
+# ======================
+PAGE_ID = os.getenv("PAGE_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL")
+
+POSTS_PER_RUN = 1
 STATE_FILE = "state.json"
 
-PAGE_ID = os.getenv("PAGE_ID", "").strip()
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
-SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
+# ======================
+# TIME (Thailand)
+# ======================
+TH_TZ = dt.timezone(dt.timedelta(hours=7))
 
-POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))   # เทส = 1
-REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "15"))
+def now_th():
+    return dt.datetime.now(TH_TZ)
 
-# =========================
+# ======================
 # STATE
-# =========================
+# ======================
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"posted": {}}
+    return {"last_index": 0}
 
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+        json.dump(state, f)
 
-# =========================
+# ======================
+# LOAD PRODUCTS
+# ======================
+def load_products():
+    df = pd.read_csv(SHOPEE_CSV_URL)
+    df = df.dropna(subset=["product_link", "product_name"])
+    return df.to_dict("records")
+
+# ======================
+# POST CONTENT
+# ======================
+QUESTION_POSTS = [
+    "งานระบบไฟฟ้า ปัญหาที่เจอบ่อยที่สุดคืออะไร?",
+    "เลือกอุปกรณ์ไฟฟ้า ดูราคาหรือความปลอดภัยก่อน?",
+    "มือใหม่งานไฟฟ้า พลาดตรงไหนกันบ่อย?"
+]
+
+def build_post(product):
+    post_type = random.choice(["question", "sell"])
+
+    if post_type == "question":
+        return random.choice(QUESTION_POSTS)
+
+    return f"""🛒 ของมันต้องมีช่วงนี้
+{product['product_name']}
+
+💰 {product.get('price','')}
+⭐ {product.get('rating','')}
+
+กดดูรายละเอียดได้ที่ลิงก์นี้ 👇
+{product['product_link']}
+"""
+
+# ======================
 # FACEBOOK POST
-# =========================
-def fb_post(message, link):
+# ======================
+def fb_post(message):
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
     payload = {
         "message": message,
-        "link": link,
         "access_token": PAGE_ACCESS_TOKEN
     }
-    r = requests.post(url, data=payload, timeout=30)
-    data = r.json()
-
+    r = requests.post(url, data=payload)
     if r.status_code != 200:
-        raise Exception(f"Facebook post failed: {data}")
+        raise Exception(r.text)
+    return r.json()
 
-    return data
-
-# =========================
-# CONTENT
-# =========================
-def build_caption(row):
-    templates = [
-        f"""⭐ ตัวนี้รีวิวดี คนซื้อซ้ำเยอะ
-
-{row['product_name']}
-💰 ราคา {row['price']} บาท
-⭐ คะแนน {row['rating']}
-
-ดูรายละเอียดในลิงก์ 👇""",
-
-        f"""🧴 ของมันต้องมีช่วงนี้
-
-{row['product_name']}
-ราคา {row['price']} บาท
-รีวิว {row['rating']} ⭐
-
-กดดูรายละเอียดได้เลย 👇""",
-
-        f"""ของดีบอกต่อ 👌
-
-{row['product_name']}
-รีวิวดี ราคาคุ้ม
-
-ดูรายละเอียด 👇"""
-    ]
-    return random.choice(templates)
-
-# =========================
+# ======================
 # MAIN
-# =========================
+# ======================
 def main():
-    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
-        raise Exception("ENV ไม่ครบ (PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL)")
-
-    print("⬇ Downloading Shopee CSV...")
-    csv_bytes = requests.get(SHOPEE_CSV_URL, timeout=60).content
-    df = pd.read_csv(io.BytesIO(csv_bytes))
-
-    print(f"✅ CSV loaded: {len(df)} rows")
-
     state = load_state()
-    now = dt.datetime.utcnow()
+    products = load_products()
 
-    candidates = []
-    for _, r in df.iterrows():
-        pid = str(r["product_id"])
-        last = state["posted"].get(pid)
+    idx = state["last_index"] % len(products)
+    product = products[idx]
 
-        if last:
-            last_time = dt.datetime.fromisoformat(last)
-            if (now - last_time).days < REPOST_AFTER_DAYS:
-                continue
+    message = build_post(product)
+    fb_post(message)
 
-        candidates.append(r)
+    state["last_index"] += 1
+    save_state(state)
 
-    random.shuffle(candidates)
-
-    posted = 0
-    for row in candidates[:POSTS_PER_RUN]:
-        caption = build_caption(row)
-        link = row["product_link"]
-
-        print(f"🚀 Posting: {row['product_name']}")
-        res = fb_post(caption, link)
-        print("✅ POSTED:", res.get("id"))
-
-        state["posted"][str(row["product_id"])] = now.isoformat()
-        save_state(state)
-
-        posted += 1
-        time.sleep(3)
-
-    print(f"🎉 Done. Posted {posted} post(s)")
+    print("✅ Posted successfully")
 
 if __name__ == "__main__":
     main()
