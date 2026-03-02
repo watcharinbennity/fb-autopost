@@ -2,7 +2,6 @@ name: fb-autopost
 
 on:
   schedule:
-    # GitHub cron ใช้เวลา UTC
     # ไทย 12:00 (UTC+7) = UTC 05:00
     - cron: "0 5 * * *"
     # ไทย 18:30 (UTC+7) = UTC 11:30
@@ -12,7 +11,7 @@ on:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -33,29 +32,31 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          TZ: Asia/Bangkok
 
+          TZ: Asia/Bangkok
           POSTS_PER_RUN: "1"
-          TOP_POOL: "200"
+          TOP_POOL: "120"
           REPOST_AFTER_DAYS: "14"
 
-          CAPTION_STYLE: "short"
+          # คัดหมวด/คีย์เวิร์ดให้ตรงเพจ (แก้ได้)
+          KEYWORDS_ALLOW: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|พัดลม|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|ชาร์จ|USB|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|ของใช้ในบ้าน|ครัว|จัดเก็บ|ทำความสะอาด"
+          KEYWORDS_BLOCK: "แชมพู|ครีม|อาหารเสริม|บุหรี่ไฟฟ้า|ยา|การพนัน"
+
+          BRAND_NAME: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
+          CAPTION_STYLE: "short"
 
-          # ปรับได้: ถ้าอยากบังคับให้โพสต์ public ใส่ "public"
-          FB_PRIVACY: "public"
-
-          # กันค้างโหลดรูป/โพสต์
-          HTTP_TIMEOUT: "25"
-          FB_API_VERSION: "v20.0"
         run: |
-          python app.py
+          python -u app.py
 
       - name: Commit updated state.json
-        if: always()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state.json || true
-          git diff --staged --quiet || git commit -m "Update state.json"
-          git push || true
+          if git diff --quiet; then
+            echo "No state changes."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "Update state"
+            git push
+          fi
