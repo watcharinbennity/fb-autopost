@@ -1,15 +1,12 @@
 # app.py
 # Facebook Page autopost (Shopee CSV) via GitHub Actions
-#
-# Required ENV (Secrets):
+# Required ENV (GitHub Secrets):
 #   PAGE_ID
 #   PAGE_ACCESS_TOKEN
 #   SHOPEE_CSV_URL
 #
-# Optional ENV (Variables or Secrets) - if empty, safe defaults will be used:
+# Optional ENV:
 #   TZ=Asia/Bangkok
-#   RUN_TIMES=12:00,18:00          # เวลาไทยที่ "อนุญาต" ให้โพสต์ (ถ้าไม่ตรงจะ exit)
-#   RUN_TOLERANCE_MIN=10           # เผื่อเวลา +/- นาที
 #   POSTS_PER_RUN=3
 #   TOP_POOL=200
 #   REPOST_AFTER_DAYS=14
@@ -29,50 +26,23 @@ from zoneinfo import ZoneInfo
 import requests
 import pandas as pd
 
-
-# -------------------------
-# Safe ENV helpers (กันค่าว่าง)
-# -------------------------
-def getenv_str(name: str, default: str = "") -> str:
-    v = os.getenv(name)
-    if v is None:
-        return default
-    v = v.strip()
-    return v if v != "" else default
-
-
-def getenv_int(name: str, default: int) -> int:
-    v = os.getenv(name)
-    if v is None:
-        return default
-    v = v.strip()
-    if v == "":
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
-
+STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
 # -------------------------
 # Config from ENV
 # -------------------------
-STATE_FILE = getenv_str("STATE_FILE", "state.json")
+PAGE_ID = os.getenv("PAGE_ID", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
-PAGE_ID = getenv_str("PAGE_ID", "")
-PAGE_ACCESS_TOKEN = getenv_str("PAGE_ACCESS_TOKEN", "")
-SHOPEE_CSV_URL = getenv_str("SHOPEE_CSV_URL", "")
+TZ = os.getenv("TZ", "Asia/Bangkok").strip()
 
-TZ = getenv_str("TZ", "Asia/Bangkok")
-RUN_TIMES = getenv_str("RUN_TIMES", "12:00")  # comma-separated HH:MM
-RUN_TOLERANCE_MIN = getenv_int("RUN_TOLERANCE_MIN", 10)
+REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14") or "14")
+POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "3") or "3")
+TOP_POOL = int(os.getenv("TOP_POOL", "200") or "200")
 
-REPOST_AFTER_DAYS = getenv_int("REPOST_AFTER_DAYS", 14)
-POSTS_PER_RUN = getenv_int("POSTS_PER_RUN", 3)
-TOP_POOL = getenv_int("TOP_POOL", 200)
-
-CAPTION_STYLE = getenv_str("CAPTION_STYLE", "short").lower()
-HASHTAGS = getenv_str("HASHTAGS", "#ดีลคุ้ม #Shopee #ลดราคา")
+CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()
+HASHTAGS = os.getenv("HASHTAGS", "#ดีลคุ้ม #Shopee #ลดราคา").strip()
 
 
 # -------------------------
@@ -82,10 +52,7 @@ def load_state() -> dict:
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    data.setdefault("posted", {})
-                    return data
+                return json.load(f)
         except Exception:
             pass
     return {"posted": {}}
@@ -100,42 +67,20 @@ def now_local() -> dt.datetime:
     return dt.datetime.now(tz=ZoneInfo(TZ))
 
 
-def is_time_allowed() -> bool:
-    """
-    Allow running only around configured RUN_TIMES (local TZ).
-    Set RUN_TIMES="" to disable this guard.
-    """
-    if not RUN_TIMES:
-        return True
-
-    n = now_local()
-    for t in [x.strip() for x in RUN_TIMES.split(",") if x.strip()]:
-        try:
-            hh, mm = t.split(":")
-            target = n.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-            delta_min = abs((n - target).total_seconds()) / 60.0
-            if delta_min <= RUN_TOLERANCE_MIN:
-                return True
-        except Exception:
-            continue
-    return False
-
-
 # -------------------------
 # Helpers: CSV normalize
 # -------------------------
 def pick_first_existing_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    cols_lower = {str(c).strip().lower(): c for c in df.columns}
+    cols_lower = {c.lower(): c for c in df.columns}
     for cand in candidates:
-        key = cand.strip().lower()
-        if key in cols_lower:
-            return cols_lower[key]
+        if cand.lower() in cols_lower:
+            return cols_lower[cand.lower()]
     return None
 
 
 def load_products() -> pd.DataFrame:
     if not SHOPEE_CSV_URL:
-        raise RuntimeError("SHOPEE_CSV_URL is empty (ต้องตั้งค่า Shopee CSV URL ใน Secrets)")
+        raise RuntimeError("SHOPEE_CSV_URL is empty")
 
     print("⬇️ Downloading Shopee CSV...")
     r = requests.get(SHOPEE_CSV_URL, timeout=60)
@@ -147,19 +92,12 @@ def load_products() -> pd.DataFrame:
     except Exception:
         text = content.decode("utf-8", errors="ignore")
 
-    # บางไฟล์คั่นด้วย ; ลองเดา delimiter ถ้าจำเป็น
-    try:
-        df = pd.read_csv(io.StringIO(text))
-    except Exception:
-        df = pd.read_csv(io.StringIO(text), sep=";")
-
+    df = pd.read_csv(io.StringIO(text))
     print(f"✅ CSV loaded: {len(df)} rows")
-    print("📄 Columns:", list(df.columns))
 
-    # เดาชื่อคอลัมน์ให้ทนทุกแบบ
     name_col = pick_first_existing_column(
         df,
-        ["product_name", "product name", "name", "item_name", "item name", "title", "product_title", "product title"],
+        ["product_name", "product name", "name", "item_name", "item name", "product_title", "product title", "title"],
     )
     link_col = pick_first_existing_column(
         df,
@@ -170,7 +108,7 @@ def load_products() -> pd.DataFrame:
 
     if not name_col or not link_col:
         raise RuntimeError(
-            "❌ ไม่เจอคอลัมน์ชื่อสินค้า/ลิงก์ใน CSV\n"
+            "ไม่เจอคอลัมน์ชื่อสินค้า/ลิงก์ใน CSV\n"
             f"คอลัมน์ที่มี: {list(df.columns)}\n"
             "ต้องมีอย่างน้อย: product_name (หรือ name/title) และ product_link (หรือ link/url)"
         )
@@ -179,15 +117,8 @@ def load_products() -> pd.DataFrame:
     out["product_name"] = df[name_col].astype(str).fillna("").str.strip()
     out["product_link"] = df[link_col].astype(str).fillna("").str.strip()
 
-    if price_col:
-        out["price"] = df[price_col]
-    else:
-        out["price"] = None
-
-    if rating_col:
-        out["rating"] = df[rating_col]
-    else:
-        out["rating"] = None
+    out["price"] = df[price_col] if price_col else None
+    out["rating"] = df[rating_col] if rating_col else None
 
     out = out.dropna(subset=["product_name", "product_link"])
     out = out[(out["product_name"] != "") & (out["product_link"] != "")]
@@ -209,14 +140,10 @@ def safe_float(x):
 # -------------------------
 def fb_post_link(message: str, link: str) -> dict:
     if not PAGE_ID or not PAGE_ACCESS_TOKEN:
-        raise RuntimeError("PAGE_ID / PAGE_ACCESS_TOKEN ว่าง (เช็ค Secrets)")
+        raise RuntimeError("PAGE_ID / PAGE_ACCESS_TOKEN is empty")
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-    payload = {
-        "message": message,
-        "link": link,
-        "access_token": PAGE_ACCESS_TOKEN,
-    }
+    payload = {"message": message, "link": link, "access_token": PAGE_ACCESS_TOKEN}
 
     resp = requests.post(url, data=payload, timeout=60)
     try:
@@ -239,35 +166,26 @@ def fb_post_link(message: str, link: str) -> dict:
 def build_caption(row: pd.Series) -> str:
     name = str(row.get("product_name", "")).strip()
     link = str(row.get("product_link", "")).strip()
+
     price = safe_float(row.get("price"))
     rating = safe_float(row.get("rating"))
 
-    lines = []
-    lines.append("🛒 ของมันต้องมีช่วงนี้")
-    lines.append(f"✅ {name}")
+    lines = ["🛒 ของมันต้องมีช่วงนี้", f"✅ {name}"]
 
     meta = []
-    if price is not None and not (isinstance(price, float) and math.isnan(price)):
-        try:
-            meta.append(f"💰 {int(price):,} บาท")
-        except Exception:
-            meta.append(f"💰 {price}")
-    if rating is not None and not (isinstance(rating, float) and math.isnan(rating)):
+    if price is not None and not math.isnan(price):
+        meta.append(f"💰 {int(price):,} บาท")
+    if rating is not None and not math.isnan(rating):
         meta.append(f"⭐ {rating:.1f}")
-
     if meta:
         lines.append(" / ".join(meta))
 
     lines.append("กดดูรายละเอียด 👇")
     lines.append(link)
-
-    if CAPTION_STYLE == "full":
-        lines.append("")
-
     if HASHTAGS:
         lines.append(HASHTAGS)
 
-    caption = "\n".join([l for l in lines if l is not None])
+    caption = "\n".join([l for l in lines if l])
     return caption[:1800]
 
 
@@ -276,20 +194,12 @@ def build_caption(row: pd.Series) -> str:
 # -------------------------
 def main():
     print("TZ =", TZ)
-    print("Now(local) =", now_local().isoformat())
-    print("RUN_TIMES =", RUN_TIMES, "tolerance(min) =", RUN_TOLERANCE_MIN)
-    print("POSTS_PER_RUN =", POSTS_PER_RUN, "TOP_POOL =", TOP_POOL, "REPOST_AFTER_DAYS =", REPOST_AFTER_DAYS)
-    print("CAPTION_STYLE =", CAPTION_STYLE, "HASHTAGS =", HASHTAGS)
-
-    if not is_time_allowed():
-        print("⏭️ Not in allowed time window. Exit.")
-        return
+    print("Now =", now_local().isoformat())
 
     state = load_state()
     posted = state.get("posted", {})
 
     products = load_products()
-
     cutoff = now_local() - dt.timedelta(days=REPOST_AFTER_DAYS)
 
     def is_eligible(link: str) -> bool:
@@ -308,7 +218,7 @@ def main():
     pool = products[products["eligible"]].copy()
 
     if len(pool) == 0:
-        print("😴 ไม่มีสินค้าที่เข้าเงื่อนไข (eligible) แล้ว")
+        print("😴 ไม่มีสินค้าที่เข้าเงื่อนไขแล้ว")
         return
 
     if len(pool) > TOP_POOL:
