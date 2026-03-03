@@ -8,7 +8,7 @@ on:
     - cron: "30 11 * * *"
   workflow_dispatch:
 
-# กัน run ซ้อนแล้วโดน cancel -> "Error: The operation was canceled."
+# กันรันซ้อนแล้วโดน cancel กันเอง
 concurrency:
   group: fb-autopost
   cancel-in-progress: false
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -28,25 +28,38 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run autopost
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-
           TZ: Asia/Bangkok
+
           POSTS_PER_RUN: "1"
           TOP_POOL: "120"
           REPOST_AFTER_DAYS: "14"
-          STATE_FILE: "state.json"
 
           BRAND: "BEN Home & Electrical"
           CAPTION_STYLE: "short"
           HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
 
-          # คัดหมวดให้ตรงเพจ (ผ่าน/ไม่ผ่าน)
-          ALLOW_KEYWORDS: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|ไฟเพดาน|ไฟติดผนัง|พัดลม|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|หัวชาร์จ|สายชาร์จ|USB|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|กาว|ซิลิโคน|จัดเก็บ|ชั้นวาง|กล่อง|ครัว|ทำความสะอาด|ไม้ถู|ฟองน้ำ|น้ำยาล้างจาน|ถุงขยะ"
+          # คีย์เวิร์ดที่ “อนุญาต”
+          ALLOW_KEYWORDS: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|ไฟเพดาน|ไฟติดผนัง|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|หัวชาร์จ|สายชาร์จ|USB|พัดลม|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|ชั้นวาง|กล่อง|จัดเก็บ|ครัว|ทำความสะอาด|ไม้ถู|ฟองน้ำ|น้ำยาล้างจาน|ถุงขยะ|ซิลิโคน"
+
+          # คีย์เวิร์ดที่ “ต้องบล็อก”
           BLOCK_KEYWORDS: "แชมพู|ครีม|อาหารเสริม|บุหรี่ไฟฟ้า|ยา|การพนัน|เซ็กซ์|18\\+"
-        run: python -u app.py
+
+        run: |
+          python -u app.py
+
+      - name: Commit updated state.json
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json || true
+          git diff --cached --quiet || git commit -m "Update state" && git push || true
