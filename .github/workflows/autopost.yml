@@ -2,23 +2,26 @@ name: Auto Post
 
 on:
   schedule:
-    - cron: "15 5 * * *"   # 12:15 Asia/Bangkok
-    - cron: "30 11 * * *"  # 18:30 Asia/Bangkok
+    # Thailand (UTC+7) 12:15 -> UTC 05:15
+    - cron: "15 5 * * *"
+    # Thailand (UTC+7) 18:30 -> UTC 11:30
+    - cron: "30 11 * * *"
   workflow_dispatch:
     inputs:
-      posts:
+      posts_count:
         description: "How many posts this run"
-        required: false
+        required: true
         default: "1"
 
+# ถ้าคุณชอบกดรันซ้ำบ่อย ให้ปิด cancel-in-progress (จะไม่ cancel กันเอง)
 concurrency:
-  group: fb-autopost
+  group: autopost
   cancel-in-progress: false
 
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -32,33 +35,34 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Debug CSV URL (headers only)
+        env:
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+        run: |
+          echo "== CURL HEADERS =="
+          curl -L -I --max-time 20 "$SHOPEE_CSV_URL" | head -n 60 || true
+
       - name: Run Auto Post
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          POSTS_PER_RUN: ${{ github.event.inputs.posts || '1' }}
-
-          # โหมดโหด
-          POST_IMAGES_COUNT: "3"          # 3 รูปต่อโพสต์
-          END_MONTH_BOOST_DAYS: "3"       # 3 วันท้ายเดือน เน้นของโปร
-          MIN_DISCOUNT_PCT: "10"          # ถ้าเป็นของโปรอย่างน้อยกี่ %
-          CSV_TIMEOUT_SEC: "45"           # กันค้างดึง CSV
-          CSV_RETRIES: "5"
+          POSTS_COUNT: ${{ github.event.inputs.posts_count || '1' }}
 
           GRAPH_VERSION: "v25.0"
+          POST_IMAGES_COUNT: "3"
+          END_MONTH_BOOST_DAYS: "3"
 
         run: python -u app.py
 
       - name: Commit state.json back to repo
+        if: always()
         run: |
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
+          if [ -f state.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
             git add state.json
-            git commit -m "Update state.json"
-            git push
-          else
-            echo "No state changes"
+            git commit -m "Update state" || echo "No changes"
+            git push || echo "Push skipped"
           fi
