@@ -2,11 +2,11 @@ name: Auto Post
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # รันทุก 15 นาที (UTC)
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
-      posts_this_run:
-        description: "How many posts this run (default 1)"
+      max_catchup_per_run:
+        description: "How many missed slots to catch up in this run"
         required: false
         default: "1"
 
@@ -30,23 +30,30 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+
           GRAPH_VERSION: "v25.0"
 
-          # ตารางเวลา (เวลาไทย)
+          # เวลาโพสต์ (เวลาไทย)
           POST_SCHEDULE_BKK: "09:00,12:15,15:30,18:30,21:00"
 
-          # โพสต์ต่อการรัน (แนะนำ 1 เพื่อไม่สแปม)
-          POSTS_THIS_RUN: ${{ github.event.inputs.posts_this_run || '1' }}
+          # โพสต์ชดเชยได้กี่สล็อตต่อการรัน (แนะนำ 1-2 กันสแปม)
+          MAX_CATCHUP_PER_RUN: ${{ github.event.inputs.max_catchup_per_run || '1' }}
 
-          # รูปต่อโพสต์
+          # รูปต่อสินค้า (3 รูป)
           POST_IMAGES_COUNT: "3"
 
-          # คัดของดี (ปรับได้)
+          # คัดของดี
           MIN_RATING: "4.5"
           MIN_DISCOUNT_PCT: "20"
           MIN_IMAGES: "3"
-          STREAM_SCAN_ROWS: "30000"     # สแกนสูงสุดกี่แถวจาก CSV (stream)
-          PICK_TOP_N: "400"             # เลือกสุ่มจาก top N ที่คัดแล้ว
+          STREAM_SCAN_ROWS: "30000"
+          PICK_TOP_N: "400"
+
+          # ทำคอมเมนต์ใต้โพสต์ (ช่วย Reach)
+          AUTO_COMMENT: "true"
+
+          # ทำโพสต์แรกทันทีเมื่อรันครั้งแรก
+          FIRST_RUN_POST_NOW: "true"
 
         run: python -u app.py
 
