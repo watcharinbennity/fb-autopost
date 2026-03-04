@@ -1,73 +1,153 @@
 import os
-import requests
 import csv
-import random
 import json
-import urllib.request
+import time
+import requests
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 PAGE_ID = os.getenv("PAGE_ID")
 ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
 
-if not PAGE_ID:
-    raise Exception("Missing env: PAGE_ID")
+API_VERSION = "v25.0"
+STATE_FILE = "state.json"
 
-if not ACCESS_TOKEN:
-    raise Exception("Missing env: PAGE_ACCESS_TOKEN")
+def die(msg: str):
+    raise SystemExit(f"ERROR: {msg}")
 
-if not CSV_URL:
-    raise Exception("Missing env: SHOPEE_CSV_URL")
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"index": 0}
+    return {"index": 0}
 
-# โหลด CSV
-response = urllib.request.urlopen(CSV_URL)
-lines = [l.decode("utf-8") for l in response.readlines()]
-reader = csv.DictReader(lines)
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
 
-posts = []
-for row in reader:
-    posts.append({
-        "title": row.get("name",""),
-        "image": row.get("image",""),
-        "url": row.get("url","")
-    })
+def fetch_csv_rows(csv_url: str):
+    try:
+        req = Request(csv_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=30) as r:
+            content = r.read().decode("utf-8", errors="replace")
+    except (HTTPError, URLError) as e:
+        die(f"Cannot fetch CSV: {e}")
 
-# โหลด state
-state_file = "state.json"
-if os.path.exists(state_file):
-    with open(state_file) as f:
-        state = json.load(f)
-else:
-    state = {"index":0}
+    reader = csv.DictReader(content.splitlines())
+    rows = []
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        image = (row.get("image") or "").strip()
+        url = (row.get("url") or "").strip()
 
-index = state["index"]
+        if not name or not image or not url:
+            continue
 
-if index >= len(posts):
-    index = 0
+        rows.append({"name": name, "image": image, "url": url})
 
-post = posts[index]
+    if not rows:
+        die("CSV has no usable rows. Need columns: name,image,url and non-empty values.")
+    return rows
 
-caption = f"""
-{post['title']}
+def looks_like_image_url(u: str) -> bool:
+    u_low = u.lower()
+    return u_low.startswith("http://") or u_low.startswith("https://")
 
-🛒 สั่งซื้อ:
-{post['url']}
+def validate_image_reachable(image_url: str):
+    # เช็คแบบ HEAD ก่อน ถ้าโดนบล็อกค่อย GET แบบเบา ๆ
+    try:
+        h = requests.head(image_url, timeout=20, allow_redirects=True)
+        ct = (h.headers.get("content-type") or "").lower()
+        if h.status_code >= 400:
+            raise Exception(f"HTTP {h.status_code}")
+        if "image/" in ct:
+            return True
+    except Exception:
+        pass
 
-#BENHomeElectrical
-"""
+    try:
+        g = requests.get(image_url, timeout=20, stream=True, allow_redirects=True)
+        ct = (g.headers.get("content-type") or "").lower()
+        if g.status_code >= 400:
+            raise Exception(f"HTTP {g.status_code}")
+        if "image/" in ct:
+            return True
+    except Exception as e:
+        die(f"Image URL not reachable/invalid: {image_url} ({e})")
 
-url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
+    # ถ้าไม่เจอ content-type เป็น image ก็ให้ถือว่าเสี่ยง
+    die(f"Image URL does not look like a direct image (content-type not image/*): {image_url}")
 
-payload = {
-    "url": post["image"],
-    "caption": caption,
-    "access_token": ACCESS_TOKEN
-}
+def post_photo_to_page(page_id: str, access_token: str, image_url: str, caption: str):
+    endpoint = f"https://graph.facebook.com/{API_VERSION}/{page_id}/photos"
 
-r = requests.post(url,data=payload)
+    payload = {
+        "url": image_url,
+        "caption": caption,
+        "access_token": access_token
+    }
 
-print(r.text)
+    # retry กัน transient
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            resp = requests.post(endpoint, data=payload, timeout=60)
+            data = resp.json()
+            if resp.status_code >= 400 or "error" in data:
+                last_err = data
+                time.sleep(2 * attempt)
+                continue
+            return data
+        except Exception as e:
+            last_err = {"exception": str(e)}
+            time.sleep(2 * attempt)
 
-state["index"] = index + 1
+    die(f"Graph API post failed: {json.dumps(last_err, ensure_ascii=False)}")
 
-with open(state_file,"w") as f:
-    json.dump(state,f)
+def main():
+    if not PAGE_ID:
+        die("Missing env: PAGE_ID")
+    if not ACCESS_TOKEN:
+        die("Missing env: PAGE_ACCESS_TOKEN")
+    if not CSV_URL:
+        die("Missing env: SHOPEE_CSV_URL")
+
+    rows = fetch_csv_rows(CSV_URL)
+
+    state = load_state()
+    idx = int(state.get("index", 0))
+
+    if idx >= len(rows):
+        idx = 0
+
+    item = rows[idx]
+    name = item["name"]
+    image_url = item["image"]
+    product_url = item["url"]
+
+    if not looks_like_image_url(image_url):
+        die(f"Invalid image URL format: {image_url}")
+
+    # เช็คว่าเป็นรูปจริง เข้าถึงได้
+    validate_image_reachable(image_url)
+
+    caption = (
+        f"🧰 {name}\n\n"
+        f"🛒 สั่งซื้อได้ที่:\n{product_url}\n\n"
+        f"#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า"
+    )
+
+    result = post_photo_to_page(PAGE_ID, ACCESS_TOKEN, image_url, caption)
+
+    print("POST_OK:", json.dumps(result, ensure_ascii=False))
+
+    # อัปเดต state ให้โพสต์ถัดไปเป็นรายการถัดไป
+    state["index"] = idx + 1
+    save_state(state)
+
+if __name__ == "__main__":
+    main()
