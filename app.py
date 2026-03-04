@@ -6,7 +6,6 @@ import time
 import random
 import datetime as dt
 from zoneinfo import ZoneInfo
-from urllib.parse import urlparse
 
 import requests
 import pandas as pd
@@ -24,65 +23,52 @@ SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
 TZ = os.getenv("TZ", "Asia/Bangkok")
 
-POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "2"))   # Auto Pro: โพสต์มากกว่าเดิม
+POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "2"))
 TOP_POOL = int(os.getenv("TOP_POOL", "200"))
 REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
 
 BRAND = os.getenv("BRAND", "BEN Home & Electrical")
-CAPTION_STYLE = os.getenv("CAPTION_STYLE", "full").strip().lower()
+CAPTION_STYLE = os.getenv("CAPTION_STYLE", "short").strip().lower()
+HASHTAGS = os.getenv("HASHTAGS", "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee #ลดราคา")
 
-HASHTAGS = os.getenv(
-    "HASHTAGS",
-    "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee #ลดราคา #ของมันต้องมี"
-)
+ALLOW_KEYWORDS = os.getenv("ALLOW_KEYWORDS", "").strip()
+BLOCK_KEYWORDS = os.getenv("BLOCK_KEYWORDS", "").strip()
 
-# โฟกัสหมวด/คีย์เวิร์ดให้ตรงเพจ (ปรับได้ใน ENV)
-ALLOW_KEYWORDS = os.getenv(
-    "ALLOW_KEYWORDS",
-    r"(ไฟ|ปลั๊ก|สายไฟ|พาวเวอร์|ปลั๊กพ่วง|หลอดไฟ|โคม|สวิตช์|เบรกเกอร์|อะแดปเตอร์|ชาร์จ|เครื่องมือ|คีม|ไขควง|สว่าน|เทปพันสาย|กล่อง|ราง|ตู้|แม่เหล็ก|กาว|ซิลิโคน|อุปกรณ์บ้าน|ครัว|ห้องน้ำ)"
-).strip()
+# ต้องมีรูปเท่านั้น
+REQUIRE_IMAGE = os.getenv("REQUIRE_IMAGE", "1").strip() != "0"
 
-BLOCK_KEYWORDS = os.getenv(
-    "BLOCK_KEYWORDS",
-    r"(อาหาร|เสื้อผ้า|เครื่องสำอาง|สกินแคร์|เกม|บัตรเติม|18\+)"
-).strip()
+# Auto Pro filters
+MIN_RATING = float(os.getenv("MIN_RATING", "4.6"))
+MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "10"))  # %
+MIN_SOLD = int(os.getenv("MIN_SOLD", "50"))
+REQUIRE_COUPON = os.getenv("REQUIRE_COUPON", "0").strip() == "1"  # 1=ต้องมีคูปอง/โค้ดเท่านั้น
 
-# ต้องมีสื่อเท่านั้น (รูปหรือวิดีโอ)
-REQUIRE_MEDIA = os.getenv("REQUIRE_MEDIA", "1").strip() != "0"
+# Graph API version (ต้องเป็น v25.0)
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0").strip()
+GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
-# เงื่อนไข Auto Pro (ถ้า CSV มีคอลัมน์พวกนี้จะใช้)
-MIN_RATING = float(os.getenv("MIN_RATING", "4.6"))          # เน้นเรตติ้ง
-MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "10"))# เน้นลดราคา %
-MIN_SOLD = int(os.getenv("MIN_SOLD", "50"))                 # เน้นขายดี
-REQUIRE_COUPON = os.getenv("REQUIRE_COUPON", "0").strip() == "1"  # บังคับมีคูปอง/โค้ดไหม
-
-# เวลาหน่วงระหว่างโพสต์ (กันยิงถี่)
-SLEEP_BETWEEN_POSTS_SEC = int(os.getenv("SLEEP_BETWEEN_POSTS_SEC", "8"))
-
-
+# -----------------------
+# Helpers
+# -----------------------
 def now_th() -> dt.datetime:
     return dt.datetime.now(ZoneInfo(TZ))
-
 
 def die(msg: str, code: int = 1):
     print("FATAL:", msg)
     raise SystemExit(code)
 
-
 def load_state() -> dict:
     if not os.path.exists(STATE_FILE):
-        return {"posted_ids": {}, "last_run_iso": ""}
+        return {"posted_ids": {}, "posted_posts": [], "last_run_iso": ""}
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"posted_ids": {}, "last_run_iso": ""}
-
+        return {"posted_ids": {}, "posted_posts": [], "last_run_iso": ""}
 
 def save_state(state: dict):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-
 
 def make_session() -> requests.Session:
     s = requests.Session()
@@ -100,9 +86,7 @@ def make_session() -> requests.Session:
     s.mount("https://", adapter)
     return s
 
-
 SESSION = make_session()
-
 
 def normalize_text(x) -> str:
     if x is None:
@@ -111,44 +95,29 @@ def normalize_text(x) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-
-def to_float(x) -> float | None:
+def to_float(x) -> float:
     s = normalize_text(x)
     if not s:
-        return None
-    # ดึงตัวเลข 4.8 / 4,8 / "4.8/5"
-    s = s.replace(",", ".")
-    m = re.search(r"(\d+(?:\.\d+)?)", s)
-    return float(m.group(1)) if m else None
+        return 0.0
+    s = s.replace(",", "")
+    m = re.search(r"(\d+(\.\d+)?)", s)
+    return float(m.group(1)) if m else 0.0
 
-
-def to_int(x) -> int | None:
+def to_int(x) -> int:
     s = normalize_text(x)
     if not s:
-        return None
-    # "1.2k" "3,400" "1200"
-    s = s.lower().replace(",", "")
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(k|m)?", s)
-    if not m:
-        return None
-    num = float(m.group(1))
-    suf = m.group(2)
-    if suf == "k":
-        num *= 1000
-    elif suf == "m":
-        num *= 1_000_000
-    return int(num)
-
+        return 0
+    s = s.replace(",", "")
+    m = re.search(r"(\d+)", s)
+    return int(m.group(1)) if m else 0
 
 def compile_pat(expr: str):
     if not expr:
         return None
     return re.compile(expr, flags=re.IGNORECASE)
 
-
 ALLOW_PAT = compile_pat(ALLOW_KEYWORDS)
 BLOCK_PAT = compile_pat(BLOCK_KEYWORDS)
-
 
 def is_allowed(title: str, category: str) -> bool:
     text = f"{title} {category}".strip()
@@ -158,11 +127,7 @@ def is_allowed(title: str, category: str) -> bool:
         return bool(ALLOW_PAT.search(text))
     return True
 
-
 def pick_columns(df: pd.DataFrame) -> dict:
-    """
-    รองรับคอลัมน์หลายชื่อ (CSV จากหลายแหล่ง)
-    """
     cols = {c.lower().strip(): c for c in df.columns}
 
     def find(*names):
@@ -172,29 +137,19 @@ def pick_columns(df: pd.DataFrame) -> dict:
         return None
 
     return {
-        # หลัก
         "title": find("title", "name", "product_name"),
+        "price": find("price", "sale_price", "discount_price"),
+        "img": find("image", "image_url", "image_link", "img", "thumbnail", "images"),
         "url": find("url", "product_url", "link", "product_link"),
-        # media
-        "media": find("media", "media_url", "video", "video_url", "image", "image_url", "image_link", "img", "thumbnail", "images"),
-        "image": find("image", "image_url", "image_link", "img", "thumbnail", "images"),
-        "video": find("video", "video_url"),
-        # category
         "category": find("category", "cat", "category_name"),
-        # pricing / discount
-        "price": find("price", "sale_price", "discount_price", "current_price"),
-        "original_price": find("original_price", "list_price", "normal_price", "price_before"),
-        "discount_pct": find("discount_pct", "discount_percent", "discount", "off_percent"),
-        # rating / sold
-        "rating": find("rating", "rate", "stars", "score"),
-        "sold": find("sold", "sales", "sold_count", "total_sold", "orders", "order_count"),
-        # coupon / promo
-        "coupon": find("coupon", "voucher", "promo", "promo_code", "discount_code", "code"),
+        "rating": find("rating", "score", "stars"),
+        "sold": find("sold", "sales", "total_sold", "sold_count"),
+        "discount": find("discount", "discount_pct", "off", "discount_percent"),
+        "coupon": find("coupon", "voucher", "promo_code", "discount_code", "code"),
     }
 
-
-def extract_first_url(field: str) -> str:
-    s = normalize_text(field)
+def extract_first_image(img_field: str) -> str:
+    s = normalize_text(img_field)
     if not s:
         return ""
     parts = re.split(r"[;,|]\s*", s)
@@ -203,24 +158,6 @@ def extract_first_url(field: str) -> str:
         if p.startswith("http"):
             return p
     return ""
-
-
-def guess_media_url(row, col) -> str:
-    # priority: video -> image -> media
-    for key in ("video", "image", "media"):
-        c = col.get(key)
-        if c:
-            u = extract_first_url(row[c])
-            if u:
-                return u
-    return ""
-
-
-def is_video_url(url: str) -> bool:
-    u = url.lower()
-    # เงื่อนไขเบื้องต้น (แล้วแต่ CSV)
-    return any(u.endswith(ext) for ext in (".mp4", ".mov", ".m4v", ".webm"))
-
 
 def fetch_csv(url: str) -> pd.DataFrame:
     print("Fetching CSV...")
@@ -233,67 +170,213 @@ def fetch_csv(url: str) -> pd.DataFrame:
         text = content.decode("utf-8-sig")
     except Exception:
         text = content.decode("utf-8", errors="ignore")
-
     df = pd.read_csv(io.StringIO(text))
     if df.empty:
         die("CSV is empty")
     return df
 
+def build_caption(it: dict) -> str:
+    title = it["title"]
+    price = it["price"]
+    url = it["url"]
+    rating = it.get("rating", 0.0)
+    sold = it.get("sold", 0)
+    discount = it.get("discount", 0.0)
+    coupon = it.get("coupon", "")
 
-def calc_discount_pct(price_now: float | None, price_old: float | None, discount_pct_field: float | None) -> float | None:
-    # ถ้า CSV มี % อยู่แล้ว ใช้อันนั้นก่อน
-    if discount_pct_field is not None:
-        # ถ้าเป็น "20%" จะถูก to_float ดึง 20
-        return float(discount_pct_field)
+    if CAPTION_STYLE == "full":
+        lines = [
+            f"🏠⚡ {BRAND}",
+            f"📌 {title}",
+            f"⭐ {rating:.1f} | ขายแล้ว {sold}",
+        ]
+        if discount > 0:
+            lines.append(f"🔥 ลด {discount:.0f}%")
+        if coupon:
+            lines.append(f"🎟 โค้ด/คูปอง: {coupon}")
+        if price:
+            lines.append(f"💰 ราคา: {price}")
+        if url:
+            lines.append(f"🔗 สั่งซื้อ: {url}")
+        lines.append(HASHTAGS)
+        return "\n".join([x for x in lines if x])
 
-    if price_now is None or price_old is None:
-        return None
-    if price_old <= 0:
-        return None
-    return max(0.0, (price_old - price_now) * 100.0 / price_old)
-
-
-def build_caption(title: str, price: str, url: str, rating: float | None, sold: int | None, discount_pct: float | None, coupon: str) -> str:
-    title = normalize_text(title)
-    price = normalize_text(price)
-    url = normalize_text(url)
-    coupon = normalize_text(coupon)
-
-    lines = []
-    # Hook + Brand
-    lines.append(f"🏠⚡ {BRAND}")
-    lines.append(f"📌 {title}")
-
-    # ไฮไลต์ดีล
-    if discount_pct is not None and discount_pct > 0:
-        lines.append(f"🔥 ลด {discount_pct:.0f}%")
-
-    if price:
-        lines.append(f"💰 ราคา: {price}")
-
-    if rating is not None:
-        lines.append(f"⭐ เรตติ้ง: {rating:.1f}/5")
-
-    if sold is not None:
-        lines.append(f"📈 ขายแล้ว: {sold:,}")
-
+    parts = [f"📌 {title}"]
+    meta = []
+    if discount > 0:
+        meta.append(f"ลด {discount:.0f}%")
+    if rating > 0:
+        meta.append(f"⭐{rating:.1f}")
+    if sold > 0:
+        meta.append(f"ขายแล้ว {sold}")
+    if meta:
+        parts.append(" | ".join(meta))
     if coupon:
-        lines.append(f"🎟 โค้ด/คูปอง: {coupon}")
-
+        parts.append(f"🎟 {coupon}")
+    if price:
+        parts.append(f"💰 {price}")
     if url:
-        lines.append(f"🔗 สั่งซื้อ: {url}")
-
-    lines.append(HASHTAGS)
-
-    return "\n".join([x for x in lines if x])
-
+        parts.append(f"🔗 {url}")
+    parts.append(HASHTAGS)
+    return "\n".join([p for p in parts if p])
 
 def fb_post_photo(page_id: str, access_token: str, image_url: str, caption: str) -> dict:
-    endpoint = f"https://graph.facebook.com/v19.0/{page_id}/photos"
+    # v25.0
+    endpoint = f"{GRAPH_BASE}/{page_id}/photos"
     payload = {
         "url": image_url,
         "caption": caption,
         "access_token": access_token,
         "published": "true",
     }
-    r = SESSION.post(endpoint, data=payload,
+    r = SESSION.post(endpoint, data=payload, timeout=25)
+    data = r.json() if "application/json" in r.headers.get("content-type", "") else {"raw": r.text}
+    if r.status_code >= 400 or ("error" in data):
+        raise RuntimeError(f"FB post failed: status={r.status_code} resp={data}")
+    return data
+
+def fb_get_permalink(object_id: str, access_token: str) -> str:
+    # v25.0
+    endpoint = f"{GRAPH_BASE}/{object_id}"
+    params = {
+        "fields": "permalink_url",
+        "access_token": access_token,
+    }
+    r = SESSION.get(endpoint, params=params, timeout=25)
+    data = r.json() if "application/json" in r.headers.get("content-type", "") else {}
+    if r.status_code >= 400 or ("error" in data):
+        return ""
+    return data.get("permalink_url", "") or ""
+
+def auto_pro_pass(it: dict) -> bool:
+    if it.get("rating", 0.0) < MIN_RATING:
+        return False
+    if it.get("sold", 0) < MIN_SOLD:
+        return False
+    if it.get("discount", 0.0) < MIN_DISCOUNT_PCT:
+        return False
+    if REQUIRE_COUPON and not it.get("coupon", "").strip():
+        return False
+    return True
+
+def main():
+    print("== fb-autopost AUTO PRO ==")
+    t = now_th()
+    print("time(th):", t.isoformat())
+    print("graph_version:", GRAPH_VERSION)
+
+    if not PAGE_ID or not PAGE_ACCESS_TOKEN or not SHOPEE_CSV_URL:
+        die("Missing ENV: PAGE_ID / PAGE_ACCESS_TOKEN / SHOPEE_CSV_URL")
+
+    state = load_state()
+    posted = state.get("posted_ids", {})
+    posted_posts = state.get("posted_posts", [])
+    cutoff = t - dt.timedelta(days=REPOST_AFTER_DAYS)
+
+    df = fetch_csv(SHOPEE_CSV_URL)
+    col = pick_columns(df)
+
+    if not col["title"]:
+        die("CSV missing title/name column")
+    if REQUIRE_IMAGE and not col["img"]:
+        die("CSV missing image column (image_url/image_link/images) but REQUIRE_IMAGE=1")
+
+    df2 = df.head(TOP_POOL).copy()
+
+    items = []
+    for _, row in df2.iterrows():
+        title = normalize_text(row[col["title"]]) if col["title"] else ""
+        price = normalize_text(row[col["price"]]) if col["price"] else ""
+        url = normalize_text(row[col["url"]]) if col["url"] else ""
+        category = normalize_text(row[col["category"]]) if col["category"] else ""
+        img = extract_first_image(row[col["img"]]) if col["img"] else ""
+
+        rating = to_float(row[col["rating"]]) if col["rating"] else 0.0
+        sold = to_int(row[col["sold"]]) if col["sold"] else 0
+        discount = to_float(row[col["discount"]]) if col["discount"] else 0.0
+        coupon = normalize_text(row[col["coupon"]]) if col["coupon"] else ""
+
+        if not title:
+            continue
+        if REQUIRE_IMAGE and not img:
+            continue
+        if not is_allowed(title, category):
+            continue
+
+        item_id = url if url else title
+
+        last_iso = posted.get(item_id)
+        if last_iso:
+            try:
+                last_dt = dt.datetime.fromisoformat(last_iso)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=ZoneInfo(TZ))
+            except Exception:
+                last_dt = None
+            if last_dt and last_dt > cutoff:
+                continue
+
+        it = {
+            "id": item_id,
+            "title": title,
+            "price": price,
+            "url": url,
+            "category": category,
+            "img": img,
+            "rating": rating,
+            "sold": sold,
+            "discount": discount,
+            "coupon": coupon,
+        }
+
+        if not auto_pro_pass(it):
+            continue
+
+        items.append(it)
+
+    if not items:
+        print("No eligible items (after Auto Pro filters). Nothing to post.")
+        state["last_run_iso"] = t.isoformat()
+        save_state(state)
+        return
+
+    random.shuffle(items)
+    to_post = items[:POSTS_PER_RUN]
+
+    success = 0
+    for it in to_post:
+        caption = build_caption(it)
+        print("\n--- Posting ---")
+        print("title:", it["title"])
+        print("rating/sold/discount/coupon:", it["rating"], it["sold"], it["discount"], it["coupon"])
+        print("img:", it["img"])
+        try:
+            resp = fb_post_photo(PAGE_ID, PAGE_ACCESS_TOKEN, it["img"], caption)
+            obj_id = resp.get("id", "")
+            permalink = fb_get_permalink(obj_id, PAGE_ACCESS_TOKEN) if obj_id else ""
+            print("posted_resp:", resp)
+            print("permalink:", permalink)
+
+            posted[it["id"]] = t.isoformat()
+            posted_posts.append({
+                "time": t.isoformat(),
+                "item_id": it["id"],
+                "object_id": obj_id,
+                "permalink": permalink,
+                "title": it["title"],
+            })
+            success += 1
+        except Exception as e:
+            print("POST ERROR:", str(e))
+
+        time.sleep(2)
+
+    state["posted_ids"] = posted
+    state["posted_posts"] = posted_posts[-200:]
+    state["last_run_iso"] = t.isoformat()
+    save_state(state)
+
+    print(f"\nDone. success={success}/{len(to_post)}")
+
+if __name__ == "__main__":
+    main()
