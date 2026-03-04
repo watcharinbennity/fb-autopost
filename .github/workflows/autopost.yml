@@ -29,17 +29,33 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # ✅ เพิ่ม step ตรวจ CSV ก่อน (จะรู้ทันทีว่า URL ใช้ได้ไหม)
+      - name: Debug CSV URL (headers + first bytes)
+        env:
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+        run: |
+          echo "Checking CSV URL..."
+          curl -I -L --max-time 30 "$SHOPEE_CSV_URL" || true
+          echo "Downloading first 2KB..."
+          curl -L --max-time 30 "$SHOPEE_CSV_URL" | head -c 2048 || true
+          echo ""
+
       - name: Run Auto Post (1 post)
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          POST_IMAGES_COUNT: "3"        # 3 รูปต่อสินค้า
-          END_MONTH_BOOST_DAYS: "5"     # โหมดปลายเดือน (5 วันท้ายเดือน)
-          DOUBLE_DAY_BOOST: "1"         # วันเลขเบิ้ล 3/3,4/4...
-          COMMENT_LINK: "1"             # คอมเมนต์ลิงก์เพิ่ม Reach
-          DRY_RUN: "0"                  # 1=ไม่โพสต์จริง (เทส)
+          POST_IMAGES_COUNT: "3"
+          END_MONTH_BOOST_DAYS: "5"
+          DOUBLE_DAY_BOOST: "1"
+          COMMENT_LINK: "1"
+          DRY_RUN: "0"
+
+          # ✅ เพิ่มค่าความทนเวลาโหลด CSV
+          CSV_TIMEOUT: "25"
+          CSV_RETRIES: "5"
+          CSV_RETRY_SLEEP: "4"
         run: python -u app.py
 
       - name: Commit state.json back to repo
