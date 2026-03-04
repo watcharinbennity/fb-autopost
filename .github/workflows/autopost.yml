@@ -2,11 +2,14 @@ name: Auto Post
 
 on:
   schedule:
-    # TH 12:15 = UTC 05:15
-    - cron: "15 5 * * *"
-    # TH 18:30 = UTC 11:30
-    - cron: "30 11 * * *"
+    - cron: "15 5 * * *"   # 12:15 Asia/Bangkok
+    - cron: "30 11 * * *"  # 18:30 Asia/Bangkok
   workflow_dispatch:
+    inputs:
+      posts:
+        description: "How many posts this run"
+        required: false
+        default: "1"
 
 concurrency:
   group: fb-autopost
@@ -15,7 +18,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -29,41 +32,33 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ✅ เพิ่ม step ตรวจ CSV ก่อน (จะรู้ทันทีว่า URL ใช้ได้ไหม)
-      - name: Debug CSV URL (headers + first bytes)
-        env:
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-        run: |
-          echo "Checking CSV URL..."
-          curl -I -L --max-time 30 "$SHOPEE_CSV_URL" || true
-          echo "Downloading first 2KB..."
-          curl -L --max-time 30 "$SHOPEE_CSV_URL" | head -c 2048 || true
-          echo ""
-
-      - name: Run Auto Post (1 post)
+      - name: Run Auto Post
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          POST_IMAGES_COUNT: "3"
-          END_MONTH_BOOST_DAYS: "5"
-          DOUBLE_DAY_BOOST: "1"
-          COMMENT_LINK: "1"
-          DRY_RUN: "0"
+          POSTS_PER_RUN: ${{ github.event.inputs.posts || '1' }}
 
-          # ✅ เพิ่มค่าความทนเวลาโหลด CSV
-          CSV_TIMEOUT: "25"
+          # โหมดโหด
+          POST_IMAGES_COUNT: "3"          # 3 รูปต่อโพสต์
+          END_MONTH_BOOST_DAYS: "3"       # 3 วันท้ายเดือน เน้นของโปร
+          MIN_DISCOUNT_PCT: "10"          # ถ้าเป็นของโปรอย่างน้อยกี่ %
+          CSV_TIMEOUT_SEC: "45"           # กันค้างดึง CSV
           CSV_RETRIES: "5"
-          CSV_RETRY_SLEEP: "4"
+
+          GRAPH_VERSION: "v25.0"
+
         run: python -u app.py
 
       - name: Commit state.json back to repo
         run: |
-          if [ -f state.json ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
             git add state.json
-            git commit -m "Update state.json" || echo "No changes"
-            git push || echo "No push"
+            git commit -m "Update state.json"
+            git push
+          else
+            echo "No state changes"
           fi
