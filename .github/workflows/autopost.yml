@@ -25,7 +25,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -33,28 +32,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Auto Post (V16)
+      - name: Run Auto Post (V17 TH ULTRA PRO)
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          # Optional tuning
-          POST_IMAGES_COUNT: "3"
-          END_MONTH_BOOST_DAYS: "3"
           POSTS_THIS_RUN: ${{ github.event.inputs.posts_this_run || '1' }}
+          POST_IMAGES_COUNT: "3"
 
-          # Filtering (ขายง่าย)
-          MIN_RATING: "4.6"
-          MIN_DISCOUNT_PCT: "15"
-          MIN_SOLD: "50"
+          # คัดของให้ “โหด”
+          MIN_RATING: "4.7"
+          MIN_DISCOUNT_PCT: "20"
+          MIN_SOLD: "80"
           PRICE_MIN: "79"
-          PRICE_MAX: "1999"
+          PRICE_MAX: "1990"
 
-          # CSV streaming limits
-          STREAM_MAX_ROWS: "250000"   # กันยาวเกินไป
-          TOPK_POOL: "200"            # เก็บของคะแนนดีไว้สุ่ม
+          STREAM_MAX_ROWS: "300000"
+          TOPK_POOL: "250"
+
         run: python -u app.py
 
       - name: Commit state.json back to repo
