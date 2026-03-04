@@ -1,37 +1,39 @@
 import os
-import json
-import random
-import time
 import csv
 import io
-import re
-import calendar
-from datetime import datetime
-from dateutil import tz
-import requests
+import json
+import time
+import random
+import datetime
+from typing import Dict, List, Tuple, Optional
 
-GRAPH_VERSION = "v25.0"
+import requests
+from dateutil import tz
+
+
+# =========================
+# Config (Env)
+# =========================
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0").strip()
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
+
+PAGE_ID = os.getenv("PAGE_ID", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
+
+POSTS_PER_RUN = int(os.getenv("POSTS_PER_RUN", "1"))
+POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
+
+CSV_TIMEOUT_SEC = int(os.getenv("CSV_TIMEOUT_SEC", "45"))
+CSV_RETRIES = int(os.getenv("CSV_RETRIES", "5"))
+
+END_MONTH_BOOST_DAYS = int(os.getenv("END_MONTH_BOOST_DAYS", "3"))
+MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "10"))
 
 STATE_FILE = "state.json"
 MAX_STATE_ITEMS = 5000
-REQ_TIMEOUT = 60  # Graph timeout
 
-# ---- ENV ----
-PAGE_ID = os.getenv("PAGE_ID")
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL")
-
-POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
-END_MONTH_BOOST_DAYS = int(os.getenv("END_MONTH_BOOST_DAYS", "5"))
-DOUBLE_DAY_BOOST = os.getenv("DOUBLE_DAY_BOOST", "1") == "1"
-COMMENT_LINK = os.getenv("COMMENT_LINK", "1") == "1"
-DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
-
-CSV_TIMEOUT = int(os.getenv("CSV_TIMEOUT", "25"))
-CSV_RETRIES = int(os.getenv("CSV_RETRIES", "5"))
-CSV_RETRY_SLEEP = int(os.getenv("CSV_RETRY_SLEEP", "4"))
-
+# เพจ BEN Home & Electrical: โทนแฮชแท็ก
 HASHTAGS = [
     "#BENHomeElectrical",
     "#ของใช้ในบ้าน",
@@ -43,271 +45,424 @@ HASHTAGS = [
 ]
 
 SELLING_HOOKS = [
-    "🔧 งานช่างต้องมีติดบ้าน! ใช้งานง่าย คุณภาพคุ้มราคา 💯",
-    "⚡ ของมันต้องมี! ช่วยให้บ้านคุณพร้อมใช้งานทุกวัน 🏡",
-    "🛠️ เลือกของดีไว้ก่อน ซ่อม/ติดตั้งได้สบาย ๆ",
-    "🔥 ราคาดี + ใช้จริงคุ้มจริง เหมาะกับสายช่างและเจ้าของบ้าน",
-    "✅ รีวิวดี ส่งไว ใช้งานได้หลากหลาย เหมาะมากสำหรับบ้านคุณ",
+    "ของมันต้องมีติดบ้าน 🏠✨",
+    "งานช่างเล็ก-ใหญ่ ทำเองได้ง่ายขึ้น 🔧",
+    "คุ้มสุดในงบ ใช้ได้จริง 💪",
+    "ของเข้าใหม่/ของฮิต รีบดูเลย 👀",
+    "พร้อมส่ง ใช้งานได้จริง ไม่จกตา ✅",
 ]
 
-CTA_LINES = [
-    "📌 สนใจทักแชทได้เลย เดี๋ยวแนะนำให้ตรงงานครับ",
-    "💬 คอมเมนต์คำว่า ‘สนใจ’ เดี๋ยวส่งลิงก์ให้",
-    "🚚 พร้อมส่ง เช็คโปรก่อนหมดได้เลย",
-    "⭐ กดติดตามเพจไว้ มีของดีมาอัปเดตทุกวัน",
+CTA = [
+    "กดดูรายละเอียด/สั่งซื้อได้ที่ลิงก์ 👉",
+    "สนใจคลิกเลย 👇",
+    "ดูราคาโปรที่นี่ 👉",
 ]
 
-MONTHLY_PROMO_LINES = [
-    "🎉 โปรประจำเดือน! ของดีราคาพิเศษ รีบเก็บก่อนหมดโปร",
-    "🏷️ ช่วงโปรแรงของเดือนนี้ ลดคุ้ม ๆ ต้องรีบจัด",
-    "🔥 โปรเดือนนี้มาแล้ว! ราคาดีหายาก",
+URGENCY = [
+    "ของมีจำนวนจำกัด รีบจัดก่อนหมด!",
+    "โปรเปลี่ยนได้ตลอด รีบเช็คตอนนี้!",
+    "ราคาดีๆ แบบนี้ ไม่บ่อยนะ!",
 ]
 
-END_MONTH_LINES = [
-    "🔥 โค้งสุดท้ายปลายเดือน! โปรแรง เคลียร์สต็อก รีบจัดก่อนหมด",
-    "💥 ปลายเดือนโปรเดือด! ราคาพิเศษเฉพาะช่วงนี้",
-]
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) fb-autopost/3.0"
 
-DOUBLE_DAY_LINES = [
-    "🎯 วันเลขเบิ้ล โปรพิเศษ! เก็บคูปอง/ลดเพิ่มได้อีก",
-    "⚡ วันนี้เลขเบิ้ล! ของดีต้องรีบจัด",
-]
 
-def die(msg: str):
-    raise SystemExit(msg)
+# =========================
+# Utilities
+# =========================
+def log(msg: str) -> None:
+    print(msg, flush=True)
 
-def now_th():
-    return datetime.now(tz=tz.gettz("Asia/Bangkok"))
 
-def is_end_month_boost(dt: datetime) -> bool:
-    last_day = calendar.monthrange(dt.year, dt.month)[1]
-    return dt.day >= (last_day - END_MONTH_BOOST_DAYS + 1)
+def must_env(name: str, value: str) -> None:
+    if not value:
+        raise SystemExit(f"ERROR: Missing env: {name}")
 
-def is_double_day(dt: datetime) -> bool:
-    return dt.day == dt.month
 
-def clean_text(s: str) -> str:
-    if not s:
-        return ""
-    s = str(s).strip()
-    s = re.sub(r"\s+", " ", s)
-    return s
-
-def load_state():
+def load_state() -> Dict:
     if not os.path.exists(STATE_FILE):
         return {"posted_keys": []}
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if "posted_keys" not in data or not isinstance(data["posted_keys"], list):
+            data["posted_keys"] = []
+        return data
     except Exception:
         return {"posted_keys": []}
 
-def save_state(state):
+
+def save_state(state: Dict) -> None:
+    # trim
     keys = state.get("posted_keys", [])
     if len(keys) > MAX_STATE_ITEMS:
         state["posted_keys"] = keys[-MAX_STATE_ITEMS:]
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-def fetch_csv_with_retry(url: str) -> list[dict]:
-    print("INFO: Fetching CSV...")
-    last_err = None
 
+def is_end_of_month_boost(now_bkk: datetime.datetime) -> bool:
+    # ถ้าวันนี้อยู่ในช่วงท้ายเดือน N วัน
+    next_day = now_bkk.date() + datetime.timedelta(days=1)
+    # ถ้าวันพรุ่งนี้เป็นเดือนใหม่ แปลว่าวันนี้คือวันสุดท้ายของเดือน
+    last_day = (next_day.month != now_bkk.month)
+    if last_day:
+        return True
+    # หรือถ้าเหลือ <= END_MONTH_BOOST_DAYS ถึงสิ้นเดือน
+    # หา last date ของเดือนนี้
+    first_next_month = (now_bkk.replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
+    last_date = first_next_month.date() - datetime.timedelta(days=1)
+    remaining = (last_date - now_bkk.date()).days
+    return remaining <= END_MONTH_BOOST_DAYS
+
+
+def safe_float(x: str) -> float:
+    try:
+        return float(str(x).replace(",", "").strip())
+    except Exception:
+        return 0.0
+
+
+def safe_int(x: str) -> int:
+    try:
+        return int(float(str(x).replace(",", "").strip()))
+    except Exception:
+        return 0
+
+
+def pick_first(*vals: str) -> str:
+    for v in vals:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ""
+
+
+# =========================
+# CSV Fetch + Normalize
+# =========================
+def fetch_csv_text(url: str) -> str:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/csv,text/plain,*/*",
+    }
+
+    last_err = None
     for attempt in range(1, CSV_RETRIES + 1):
         try:
-            print(f"INFO: CSV fetch attempt {attempt}/{CSV_RETRIES} (timeout={CSV_TIMEOUT}s)")
-            r = requests.get(url, timeout=CSV_TIMEOUT, allow_redirects=True)
+            log(f"INFO: CSV fetch attempt {attempt}/{CSV_RETRIES} (timeout={CSV_TIMEOUT_SEC}s)")
+            r = requests.get(url, headers=headers, timeout=CSV_TIMEOUT_SEC, allow_redirects=True)
             r.raise_for_status()
 
-            content = r.content.decode("utf-8", errors="replace")
-            if content.startswith("\ufeff"):
-                content = content.lstrip("\ufeff")
-
-            # debug small preview
-            preview = content[:300].replace("\n", "\\n")
-            print(f"INFO: CSV preview(300): {preview}")
-
-            f = io.StringIO(content)
-            reader = csv.DictReader(f)
-            rows = []
-            for row in reader:
-                if not row:
-                    continue
-                rows.append({(k.strip() if k else k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()})
-            return rows
-
+            # บางลิงก์ส่งเป็น bytes แปลกๆ ให้เดา encoding
+            r.encoding = r.encoding or "utf-8"
+            text = r.text
+            if not text.strip():
+                raise RuntimeError("Empty CSV response")
+            return text
         except Exception as e:
             last_err = e
-            print(f"WARN: CSV fetch failed: {e}")
-            if attempt < CSV_RETRIES:
-                time.sleep(CSV_RETRY_SLEEP)
+            wait = min(2 ** attempt, 20)
+            log(f"WARN: CSV fetch failed: {e} | retry in {wait}s")
+            time.sleep(wait)
 
-    die(f"ERROR: Fetch CSV failed after {CSV_RETRIES} attempts. Last error: {last_err}")
+    raise SystemExit(f"ERROR: Cannot fetch CSV after {CSV_RETRIES} tries: {last_err}")
 
-def pick_best_url(row: dict) -> str:
-    for k in ["url", "product_link", "link", "product_url", "item_link"]:
-        v = row.get(k)
-        if v and str(v).startswith("http"):
-            return str(v).strip()
-    return ""
 
-def pick_best_name(row: dict) -> str:
-    for k in ["name", "title", "product_name", "item_name"]:
-        v = row.get(k)
-        if v:
-            return clean_text(v)
-    return ""
+def normalize_rows(csv_text: str) -> List[Dict[str, str]]:
+    f = io.StringIO(csv_text)
+    reader = csv.DictReader(f)
+    if not reader.fieldnames:
+        raise SystemExit("ERROR: CSV has no header/fieldnames.")
 
-def pick_image_candidates(row: dict) -> list[str]:
-    candidates = []
-    keys_priority = [
-        "image", "image_url", "image_link",
-        "image_link_1","image_link_2","image_link_3","image_link_4","image_link_5",
-        "image_link_6","image_link_7","image_link_8","image_link_9","image_link_10",
-        "additional_image_link",
-    ]
-    for k in keys_priority:
-        v = row.get(k)
+    # normalize headers: lowercase + strip
+    fieldnames = [fn.strip() for fn in reader.fieldnames]
+    log(f"INFO: CSV columns ({len(fieldnames)}): {fieldnames[:25]}{'...' if len(fieldnames)>25 else ''}")
+
+    rows = []
+    for row in reader:
+        if not row:
+            continue
+        norm = {}
+        for k, v in row.items():
+            if k is None:
+                continue
+            nk = k.strip()
+            norm[nk] = (v or "").strip()
+        rows.append(norm)
+
+    if not rows:
+        raise SystemExit("ERROR: CSV has 0 rows.")
+    return rows
+
+
+def extract_images(row: Dict[str, str]) -> List[str]:
+    # เก็บทุกคอลัมน์ที่ชื่อขึ้นต้นด้วย image_link
+    imgs = []
+    for k, v in row.items():
         if not v:
             continue
-        v = str(v).strip()
-        if v.startswith("http"):
-            candidates.append(v)
+        kk = k.strip().lower()
+        if kk.startswith("image_link"):
+            url = v.strip()
+            if url.startswith("http"):
+                imgs.append(url)
 
-    extra = row.get("additional_image_link")
-    if extra and isinstance(extra, str) and "," in extra:
-        for part in extra.split(","):
-            part = part.strip()
-            if part.startswith("http"):
-                candidates.append(part)
-
+    # กันซ้ำ เรียงตามที่เจอ
     seen = set()
     uniq = []
-    for u in candidates:
-        if u not in seen:
-            uniq.append(u)
-            seen.add(u)
+    for u in imgs:
+        if u in seen:
+            continue
+        seen.add(u)
+        uniq.append(u)
     return uniq
 
-def row_key(row: dict) -> str:
-    for k in ["itemid", "item_id", "model_id", "modelid", "product_id", "url", "product_link"]:
-        v = row.get(k)
-        if v:
-            return f"{k}:{str(v).strip()}"
-    return f"nu:{pick_best_name(row)}|{pick_best_url(row)}"
 
-def build_caption(name: str, url: str) -> str:
-    dt = now_th()
+def normalize_product(row: Dict[str, str]) -> Optional[Dict]:
+    # รองรับหลายฟอร์แมต: name/url อาจไม่มี แต่ Shopee export มักมี title + product_link
+    name = pick_first(row.get("name", ""), row.get("title", ""), row.get("product_name", ""))
+    url = pick_first(row.get("url", ""), row.get("product_link", ""), row.get("link", ""))
+
+    images = extract_images(row)
+
+    # ต้องมีขั้นต่ำ
+    if not name or not url or len(images) < 1:
+        return None
+
+    # ตัวเลขสำหรับทำ weight
+    discount_pct = safe_float(pick_first(row.get("discount_percentage", ""), row.get("discount", "")))
+    sold = safe_int(pick_first(row.get("item_sold", ""), row.get("sold", "")))
+    like = safe_int(pick_first(row.get("like", ""), row.get("likes", "")))
+    shop_rating = safe_float(pick_first(row.get("shop_rating", ""), row.get("rating", "")))
+    price = safe_float(pick_first(row.get("sale_price", ""), row.get("price", "")))
+
+    # คีย์กันซ้ำ
+    itemid = pick_first(row.get("itemid", ""), row.get("item_id", ""))
+    modelid = pick_first(row.get("model_ids", ""), row.get("model_id", ""))
+    dedupe_key = f"{itemid}|{modelid}|{url}".strip("|")
+
+    return {
+        "name": name,
+        "url": url,
+        "images": images,
+        "discount_pct": discount_pct,
+        "sold": sold,
+        "like": like,
+        "shop_rating": shop_rating,
+        "price": price,
+        "dedupe_key": dedupe_key,
+        "raw": row,
+    }
+
+
+def build_catalog(rows: List[Dict[str, str]]) -> List[Dict]:
+    products = []
+    for r in rows:
+        p = normalize_product(r)
+        if p:
+            products.append(p)
+
+    if not products:
+        # โชว์ตัวอย่างเพื่อ debug
+        preview = rows[0] if rows else {}
+        raise SystemExit(
+            "ERROR: No usable rows in CSV. Need: (title/name) + (product_link/url) + at least 1 image_link*. "
+            f"Preview row keys: {list(preview.keys())[:30]}"
+        )
+    return products
+
+
+# =========================
+# Pick product (Weighted + End-month promo)
+# =========================
+def compute_weight(p: Dict, boost_end_month: bool) -> float:
+    # weight base
+    w = 1.0
+
+    # ยอดขาย/ไลก์ช่วยดัน
+    w += min(p["sold"], 5000) / 250.0     # sold 250 = +1
+    w += min(p["like"], 5000) / 500.0     # like 500 = +1
+
+    # เรตติ้งร้าน
+    w += max(0.0, p["shop_rating"] - 4.0) * 2.0  # 4.5 => +1
+
+    # ส่วนลด
+    w += min(p["discount_pct"], 80.0) / 10.0     # 10% => +1
+
+    # สิ้นเดือน: ถ้ามีส่วนลดถึงขั้นต่ำ ให้คูณ
+    if boost_end_month and p["discount_pct"] >= MIN_DISCOUNT_PCT:
+        w *= 2.5
+
+    return max(w, 0.1)
+
+
+def pick_product(products: List[Dict], posted_keys: set, boost_end_month: bool) -> Dict:
+    # กันซ้ำก่อน
+    candidates = [p for p in products if p["dedupe_key"] not in posted_keys]
+    if not candidates:
+        # ถ้าซ้ำหมด ให้ยอมวนใหม่บางส่วน
+        candidates = products[:]
+
+    weights = [compute_weight(p, boost_end_month) for p in candidates]
+    chosen = random.choices(candidates, weights=weights, k=1)[0]
+    return chosen
+
+
+# =========================
+# Caption generator (Thai pro + reach)
+# =========================
+def format_price(p: float) -> str:
+    if p <= 0:
+        return ""
+    # ราคาเป็นเลขกลม ๆ
+    if p >= 100:
+        return f"{int(round(p)):,}"
+    return f"{p:.0f}"
+
+
+def build_caption(p: Dict, boost_end_month: bool) -> str:
+    hook = random.choice(SELLING_HOOKS)
+    cta = random.choice(CTA)
+    urg = random.choice(URGENCY)
+
+    price_txt = format_price(p["price"])
+    discount_txt = f"-{int(p['discount_pct'])}% " if p["discount_pct"] >= 1 else ""
+
+    # เน้นสิ้นเดือน
+    month_tag = ""
+    if boost_end_month:
+        month_tag = "🔥 โหมดสิ้นเดือน: เน้นของโปร/คุ้มสุด!\n"
+
     lines = []
-    lines.append(random.choice(SELLING_HOOKS))
-    if name:
-        lines.append(f"✅ {name}")
+    lines.append(hook)
+    lines.append(month_tag.rstrip())
+    lines.append(f"🛒 {p['name']}")
+    if discount_txt or price_txt:
+        meta = "💸 "
+        if discount_txt:
+            meta += f"{discount_txt}"
+        if price_txt:
+            meta += f"ราคาเริ่มต้น {price_txt} บาท"
+        lines.append(meta.strip())
 
-    lines.append(random.choice(MONTHLY_PROMO_LINES))
-    if is_end_month_boost(dt):
-        lines.append(random.choice(END_MONTH_LINES))
-    if DOUBLE_DAY_BOOST and is_double_day(dt):
-        lines.append(random.choice(DOUBLE_DAY_LINES))
-
-    lines.append(random.choice(CTA_LINES))
+    lines.append("✅ เหมาะกับงานบ้าน/งานช่าง ใช้จริง คุ้มจริง")
+    lines.append(f"📌 {urg}")
+    lines.append(f"{cta} {p['url']}")
     lines.append("")
     lines.append(" ".join(HASHTAGS))
 
-    if (not COMMENT_LINK) and url:
-        lines.append(f"👉 {url}")
-    return "\n".join(lines).strip()
+    # ลบบรรทัดว่างเกิน
+    lines = [x for x in lines if x is not None]
+    caption = "\n".join([x for x in lines if x != ""])
+    return caption.strip()
 
-def graph_post(path: str, data: dict) -> dict:
+
+# =========================
+# Facebook posting (3 images in 1 post)
+# =========================
+def graph_post(path: str, data: Dict, files=None, timeout=60) -> Dict:
     url = f"{GRAPH_BASE}/{path.lstrip('/')}"
-    payload = dict(data)
-    payload["access_token"] = PAGE_ACCESS_TOKEN
-    r = requests.post(url, data=payload, timeout=REQ_TIMEOUT)
-    j = r.json() if r.headers.get("content-type","").startswith("application/json") else {"raw": r.text}
-    if r.status_code >= 400 or ("error" in j):
-        raise RuntimeError(f"Graph API error {r.status_code}: {j}")
-    return j
+    r = requests.post(url, data=data, files=files, timeout=timeout)
+    try:
+        js = r.json()
+    except Exception:
+        raise SystemExit(f"ERROR: Graph non-JSON response: {r.status_code} {r.text[:300]}")
 
-def upload_photo_unpublished(image_url: str) -> str:
-    j = graph_post(f"{PAGE_ID}/photos", {"url": image_url, "published": "false"})
-    return j["id"]
+    if r.status_code >= 400 or ("error" in js):
+        raise SystemExit(f"ERROR: Graph API error: {js}")
 
-def create_feed_post(attached_media_ids: list[str], message: str) -> str:
-    attached_media = [json.dumps({"media_fbid": pid}) for pid in attached_media_ids]
-    j = graph_post(f"{PAGE_ID}/feed", {"message": message, "attached_media": attached_media})
-    return j["id"]
+    return js
 
-def comment_on_post(post_id: str, comment: str):
-    graph_post(f"{post_id}/comments", {"message": comment})
 
+def upload_photo_unpublished(page_id: str, image_url: str, access_token: str) -> str:
+    # published=false เพื่อเอาไป attach_media ทีหลัง
+    data = {
+        "url": image_url,
+        "published": "false",
+        "access_token": access_token,
+    }
+    js = graph_post(f"{page_id}/photos", data=data, timeout=90)
+    # returns {"id": "..."}
+    return js["id"]
+
+
+def create_feed_post_with_media(page_id: str, caption: str, media_fbid_list: List[str], access_token: str) -> str:
+    data = {
+        "message": caption,
+        "access_token": access_token,
+    }
+    # attached_media[0]={"media_fbid":"..."}
+    for i, mid in enumerate(media_fbid_list):
+        data[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid}, ensure_ascii=False)
+
+    js = graph_post(f"{page_id}/feed", data=data, timeout=90)
+    return js["id"]
+
+
+# =========================
+# Main
+# =========================
 def main():
-    if not PAGE_ID:
-        die("ERROR: Missing env: PAGE_ID")
-    if not PAGE_ACCESS_TOKEN:
-        die("ERROR: Missing env: PAGE_ACCESS_TOKEN")
-    if not SHOPEE_CSV_URL:
-        die("ERROR: Missing env: SHOPEE_CSV_URL")
+    must_env("PAGE_ID", PAGE_ID)
+    must_env("PAGE_ACCESS_TOKEN", PAGE_ACCESS_TOKEN)
+    must_env("SHOPEE_CSV_URL", SHOPEE_CSV_URL)
+
+    # เวลาไทย
+    bkk = tz.gettz("Asia/Bangkok")
+    now_bkk = datetime.datetime.now(tz=bkk)
+    boost = is_end_of_month_boost(now_bkk)
+    log(f"INFO: Now (BKK) = {now_bkk.isoformat()}")
+    log(f"INFO: End-month boost = {boost} (END_MONTH_BOOST_DAYS={END_MONTH_BOOST_DAYS})")
+    log(f"INFO: POST_IMAGES_COUNT = {POST_IMAGES_COUNT}")
 
     state = load_state()
-    posted = set(state.get("posted_keys", []))
+    posted_keys = set(state.get("posted_keys", []))
 
-    rows = fetch_csv_with_retry(SHOPEE_CSV_URL)
-    if not rows:
-        die("ERROR: CSV is empty.")
+    # Fetch CSV
+    log("INFO: Fetching CSV...")
+    csv_text = fetch_csv_text(SHOPEE_CSV_URL)
 
-    candidates = []
-    for row in rows:
-        url = pick_best_url(row)
-        name = pick_best_name(row)
-        imgs = pick_image_candidates(row)
-        if not url or not name or not imgs:
-            continue
-        candidates.append({"key": row_key(row), "name": name, "url": url, "images": imgs})
+    rows = normalize_rows(csv_text)
+    catalog = build_catalog(rows)
+    log(f"INFO: Catalog usable products = {len(catalog)}")
 
-    if not candidates:
-        cols = list(rows[0].keys()) if rows else []
-        die(f"ERROR: No usable rows in CSV. Found columns: {cols}")
+    posts_done = 0
+    for n in range(POSTS_PER_RUN):
+        product = pick_product(catalog, posted_keys, boost)
+        images = product["images"][:]
+        random.shuffle(images)
+        images = images[: max(1, POST_IMAGES_COUNT)]
 
-    fresh = [c for c in candidates if c["key"] not in posted]
-    pool = fresh if fresh else candidates
+        caption = build_caption(product, boost)
 
-    product = random.choice(pool)
-    images = product["images"][:]
-    random.shuffle(images)
-    images = images[: max(1, POST_IMAGES_COUNT)]
+        log(f"INFO: Selected: {product['name']}")
+        log(f"INFO: Images: {len(images)}")
+        log("INFO: Uploading photos unpublished...")
 
-    caption = build_caption(product["name"], product["url"])
+        media_ids = []
+        for img_url in images:
+            mid = upload_photo_unpublished(PAGE_ID, img_url, PAGE_ACCESS_TOKEN)
+            media_ids.append(mid)
 
-    print("INFO: Selected product")
-    print(f" - key: {product['key']}")
-    print(f" - name: {product['name']}")
-    print(f" - url: {product['url']}")
-    print(f" - images: {len(images)}")
+        log("INFO: Creating feed post with attached media...")
+        post_id = create_feed_post_with_media(PAGE_ID, caption, media_ids, PAGE_ACCESS_TOKEN)
 
-    if DRY_RUN:
-        print("DRY_RUN=1 -> Not posting.")
-        print("CAPTION:\n" + caption)
-        return
+        # update state
+        posted_keys.add(product["dedupe_key"])
+        state["posted_keys"] = list(posted_keys)
+        save_state(state)
 
-    media_ids = []
-    for i, img_url in enumerate(images, start=1):
-        print(f"INFO: Uploading image {i}/{len(images)}...")
-        pid = upload_photo_unpublished(img_url)
-        media_ids.append(pid)
-        time.sleep(1)
+        posts_done += 1
+        log(f"SUCCESS: Posted {post_id}")
 
-    print("INFO: Creating feed post...")
-    post_id = create_feed_post(media_ids, caption)
-    print(f"INFO: Posted -> {post_id}")
+        # กันรัวเกิน
+        time.sleep(3)
 
-    if COMMENT_LINK and product["url"]:
-        print("INFO: Commenting link for reach...")
-        comment_on_post(post_id, f"👉 ลิงก์สินค้า: {product['url']}")
-        print("INFO: Comment done.")
+    log(f"INFO: Done. posts={posts_done}")
 
-    state.setdefault("posted_keys", [])
-    state["posted_keys"].append(product["key"])
-    save_state(state)
-    print("INFO: state.json updated")
 
 if __name__ == "__main__":
     main()
