@@ -1,365 +1,301 @@
 import os
-import io
-import csv
 import json
 import random
 import time
-from datetime import datetime, timedelta, timezone
-
+import csv
+import io
+import re
+import calendar
+from datetime import datetime
+from dateutil import tz
 import requests
-from dateutil.relativedelta import relativedelta
-
 
 GRAPH_VERSION = "v25.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 STATE_FILE = "state.json"
-DEFAULT_POST_IMAGES_COUNT = 5
+MAX_STATE_ITEMS = 5000
+REQ_TIMEOUT = 60
 
-# ปลายเดือน: กี่วันสุดท้ายให้เน้นโปรแรง
-DEFAULT_END_MONTH_BOOST_DAYS = 3
+# ---- ENV ----
+PAGE_ID = os.getenv("PAGE_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL")
 
-# เวลาไทย
-TZ_TH = timezone(timedelta(hours=7))
+POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
+END_MONTH_BOOST_DAYS = int(os.getenv("END_MONTH_BOOST_DAYS", "5"))
+DOUBLE_DAY_BOOST = os.getenv("DOUBLE_DAY_BOOST", "1") == "1"
+COMMENT_LINK = os.getenv("COMMENT_LINK", "1") == "1"
+DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 
-# แฮชแท็กแนวเพจ BEN Home & Electrical
-HASHTAGS_POOL = [
+HASHTAGS = [
     "#BENHomeElectrical",
     "#ของใช้ในบ้าน",
     "#อุปกรณ์ไฟฟ้า",
     "#เครื่องมือช่าง",
     "#งานช่าง",
-    "#ช่างไฟ",
     "#ซ่อมบ้าน",
-    "#แต่งบ้าน",
     "#ของดีบอกต่อ",
-    "#โปรวันนี้",
-    "#ราคาคุ้ม",
 ]
 
-# Hook/สไตล์การขายหลายแบบ (สุ่ม)
-HOOKS = [
-    "🔧 ของมันต้องมีติดบ้าน!",
-    "⚡ อัปเกรดงานช่างให้ไวขึ้น!",
-    "🏠 ของดีไว้ซ่อมบ้าน ใช้ได้จริง",
-    "🔥 โปรคุ้ม ๆ สำหรับสายช่าง",
-    "💪 งานหนักก็เอาอยู่ ใช้แล้วคุ้ม",
+SELLING_HOOKS = [
+    "🔧 งานช่างต้องมีติดบ้าน! ใช้งานง่าย คุณภาพคุ้มราคา 💯",
+    "⚡ ของมันต้องมี! ช่วยให้บ้านคุณพร้อมใช้งานทุกวัน 🏡",
+    "🛠️ เลือกของดีไว้ก่อน ซ่อม/ติดตั้งได้สบาย ๆ",
+    "🔥 ราคาดี + ใช้จริงคุ้มจริง เหมาะกับสายช่างและเจ้าของบ้าน",
+    "✅ รีวิวดี ส่งไว ใช้งานได้หลากหลาย เหมาะมากสำหรับบ้านคุณ",
 ]
 
-BENEFITS = [
-    "✅ แข็งแรง ทนงาน ใช้ได้นาน",
-    "✅ ใช้ง่าย เหมาะทั้งมือใหม่และช่าง",
-    "✅ คุ้มราคา คุณภาพเกินคุ้ม",
-    "✅ เหมาะกับงานซ่อม/ติดตั้ง/งานช่างทั่วไป",
+CTA_LINES = [
+    "📌 สนใจทักแชทได้เลย เดี๋ยวแนะนำให้ตรงงานครับ",
+    "💬 คอมเมนต์คำว่า ‘สนใจ’ เดี๋ยวส่งลิงก์ให้",
+    "🚚 พร้อมส่ง เช็คโปรก่อนหมดได้เลย",
+    "⭐ กดติดตามเพจไว้ มีของดีมาอัปเดตทุกวัน",
 ]
 
-CTAS = [
-    "👉 กดดูรายละเอียด/ราคาได้ที่ลิงก์",
-    "👉 สนใจเช็คราคาและรีวิวที่ลิงก์นี้",
-    "👉 ดูสินค้าและสั่งซื้อได้เลยที่ลิงก์",
+MONTHLY_PROMO_LINES = [
+    "🎉 โปรประจำเดือน! ของดีราคาพิเศษ รีบเก็บก่อนหมดโปร",
+    "🏷️ ช่วงโปรแรงของเดือนนี้ ลดคุ้ม ๆ ต้องรีบจัด",
+    "🔥 โปรเดือนนี้มาแล้ว! ราคาดีหายาก",
 ]
 
-COMMENT_CTAS = [
-    "ลิงก์สินค้าอยู่ที่นี่ครับ 👇",
-    "กดลิงก์ดูรายละเอียดได้เลย 👇",
-    "เช็คราคา/รีวิวที่ลิงก์นี้ 👇",
+END_MONTH_LINES = [
+    "🔥 โค้งสุดท้ายปลายเดือน! โปรแรง เคลียร์สต็อก รีบจัดก่อนหมด",
+    "💥 ปลายเดือนโปรเดือด! ราคาพิเศษเฉพาะช่วงนี้",
 ]
 
+DOUBLE_DAY_LINES = [
+    "🎯 วันเลขเบิ้ล โปรพิเศษ! เก็บคูปอง/ลดเพิ่มได้อีก",
+    "⚡ วันนี้เลขเบิ้ล! ของดีต้องรีบจัด",
+]
 
-def env(name: str) -> str:
-    v = os.getenv(name)
-    if not v:
-        raise SystemExit(f"ERROR: Missing env: {name}")
-    return v
+def die(msg: str):
+    raise SystemExit(msg)
 
+def now_th():
+    return datetime.now(tz=tz.gettz("Asia/Bangkok"))
 
-def env_int(name: str, default: int) -> int:
-    v = os.getenv(name)
-    if not v:
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
+def is_end_month_boost(dt: datetime) -> bool:
+    last_day = calendar.monthrange(dt.year, dt.month)[1]
+    return dt.day >= (last_day - END_MONTH_BOOST_DAYS + 1)
 
+def is_double_day(dt: datetime) -> bool:
+    return dt.day == dt.month
 
-def load_state() -> dict:
+def clean_text(s: str) -> str:
+    if not s:
+        return ""
+    s = str(s).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"posted_keys": [], "posted_posts": []}
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return {"posted_keys": []}
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"posted_keys": []}
 
-
-def save_state(state: dict) -> None:
+def save_state(state):
+    keys = state.get("posted_keys", [])
+    if len(keys) > MAX_STATE_ITEMS:
+        state["posted_keys"] = keys[-MAX_STATE_ITEMS:]
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-
-def http_with_retry(method, url, *, data=None, params=None, timeout=60, retries=3, sleep=2):
-    last = None
-    for i in range(retries):
-        try:
-            r = requests.request(method, url, data=data, params=params, timeout=timeout)
-            return r
-        except Exception as e:
-            last = e
-            time.sleep(sleep * (i + 1))
-    raise SystemExit(f"ERROR: Network failed after retries: {last}")
-
-
-def fetch_csv(csv_url: str) -> str:
-    r = http_with_retry("GET", csv_url, timeout=60, retries=3)
+def fetch_csv(url: str) -> list[dict]:
+    print("INFO: Fetching CSV...")
+    r = requests.get(url, timeout=REQ_TIMEOUT)
     r.raise_for_status()
-    # รองรับ UTF-8 BOM
-    return r.content.decode("utf-8-sig", errors="replace")
+    content = r.content.decode("utf-8", errors="replace")
+    if content.startswith("\ufeff"):
+        content = content.lstrip("\ufeff")
+    f = io.StringIO(content)
+    reader = csv.DictReader(f)
+    rows = []
+    for row in reader:
+        if not row:
+            continue
+        rows.append({(k.strip() if k else k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()})
+    return rows
 
+def pick_best_url(row: dict) -> str:
+    for k in ["url", "product_link", "link", "product_url", "item_link"]:
+        v = row.get(k)
+        if v and str(v).startswith("http"):
+            return str(v).strip()
+    return ""
 
-def safe_float(x):
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s == "":
-            return None
-        return float(s)
-    except Exception:
-        return None
+def pick_best_name(row: dict) -> str:
+    for k in ["name", "title", "product_name", "item_name"]:
+        v = row.get(k)
+        if v:
+            return clean_text(v)
+    return ""
 
-
-def normalize_row(row: dict) -> dict:
-    # ชื่อสินค้า
-    name = (row.get("title") or row.get("name") or "").strip()
-
-    # ลิงก์สินค้า (จาก Shopee CSV ที่คุณมีจริงคือ product_link)
-    url = (row.get("product_link") or row.get("url") or "").strip()
-
-    # รูป: รองรับ image_link_1..image_link_10 + image_link
-    images = []
-    for k, v in row.items():
+def pick_image_candidates(row: dict) -> list[str]:
+    candidates = []
+    keys_priority = [
+        "image", "image_url", "image_link", "image_link_1","image_link_2","image_link_3",
+        "image_link_4","image_link_5","image_link_6","image_link_7","image_link_8",
+        "image_link_9","image_link_10","additional_image_link",
+    ]
+    for k in keys_priority:
+        v = row.get(k)
         if not v:
             continue
-        if k == "image_link" or k.startswith("image_link_"):
-            images.append(str(v).strip())
+        v = str(v).strip()
+        if v.startswith("http"):
+            candidates.append(v)
 
-    # กันรูปซ้ำ
-    images = list(dict.fromkeys([u for u in images if u]))
+    extra = row.get("additional_image_link")
+    if extra and isinstance(extra, str) and "," in extra:
+        for part in extra.split(","):
+            part = part.strip()
+            if part.startswith("http"):
+                candidates.append(part)
 
-    # โปร/ส่วนลด
-    discount_pct = safe_float(row.get("discount_percentage"))
-    price = safe_float(row.get("price"))
-    sale_price = safe_float(row.get("sale_price"))
+    # unique keep order
+    seen = set()
+    uniq = []
+    for u in candidates:
+        if u not in seen:
+            uniq.append(u)
+            seen.add(u)
+    return uniq
 
-    # ถ้าไม่มี discount_percentage แต่มี price/sale_price ให้คำนวณ
-    if discount_pct is None and price and sale_price and price > 0 and sale_price < price:
-        discount_pct = round((price - sale_price) / price * 100, 2)
+def row_key(row: dict) -> str:
+    for k in ["itemid", "item_id", "model_id", "modelid", "product_id", "url", "product_link"]:
+        v = row.get(k)
+        if v:
+            return f"{k}:{str(v).strip()}"
+    return f"nu:{pick_best_name(row)}|{pick_best_url(row)}"
 
-    # คีย์กันซ้ำ: ใช้ itemid ก่อน ถ้าไม่มีใช้ url+name
-    key = row.get("itemid") or row.get("modelid") or url or name
-
-    return {
-        "key": str(key),
-        "name": name,
-        "url": url,
-        "images": images,
-        "discount_pct": discount_pct,
-        "price": price,
-        "sale_price": sale_price,
-    }
-
-
-def parse_products(csv_text: str) -> list:
-    reader = csv.DictReader(io.StringIO(csv_text))
-    products = []
-    for row in reader:
-        p = normalize_row(row)
-        if p["name"] and p["url"] and p["images"]:
-            products.append(p)
-
-    if not products:
-        raise SystemExit("ERROR: CSV has no usable rows (need title/name + product_link/url + at least 1 image_link).")
-    return products
-
-
-def is_end_of_month(now_th: datetime, boost_days: int) -> bool:
-    # วันสุดท้ายของเดือน
-    first_next_month = (now_th.replace(day=1) + relativedelta(months=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    last_day = first_next_month - timedelta(days=1)
-    return now_th.date() >= (last_day.date() - timedelta(days=boost_days - 1))
-
-
-def pick_product(products: list, state: dict, end_month_boost_days: int) -> dict:
-    now_th = datetime.now(TZ_TH)
-    posted = set(state.get("posted_keys", []))
-
-    # แยก candidate ที่ยังไม่เคยโพสต์
-    fresh = [p for p in products if p["key"] not in posted]
-    if not fresh:
-        # รีเซ็ตกันซ้ำ ถ้าโพสต์ครบแล้ว
-        state["posted_keys"] = []
-        posted = set()
-        fresh = products[:]
-
-    # ช่วงปลายเดือน: เน้นสินค้าลดราคา/โปรแรง
-    if is_end_of_month(now_th, end_month_boost_days):
-        promo = []
-        for p in fresh:
-            dp = p.get("discount_pct")
-            if dp is not None and dp > 0:
-                promo.append(p)
-            elif p.get("price") and p.get("sale_price") and p["sale_price"] < p["price"]:
-                promo.append(p)
-
-        if promo:
-            # จัดอันดับด้วยส่วนลดมากสุด (ถ้าไม่มี discount_pct ใช้ price-sale_price)
-            def promo_score(x):
-                if x.get("discount_pct") is not None:
-                    return x["discount_pct"]
-                if x.get("price") and x.get("sale_price") and x["price"] > 0:
-                    return (x["price"] - x["sale_price"]) / x["price"] * 100
-                return 0
-
-            promo.sort(key=promo_score, reverse=True)
-
-            # เลือกสุ่มจาก Top N เพื่อไม่ให้ซ้ำแนวเดิม
-            top_n = min(30, len(promo))
-            return random.choice(promo[:top_n])
-
-    # วันปกติ: สุ่มจากของใหม่
-    return random.choice(fresh)
-
-
-def build_caption(p: dict) -> str:
-    # สุ่มแฮชแท็กแบบไม่เยอะเกิน (กันโดนมองว่า spam)
-    tags = random.sample(HASHTAGS_POOL, k=min(6, len(HASHTAGS_POOL)))
-
-    # สร้างบรรทัดโปร
-    promo_line = ""
-    if p.get("discount_pct") is not None and p["discount_pct"] > 0:
-        promo_line = f"🔥 โปรลด {p['discount_pct']}% (ช่วงนี้คุ้มมาก!)"
-    elif p.get("price") and p.get("sale_price") and p["sale_price"] < p["price"]:
-        promo_line = "🔥 มีราคาพิเศษช่วงนี้ รีบกดดูเลย!"
-
+def build_caption(name: str, url: str) -> str:
+    dt = now_th()
     lines = []
-    lines.append(random.choice(HOOKS))
+    lines.append(random.choice(SELLING_HOOKS))
+    if name:
+        lines.append(f"✅ {name}")
+
+    lines.append(random.choice(MONTHLY_PROMO_LINES))
+    if is_end_month_boost(dt):
+        lines.append(random.choice(END_MONTH_LINES))
+    if DOUBLE_DAY_BOOST and is_double_day(dt):
+        lines.append(random.choice(DOUBLE_DAY_LINES))
+
+    lines.append(random.choice(CTA_LINES))
     lines.append("")
-    lines.append(f"🛠 {p['name']}")
+    lines.append(" ".join(HASHTAGS))
 
-    if promo_line:
-        lines.append(promo_line)
+    # ถ้าไม่คอมเมนต์ลิงก์ ให้ใส่ในแคปชัน
+    if (not COMMENT_LINK) and url:
+        lines.append(f"👉 {url}")
+    return "\n".join(lines).strip()
 
-    lines.append(random.choice(BENEFITS))
-    lines.append(random.choice(BENEFITS))
-    lines.append("")
-    lines.append(random.choice(CTAS))
-    lines.append(p["url"])
-    lines.append("")
-    lines.append(" ".join(tags))
+def graph_post(path: str, data: dict) -> dict:
+    url = f"{GRAPH_BASE}/{path.lstrip('/')}"
+    payload = dict(data)
+    payload["access_token"] = PAGE_ACCESS_TOKEN
+    r = requests.post(url, data=payload, timeout=REQ_TIMEOUT)
+    try:
+        j = r.json()
+    except Exception:
+        j = {"raw": r.text}
+    if r.status_code >= 400 or ("error" in j):
+        raise RuntimeError(f"Graph API error {r.status_code}: {j}")
+    return j
 
-    return "\n".join(lines)
-
-
-def upload_photo_unpublished(page_id: str, token: str, image_url: str) -> str:
-    endpoint = f"{GRAPH_BASE}/{page_id}/photos"
-    data = {
-        "url": image_url,
-        "published": "false",
-        "access_token": token,
-    }
-    r = http_with_retry("POST", endpoint, data=data, timeout=60, retries=3)
-    j = r.json()
-    if "error" in j:
-        raise SystemExit(f"ERROR upload photo: {j}")
+def upload_photo_unpublished(image_url: str) -> str:
+    j = graph_post(f"{PAGE_ID}/photos", {"url": image_url, "published": "false"})
     return j["id"]
 
+def create_feed_post(attached_media_ids: list[str], message: str) -> str:
+    attached_media = [json.dumps({"media_fbid": pid}) for pid in attached_media_ids]
+    j = graph_post(f"{PAGE_ID}/feed", {"message": message, "attached_media": attached_media})
+    return j["id"]
 
-def create_feed_post_with_media(page_id: str, token: str, photo_ids: list, message: str) -> dict:
-    endpoint = f"{GRAPH_BASE}/{page_id}/feed"
-    attached_media = [{"media_fbid": pid} for pid in photo_ids]
-    data = {
-        "message": message,
-        "attached_media": json.dumps(attached_media),
-        "access_token": token,
-    }
-    r = http_with_retry("POST", endpoint, data=data, timeout=60, retries=3)
-    j = r.json()
-    if "error" in j:
-        raise SystemExit(f"ERROR create post: {j}")
-    return j
-
-
-def comment_link(post_id: str, token: str, url: str) -> dict:
-    endpoint = f"{GRAPH_BASE}/{post_id}/comments"
-    msg = f"{random.choice(COMMENT_CTAS)}\n{url}"
-    data = {
-        "message": msg,
-        "access_token": token,
-    }
-    r = http_with_retry("POST", endpoint, data=data, timeout=60, retries=3)
-    j = r.json()
-    if "error" in j:
-        raise SystemExit(f"ERROR comment: {j}")
-    return j
-
+def comment_on_post(post_id: str, comment: str):
+    graph_post(f"{post_id}/comments", {"message": comment})
 
 def main():
-    page_id = env("PAGE_ID")
-    token = env("PAGE_ACCESS_TOKEN")
-    csv_url = env("SHOPEE_CSV_URL")
-
-    post_images_count = env_int("POST_IMAGES_COUNT", DEFAULT_POST_IMAGES_COUNT)
-    end_month_boost_days = env_int("END_MONTH_BOOST_DAYS", DEFAULT_END_MONTH_BOOST_DAYS)
-
-    print("INFO: Fetching CSV...")
-    csv_text = fetch_csv(csv_url)
-
-    products = parse_products(csv_text)
-    print(f"INFO: Products usable = {len(products)}")
+    if not PAGE_ID:
+        die("ERROR: Missing env: PAGE_ID")
+    if not PAGE_ACCESS_TOKEN:
+        die("ERROR: Missing env: PAGE_ACCESS_TOKEN")
+    if not SHOPEE_CSV_URL:
+        die("ERROR: Missing env: SHOPEE_CSV_URL")
 
     state = load_state()
+    posted = set(state.get("posted_keys", []))
 
-    product = pick_product(products, state, end_month_boost_days)
-    print(f"INFO: Selected = {product['name']}")
+    rows = fetch_csv(SHOPEE_CSV_URL)
+    if not rows:
+        die("ERROR: CSV is empty.")
 
-    caption = build_caption(product)
+    candidates = []
+    for row in rows:
+        url = pick_best_url(row)
+        name = pick_best_name(row)
+        imgs = pick_image_candidates(row)
 
-    # เลือกรูป
-    imgs = product["images"][: max(1, min(10, post_images_count))]
-    print(f"INFO: Using images = {len(imgs)}")
+        if not url or not name or not imgs:
+            continue
 
-    # อัปโหลดรูปแบบ unpublished
-    photo_ids = []
-    for u in imgs:
-        print("INFO: Uploading image...")
-        pid = upload_photo_unpublished(page_id, token, u)
-        photo_ids.append(pid)
+        candidates.append({
+            "key": row_key(row),
+            "name": name,
+            "url": url,
+            "images": imgs,
+        })
+
+    if not candidates:
+        cols = list(rows[0].keys()) if rows else []
+        die(f"ERROR: No usable rows in CSV. Found columns: {cols}")
+
+    fresh = [c for c in candidates if c["key"] not in posted]
+    pool = fresh if fresh else candidates
+
+    product = random.choice(pool)
+    images = product["images"][:]
+    random.shuffle(images)
+    images = images[: max(1, POST_IMAGES_COUNT)]
+
+    caption = build_caption(product["name"], product["url"])
+
+    print("INFO: Selected product")
+    print(f" - key: {product['key']}")
+    print(f" - name: {product['name']}")
+    print(f" - url: {product['url']}")
+    print(f" - images: {len(images)}")
+
+    if DRY_RUN:
+        print("DRY_RUN=1 -> Not posting.")
+        print("CAPTION:\n" + caption)
+        return
+
+    media_ids = []
+    for i, img_url in enumerate(images, start=1):
+        print(f"INFO: Uploading image {i}/{len(images)}...")
+        pid = upload_photo_unpublished(img_url)
+        media_ids.append(pid)
         time.sleep(1)
 
-    # สร้างโพสต์รวมรูป
     print("INFO: Creating feed post...")
-    post = create_feed_post_with_media(page_id, token, photo_ids, caption)
-    print("INFO: Post result:", post)
+    post_id = create_feed_post(media_ids, caption)
+    print(f"INFO: Posted -> {post_id}")
 
-    post_id = post.get("id")  # format: PAGEID_POSTID
-    if post_id:
-        print("INFO: Commenting link...")
-        c = comment_link(post_id, token, product["url"])
-        print("INFO: Comment result:", c)
+    if COMMENT_LINK and product["url"]:
+        print("INFO: Commenting link for reach...")
+        comment_on_post(post_id, f"👉 ลิงก์สินค้า: {product['url']}")
+        print("INFO: Comment done.")
 
-    # บันทึก state กันโพสต์ซ้ำ
     state.setdefault("posted_keys", [])
-    state.setdefault("posted_posts", [])
-
     state["posted_keys"].append(product["key"])
-    if post_id:
-        state["posted_posts"].append(post_id)
-
-    # จำกัดขนาด state ไม่ให้บวม
-    state["posted_keys"] = state["posted_keys"][-5000:]
-    state["posted_posts"] = state["posted_posts"][-5000:]
-
     save_state(state)
-    print("INFO: Done.")
-
+    print("INFO: state.json updated")
 
 if __name__ == "__main__":
-    main()
+    main()   
