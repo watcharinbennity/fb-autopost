@@ -1,14 +1,9 @@
-name: fb-autopost
+name: Facebook Auto Post
 
 on:
   schedule:
-    # 12:15 ไทย = 05:15 UTC
-    - cron: "15 5 * * *"
-
-    # 18:30 ไทย = 11:30 UTC
-    - cron: "30 11 * * *"
-
-  # กดรันเองได้
+    - cron: '0 5 * * *'
+    - cron: '30 11 * * *'
   workflow_dispatch:
 
 jobs:
@@ -16,19 +11,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          node-version: "20"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          pip install requests pandas
 
-      - name: Run Facebook Post
+      - name: Run Facebook Post Script
         env:
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-        run: node post.js
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+        run: |
+          python app.py
