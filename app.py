@@ -4,8 +4,9 @@ import csv
 import json
 import random
 import time
+import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 import requests
 
@@ -22,18 +23,19 @@ SHOPEE_CSV_URL = (os.getenv("SHOPEE_CSV_URL") or "").strip()
 STATE_FILE = "state.json"
 
 POST_SCHEDULE_BKK = os.getenv("POST_SCHEDULE_BKK", "09:00,12:15,15:30,18:30,21:00").strip()
-MAX_CATCHUP_PER_RUN = int(os.getenv("MAX_CATCHUP_PER_RUN", "1"))  # ชดเชยได้กี่สล็อตต่อรัน
+MAX_CATCHUP_PER_RUN = int(os.getenv("MAX_CATCHUP_PER_RUN", "1"))
 POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
 
 STREAM_SCAN_ROWS = int(os.getenv("STREAM_SCAN_ROWS", "30000"))
-PICK_TOP_N = int(os.getenv("PICK_TOP_N", "400"))
+PICK_TOP_N = int(os.getenv("PICK_TOP_N", "500"))
 
 MIN_RATING = float(os.getenv("MIN_RATING", "4.5"))
 MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "20"))
 MIN_IMAGES = int(os.getenv("MIN_IMAGES", "3"))
 
 AUTO_COMMENT = (os.getenv("AUTO_COMMENT", "true").lower() == "true")
-FIRST_RUN_POST_NOW = (os.getenv("FIRST_RUN_POST_NOW", "true").lower() == "true")
+FIRST_RUN_POST_NOW = (os.getenv("FIRST_RUN_POST_NOW", "false").lower() == "true")
+REQUIRE_AFFILIATE_LINK = (os.getenv("REQUIRE_AFFILIATE_LINK", "true").lower() == "true")
 
 # timeouts (connect, read)
 CSV_TIMEOUT = (25, 180)
@@ -50,7 +52,7 @@ if not SHOPEE_CSV_URL:
     raise SystemExit("ERROR: Missing env: SHOPEE_CSV_URL")
 
 # =========================
-# CAPTION ENGINE (หลายสไตล์)
+# BRAND / COPY
 # =========================
 HASHTAGS = [
     "#BENHomeElectrical",
@@ -68,7 +70,7 @@ HOOKS = [
     "🏠 ของใช้ในบ้านที่ควรมี",
     "💪 เครื่องมือดี งานก็ง่าย",
     "🧰 ช่างประจำบ้านควรมี",
-    "✅ คัดของดีสำหรับบ้าน/งานช่าง",
+    "✅ คัดดีลคุ้มสำหรับบ้าน/งานช่าง",
 ]
 
 CTA = [
@@ -82,17 +84,18 @@ BULLETS = [
     "✅ ใช้ได้จริง คุ้มราคา",
     "✅ เหมาะกับบ้าน/งานช่าง",
     "✅ ดูรูป+รายละเอียดครบในลิงก์",
-    "✅ สนใจหลายชิ้น ทักมาให้ช่วยเลือกได้",
+    "✅ ของจำเป็น ใช้บ่อยในบ้าน",
+    "✅ ลดแรงช่วงนี้ รีบเช็คโปร",
 ]
 
 COMMENT_TEMPLATES = [
-    "📌 ลิงก์สั่งซื้อ/ดูโปรล่าสุดอยู่ตรงนี้ครับ 👇\n{link}",
-    "🔥 เช็คโค้ดลด + ราคา ณ ตอนนี้ได้ที่ลิงก์ 👇\n{link}",
-    "✅ ดูรีวิว + รายละเอียดเต็มในลิงก์นี้ครับ 👇\n{link}",
+    "📌 ลิงก์สั่งซื้อ/ดูโปรล่าสุด 👇\n{link}",
+    "🔥 เช็คโค้ดลด + ราคาล่าสุดในลิงก์ 👇\n{link}",
+    "✅ ดูรีวิว + รายละเอียดเต็ม 👇\n{link}",
 ]
 
 # =========================
-# TIME / SCHEDULE (Smart + Catch-up)
+# TIME / SCHEDULE
 # =========================
 def now_bkk() -> datetime:
     return datetime.now(BKK)
@@ -113,10 +116,6 @@ def slot_key(day: datetime, hh: int, mm: int) -> str:
     return f"{day.strftime('%Y-%m-%d')} {hh:02d}:{mm:02d}"
 
 def list_pending_slots(now: datetime, state: dict):
-    """
-    คืนรายการสล็อตของ 'วันนี้' ที่ควรโพสต์แล้ว (now >= slot_time) แต่ยังไม่โพสต์
-    เรียงจากเก่า -> ใหม่ เพื่อชดเชยแบบเป็นลำดับ
-    """
     posted = set(state.get("posted_slots", []))
     pending = []
     for hh, mm in SCHEDULE:
@@ -129,12 +128,12 @@ def list_pending_slots(now: datetime, state: dict):
     return pending
 
 # =========================
-# STATE (รองรับ state เก่า + กันโต)
+# STATE
 # =========================
 def cleanup_state(state: dict, keep_days: int = 10):
     cutoff = (now_bkk() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
     state["posted_slots"] = [s for s in state.get("posted_slots", []) if len(s) >= 10 and s[:10] >= cutoff][-5000:]
-    state["used_urls"] = state.get("used_urls", [])[-8000:]
+    state["used_urls"] = state.get("used_urls", [])[-12000:]
 
 def load_state() -> dict:
     if not os.path.exists(STATE_FILE):
@@ -148,7 +147,6 @@ def load_state() -> dict:
     except Exception:
         st = {}
 
-    # รองรับ key เก่า
     if "used_urls" not in st:
         if isinstance(st.get("used"), list):
             st["used_urls"] = st["used"]
@@ -156,6 +154,7 @@ def load_state() -> dict:
             st["used_urls"] = st["used_ids"]
         else:
             st["used_urls"] = []
+
     if "posted_slots" not in st or not isinstance(st["posted_slots"], list):
         st["posted_slots"] = []
 
@@ -171,7 +170,40 @@ def save_state(state: dict):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 # =========================
-# CSV STREAM (ทน + รองรับ delimiter)
+# AFFILIATE LINK DETECTOR (V15 핵심)
+# =========================
+AFF_SHORT_HOSTS = {"s.shopee.co.th", "shope.ee"}
+
+def is_affiliate_link(url: str) -> bool:
+    """
+    ตรวจแบบปลอดภัย: ถ้าลิงก์เป็น short link (s.shopee.co.th / shope.ee) = น่าจะเป็น affiliate
+    หรือมีพารามิเตอร์ tracking ที่เจอบ่อย เช่น smtt, af_siteid, af_click, uic, pid ฯลฯ
+    """
+    try:
+        u = url.strip()
+        if not u:
+            return False
+        p = urlparse(u)
+        host = (p.netloc or "").lower()
+        if host in AFF_SHORT_HOSTS:
+            return True
+
+        q = parse_qs(p.query)
+        keys = set(k.lower() for k in q.keys())
+        tracking_keys = {
+            "smtt", "af_siteid", "af_click_lookback", "af_reengagement_window",
+            "pid", "utm_source", "utm_medium", "utm_campaign"
+        }
+        if keys.intersection(tracking_keys):
+            return True
+
+        # บางทีอยู่ใน path แบบ /product/... ไม่พอ -> ยังไม่การันตีว่า affiliate
+        return False
+    except Exception:
+        return False
+
+# =========================
+# CSV STREAM
 # =========================
 def detect_delimiter(sample: str) -> str:
     for d in [",", "\t", ";", "|"]:
@@ -219,7 +251,6 @@ def normalize_row(row: dict) -> dict:
     price = to_float(row.get("price") or row.get("original_price") or row.get("ori_price"))
     rating = to_float(row.get("item_rating") or row.get("rating") or row.get("product_rating"))
     sold = to_int(row.get("item_sold") or row.get("sold") or row.get("historical_sold"))
-
     discount_pct = to_float(row.get("discount_percentage") or row.get("discount_percent") or row.get("discount"))
     if discount_pct is None and price and sale_price and price > 0 and sale_price <= price:
         discount_pct = round((price - sale_price) / price * 100, 0)
@@ -240,7 +271,7 @@ def normalize_row(row: dict) -> dict:
 
 def stream_candidates(max_rows: int) -> list[dict]:
     print("INFO: Streaming Shopee CSV...")
-    r = requests.get(SHOPEE_CSV_URL, stream=True, timeout=CSV_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
+    r = requests.get(SHOPEE_CSV_URL, stream=True, timeout=(25, 180), headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
 
     raw = b""
@@ -255,13 +286,15 @@ def stream_candidates(max_rows: int) -> list[dict]:
     delim = detect_delimiter(sample_text[:2000])
     print(f"INFO: delimiter='{delim}' sample_bytes={len(raw)} content-type={r.headers.get('content-type','')}")
 
-    r2 = requests.get(SHOPEE_CSV_URL, stream=True, timeout=CSV_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
+    r2 = requests.get(SHOPEE_CSV_URL, stream=True, timeout=(25, 180), headers={"User-Agent": "Mozilla/5.0"})
     r2.raise_for_status()
     text_stream = io.TextIOWrapper(r2.raw, encoding="utf-8-sig", errors="replace", newline="")
     reader = csv.DictReader(text_stream, delimiter=delim)
 
     goods = []
     scanned = 0
+    affiliate_ok = 0
+
     for row in reader:
         scanned += 1
         p = normalize_row(row)
@@ -270,6 +303,13 @@ def stream_candidates(max_rows: int) -> list[dict]:
             continue
         if len(p["images"]) < MIN_IMAGES:
             continue
+
+        # V15: ต้องเป็นลิงก์นายหน้าเท่านั้น
+        aff = is_affiliate_link(p["url"])
+        if REQUIRE_AFFILIATE_LINK and not aff:
+            continue
+        if aff:
+            affiliate_ok += 1
 
         rating = p["rating"] if p["rating"] is not None else 0.0
         disc = p["discount_pct"] if p["discount_pct"] is not None else 0.0
@@ -283,31 +323,43 @@ def stream_candidates(max_rows: int) -> list[dict]:
         if scanned >= max_rows:
             break
 
-    print(f"INFO: scanned={scanned} qualified={len(goods)}")
+    print(f"INFO: scanned={scanned} affiliate_seen={affiliate_ok} qualified={len(goods)}")
     if not goods:
         cols = reader.fieldnames or []
         raise SystemExit(
-            "ERROR: No qualified products. ลองลด MIN_RATING / MIN_DISCOUNT_PCT หรือเช็คคอลัมน์ใน CSV\n"
+            "ERROR: No qualified products. อาจเกิดจากลิงก์ใน CSV ไม่ใช่ Affiliate หรือเงื่อนไขคัดเข้มเกินไป\n"
+            f"TIP: ลองตั้ง REQUIRE_AFFILIATE_LINK=false หรือ ลด MIN_RATING/MIN_DISCOUNT_PCT\n"
             f"DEBUG columns={cols[:80]}"
         )
     return goods
 
 # =========================
-# RANK / PICK (ขายจริง)
+# MONEY SCORING (V15 ทำเงิน)
 # =========================
-def score_product(p: dict) -> float:
+def score_money(p: dict) -> float:
+    """
+    โฟกัส “ทำเงิน”:
+    - ส่วนลดสูง (ดึงคนคลิก)
+    - เรตติ้งสูง (ปิดการขายง่าย)
+    - ยอดขายสูง (ของฮิต)
+    - ราคาสูงพอ (คอมมักสูงขึ้นถ้า % เท่ากัน) แต่ไม่ให้ครอบมาก
+    """
     disc = p["discount_pct"] or 0.0
     rating = p["rating"] or 0.0
     sold = p["sold"] or 0
-    # เน้น: ลดแรง + เรตติ้ง + ยอดขาย
-    return (disc * 2.0) + (rating * 10.0) + (min(sold, 5000) / 400.0) + random.random()
+    price_now = p["sale_price"] or 0.0
+
+    price_term = min(price_now, 3000.0) / 300.0  # เพดานกันดันของแพงเว่อร์
+    sold_term = min(sold, 8000) / 400.0
+
+    return (disc * 2.2) + (rating * 11.0) + sold_term + price_term + random.random()
 
 def pick_product(cands: list[dict], state: dict) -> dict:
     used = set(state.get("used_urls", []))
     fresh = [p for p in cands if p["url"] not in used]
     pool = fresh if fresh else cands
 
-    ranked = sorted(pool, key=score_product, reverse=True)
+    ranked = sorted(pool, key=score_money, reverse=True)
     top = ranked[: min(PICK_TOP_N, len(ranked))]
     chosen = random.choice(top)
 
@@ -315,7 +367,7 @@ def pick_product(cands: list[dict], state: dict) -> dict:
     return chosen
 
 # =========================
-# CAPTION (ราคา/เรตติ้ง/ส่วนลด + ไม่ดูบอท)
+# CAPTION
 # =========================
 def fmt_money(x):
     if x is None:
@@ -335,8 +387,6 @@ def build_caption(p: dict) -> str:
     hook = random.choice(HOOKS)
     cta = random.choice(CTA)
     tags = " ".join(HASHTAGS)
-
-    # สุ่ม bullet 2-3 บรรทัดกันซ้ำ
     bullets = random.sample(BULLETS, k=random.choice([2, 3]))
 
     price_now = fmt_money(p.get("sale_price"))
@@ -367,22 +417,17 @@ def build_caption(p: dict) -> str:
     lines.append("")
     lines.extend(bullets)
 
-    lines.extend([
-        "",
-        cta,
-        f"👉 {p['url']}",
-    ])
+    lines.extend(["", cta, f"👉 {p['url']}"])
 
     domain = short_domain(p["url"])
     if domain:
         lines.append(f"🔎 แหล่งซื้อ: {domain}")
 
     lines.extend(["", tags])
-    out = "\n".join(lines).strip()
-    return out[:1800]
+    return "\n".join(lines).strip()[:1800]
 
 # =========================
-# GRAPH API (upload 3 photos + create post + auto comment)
+# GRAPH API
 # =========================
 def graph_post(path: str, data=None, files=None) -> dict:
     url = f"{GRAPH_BASE}{path}"
@@ -413,9 +458,9 @@ def create_feed_post_with_media(message: str, media_fbids: list[str]) -> str:
     for i, mid in enumerate(media_fbids):
         data[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid})
     js = graph_post(f"/{PAGE_ID}/feed", data=data)
-    return js["id"]  # feed post id
+    return js["id"]
 
-def create_comment_on_post(post_id: str, message: str) -> str:
+def create_comment(post_id: str, message: str) -> str:
     js = graph_post(f"/{post_id}/comments", data={"message": message})
     return js.get("id", "")
 
@@ -431,58 +476,53 @@ def post_product(p: dict) -> str:
         time.sleep(1)
 
     post_id = create_feed_post_with_media(caption, media_ids)
-    print("INFO: Created post_id =", post_id)
 
     if AUTO_COMMENT:
         comment = random.choice(COMMENT_TEMPLATES).format(link=p["url"])
         try:
-            cid = create_comment_on_post(post_id, comment)
-            print("INFO: Commented id =", cid)
+            cid = create_comment(post_id, comment)
+            print("INFO: comment_id =", cid)
         except Exception as e:
-            print("WARN: Comment failed:", str(e))
+            print("WARN: comment failed:", str(e))
 
     return post_id
 
 # =========================
-# MAIN (V14: catch-up missed slots)
+# MAIN
 # =========================
 def main():
     now = now_bkk()
-    print("V14 AUTO SALES ENGINE")
+    print("V15 AUTO MONEY ENGINE (Stable)")
     print("Graph =", GRAPH_VERSION)
     print("Now(BKK) =", now.strftime("%Y-%m-%d %H:%M:%S"))
     print("Schedule =", POST_SCHEDULE_BKK)
-    print("Catchup/run =", MAX_CATCHUP_PER_RUN)
+    print("Require Affiliate Link =", REQUIRE_AFFILIATE_LINK)
 
     state = load_state()
 
-    # โพสต์แรกทันที (ครั้งเดียว) เพื่อทดสอบ/เริ่มระบบ
     if FIRST_RUN_POST_NOW and not state.get("first_run_done", False):
         print("INFO: First run -> post now (one time).")
         cands = stream_candidates(max_rows=STREAM_SCAN_ROWS)
         p = pick_product(cands, state)
         post_id = post_product(p)
         state["first_run_done"] = True
-        # ยังไม่ต้อง mark posted_slots ใน first run (เพราะไม่ได้ผูกกับเวลา)
         save_state(state)
-        print("DONE: first run post =", post_id)
+        print("DONE first run:", post_id)
         return
 
     pending = list_pending_slots(now, state)
     if not pending:
-        print("SKIP: No pending slot (ยังไม่ถึงเวลาถัดไป หรือโพสต์ครบแล้ว)")
+        print("SKIP: No pending slot")
         save_state(state)
         return
 
-    # ชดเชยตามลำดับเก่า -> ใหม่ แต่จำกัดจำนวนต่อรัน
-    to_do = pending[:max(1, MAX_CATCHUP_PER_RUN)]
-    print("PENDING slots =", pending)
-    print("WILL DO slots =", to_do)
+    todo = pending[: max(1, MAX_CATCHUP_PER_RUN)]
+    print("PENDING =", pending)
+    print("WILL DO =", todo)
 
-    # โหลด + คัดของดีครั้งเดียว แล้วโพสต์หลายสล็อตได้ (ประหยัดเวลา)
     cands = stream_candidates(max_rows=STREAM_SCAN_ROWS)
 
-    for slot in to_do:
+    for slot in todo:
         p = pick_product(cands, state)
         print(f"POST FOR SLOT {slot} -> {p['name'][:90]} | rating={p.get('rating')} disc={p.get('discount_pct')}")
         post_id = post_product(p)
@@ -490,6 +530,7 @@ def main():
         state.setdefault("posted_slots", []).append(slot)
         time.sleep(6)
 
+    state["first_run_done"] = True
     save_state(state)
     print("DONE.")
 
