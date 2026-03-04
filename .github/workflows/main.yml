@@ -2,64 +2,33 @@ name: fb-autopost
 
 on:
   schedule:
-    # ไทย 12:00 (UTC+7) = UTC 05:00
-    - cron: "0 5 * * *"
-    # ไทย 18:30 (UTC+7) = UTC 11:30
-    - cron: "30 11 * * *"
-  workflow_dispatch:
+    # 12:15 ไทย = 05:15 UTC
+    - cron: "15 5 * * *"
 
-# กันรันซ้อนแล้วโดน cancel กันเอง
-concurrency:
-  group: fb-autopost
-  cancel-in-progress: false
+    # 18:30 ไทย = 11:30 UTC
+    - cron: "30 11 * * *"
+
+  # กดรันเองได้
+  workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
+          node-version: "20"
 
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install dependencies
+        run: npm install
 
-      - name: Run autopost
+      - name: Run Facebook Post
         env:
-          PAGE_ID: ${{ secrets.PAGE_ID }}
-          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          TZ: Asia/Bangkok
-
-          POSTS_PER_RUN: "1"
-          TOP_POOL: "120"
-          REPOST_AFTER_DAYS: "14"
-
-          BRAND: "BEN Home & Electrical"
-          CAPTION_STYLE: "short"
-          HASHTAGS: "#BENHomeAndElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ดีลดี #Shopee"
-
-          # คีย์เวิร์ดที่ “อนุญาต”
-          ALLOW_KEYWORDS: "ปลั๊ก|ปลั๊กพ่วง|ปลั๊กไฟ|สายไฟ|หลอดไฟ|โคมไฟ|ไฟเพดาน|ไฟติดผนัง|สวิตช์|เบรกเกอร์|ตู้ไฟ|อะแดปเตอร์|หัวชาร์จ|สายชาร์จ|USB|พัดลม|เครื่องมือ|สว่าน|ไขควง|คีม|เทปพันสาย|รางปลั๊ก|ไฟฉาย|แบต|ถ่าน|ชั้นวาง|กล่อง|จัดเก็บ|ครัว|ทำความสะอาด|ไม้ถู|ฟองน้ำ|น้ำยาล้างจาน|ถุงขยะ|ซิลิโคน"
-
-          # คีย์เวิร์ดที่ “ต้องบล็อก”
-          BLOCK_KEYWORDS: "แชมพู|ครีม|อาหารเสริม|บุหรี่ไฟฟ้า|ยา|การพนัน|เซ็กซ์|18\\+"
-
-        run: |
-          python -u app.py
-
-      - name: Commit updated state.json
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state.json || true
-          git diff --cached --quiet || git commit -m "Update state" && git push || true
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+        run: node post.js
