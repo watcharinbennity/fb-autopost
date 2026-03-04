@@ -2,12 +2,11 @@ name: Auto Post
 
 on:
   schedule:
-    # เวลาไทย (BKK, UTC+7)
+    # เวลาไทย (UTC+7) 12:15 และ 18:30
     # 12:15 BKK = 05:15 UTC
-    - cron: "15 5 * * *"
     # 18:30 BKK = 11:30 UTC
+    - cron: "15 5 * * *"
     - cron: "30 11 * * *"
-
   workflow_dispatch:
     inputs:
       posts:
@@ -15,14 +14,15 @@ on:
         required: false
         default: "1"
 
+# ถ้ามีส่วนนี้อยู่ ให้ใช้แบบนี้ (อย่า cancel งานที่กำลังรัน)
 concurrency:
-  group: autopost
+  group: fb-autopost
   cancel-in-progress: false
 
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25   # ✅ สำคัญ: กันโดนตัดที่ ~6 นาที
 
     steps:
       - name: Checkout
@@ -41,22 +41,8 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          POSTS: ${{ github.event.inputs.posts || '1' }}
-
-          # ปรับได้
+          POSTS_THIS_RUN: ${{ github.event.inputs.posts || '1' }}
+          GRAPH_VERSION: "v25.0"
           POST_IMAGES_COUNT: "3"
           END_MONTH_BOOST_DAYS: "3"
-          GRAPH_VERSION: "25.0"
         run: python -u app.py
-
-      - name: Commit state.json back to repo
-        run: |
-          if [ -f state.json ]; then
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add state.json
-            git commit -m "Update state.json" || echo "No changes"
-            git push || echo "No push"
-          else
-            echo "state.json not found, skip"
-          fi
