@@ -4,16 +4,15 @@ import csv
 import json
 import random
 import time
-import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
 
 # =========================
-# CONFIG / ENV
+# ENV / CONFIG
 # =========================
-GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0")  # ✅ ตามที่คุณย้ำ
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0").strip()
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 PAGE_ID = (os.getenv("PAGE_ID") or "").strip()
@@ -23,8 +22,8 @@ SHOPEE_CSV_URL = (os.getenv("SHOPEE_CSV_URL") or "").strip()
 STATE_FILE = "state.json"
 
 POST_SCHEDULE_BKK = os.getenv("POST_SCHEDULE_BKK", "09:00,12:15,15:30,18:30,21:00").strip()
+MAX_CATCHUP_PER_RUN = int(os.getenv("MAX_CATCHUP_PER_RUN", "1"))  # ชดเชยได้กี่สล็อตต่อรัน
 POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
-POSTS_THIS_RUN = int(os.getenv("POSTS_THIS_RUN", "1"))
 
 STREAM_SCAN_ROWS = int(os.getenv("STREAM_SCAN_ROWS", "30000"))
 PICK_TOP_N = int(os.getenv("PICK_TOP_N", "400"))
@@ -33,14 +32,16 @@ MIN_RATING = float(os.getenv("MIN_RATING", "4.5"))
 MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "20"))
 MIN_IMAGES = int(os.getenv("MIN_IMAGES", "3"))
 
-# timeouts
+AUTO_COMMENT = (os.getenv("AUTO_COMMENT", "true").lower() == "true")
+FIRST_RUN_POST_NOW = (os.getenv("FIRST_RUN_POST_NOW", "true").lower() == "true")
+
+# timeouts (connect, read)
 CSV_TIMEOUT = (25, 180)
 IMG_TIMEOUT = (25, 180)
 GRAPH_TIMEOUT = (25, 180)
 
-# =========================
-# VALIDATE
-# =========================
+BKK = timezone(timedelta(hours=7))
+
 if not PAGE_ID:
     raise SystemExit("ERROR: Missing env: PAGE_ID")
 if not PAGE_ACCESS_TOKEN:
@@ -49,7 +50,7 @@ if not SHOPEE_CSV_URL:
     raise SystemExit("ERROR: Missing env: SHOPEE_CSV_URL")
 
 # =========================
-# COPY (BEN Home & Electrical)
+# CAPTION ENGINE (หลายสไตล์)
 # =========================
 HASHTAGS = [
     "#BENHomeElectrical",
@@ -67,6 +68,7 @@ HOOKS = [
     "🏠 ของใช้ในบ้านที่ควรมี",
     "💪 เครื่องมือดี งานก็ง่าย",
     "🧰 ช่างประจำบ้านควรมี",
+    "✅ คัดของดีสำหรับบ้าน/งานช่าง",
 ]
 
 CTA = [
@@ -76,17 +78,28 @@ CTA = [
     "👉 กดสั่งซื้อได้จากลิงก์นี้",
 ]
 
-# =========================
-# TIME (BKK)
-# =========================
-BKK = timezone(timedelta(hours=7))
+BULLETS = [
+    "✅ ใช้ได้จริง คุ้มราคา",
+    "✅ เหมาะกับบ้าน/งานช่าง",
+    "✅ ดูรูป+รายละเอียดครบในลิงก์",
+    "✅ สนใจหลายชิ้น ทักมาให้ช่วยเลือกได้",
+]
 
+COMMENT_TEMPLATES = [
+    "📌 ลิงก์สั่งซื้อ/ดูโปรล่าสุดอยู่ตรงนี้ครับ 👇\n{link}",
+    "🔥 เช็คโค้ดลด + ราคา ณ ตอนนี้ได้ที่ลิงก์ 👇\n{link}",
+    "✅ ดูรีวิว + รายละเอียดเต็มในลิงก์นี้ครับ 👇\n{link}",
+]
+
+# =========================
+# TIME / SCHEDULE (Smart + Catch-up)
+# =========================
 def now_bkk() -> datetime:
     return datetime.now(BKK)
 
-def parse_schedule(schedule_str: str):
+def parse_schedule(s: str):
     out = []
-    for t in schedule_str.split(","):
+    for t in s.split(","):
         t = t.strip()
         if not t:
             continue
@@ -96,48 +109,37 @@ def parse_schedule(schedule_str: str):
 
 SCHEDULE = parse_schedule(POST_SCHEDULE_BKK)
 
-def slot_key(date_dt: datetime, hh: int, mm: int) -> str:
-    d = date_dt.strftime("%Y-%m-%d")
-    return f"{d} {hh:02d}:{mm:02d}"
+def slot_key(day: datetime, hh: int, mm: int) -> str:
+    return f"{day.strftime('%Y-%m-%d')} {hh:02d}:{mm:02d}"
 
-def find_pending_slot(now: datetime, state: dict) -> str | None:
+def list_pending_slots(now: datetime, state: dict):
     """
-    V11 Smart:
-    - ถ้าพลาดเวลา (เลยมาแล้ว) แต่ยังไม่โพสต์ slot นั้น -> โพสต์ชดเชยทันที
-    - เลือก "slot ที่เก่าที่สุดของวันนี้" ที่ now >= slot_time และยังไม่โพสต์
+    คืนรายการสล็อตของ 'วันนี้' ที่ควรโพสต์แล้ว (now >= slot_time) แต่ยังไม่โพสต์
+    เรียงจากเก่า -> ใหม่ เพื่อชดเชยแบบเป็นลำดับ
     """
     posted = set(state.get("posted_slots", []))
+    pending = []
     for hh, mm in SCHEDULE:
         key = slot_key(now, hh, mm)
         if key in posted:
             continue
         slot_time = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
         if now >= slot_time:
-            return key
-    return None
+            pending.append(key)
+    return pending
 
+# =========================
+# STATE (รองรับ state เก่า + กันโต)
+# =========================
 def cleanup_state(state: dict, keep_days: int = 10):
-    """
-    เก็บ posted_slots แค่ไม่กี่วัน เพื่อไม่ให้ state โต
-    """
     cutoff = (now_bkk() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
-    new_slots = []
-    for s in state.get("posted_slots", []):
-        # s = "YYYY-MM-DD HH:MM"
-        if len(s) >= 10 and s[:10] >= cutoff:
-            new_slots.append(s)
-    state["posted_slots"] = new_slots[-5000:]
+    state["posted_slots"] = [s for s in state.get("posted_slots", []) if len(s) >= 10 and s[:10] >= cutoff][-5000:]
+    state["used_urls"] = state.get("used_urls", [])[-8000:]
 
-    used_urls = state.get("used_urls", [])
-    if len(used_urls) > 8000:
-        state["used_urls"] = used_urls[-8000:]
-
-# =========================
-# STATE
-# =========================
 def load_state() -> dict:
     if not os.path.exists(STATE_FILE):
-        return {"posted_slots": [], "used_urls": []}
+        return {"posted_slots": [], "used_urls": [], "first_run_done": False}
+
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             st = json.load(f)
@@ -146,17 +148,19 @@ def load_state() -> dict:
     except Exception:
         st = {}
 
-    # รองรับ state เก่า
+    # รองรับ key เก่า
     if "used_urls" not in st:
-        if "used" in st and isinstance(st["used"], list):
+        if isinstance(st.get("used"), list):
             st["used_urls"] = st["used"]
-        elif "used_ids" in st and isinstance(st["used_ids"], list):
+        elif isinstance(st.get("used_ids"), list):
             st["used_urls"] = st["used_ids"]
         else:
             st["used_urls"] = []
-
     if "posted_slots" not in st or not isinstance(st["posted_slots"], list):
         st["posted_slots"] = []
+
+    if "first_run_done" not in st:
+        st["first_run_done"] = False
 
     cleanup_state(st)
     return st
@@ -167,7 +171,7 @@ def save_state(state: dict):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 # =========================
-# HELPERS
+# CSV STREAM (ทน + รองรับ delimiter)
 # =========================
 def detect_delimiter(sample: str) -> str:
     for d in [",", "\t", ";", "|"]:
@@ -179,10 +183,9 @@ def to_float(x):
     try:
         if x is None:
             return None
-        s = str(x).strip()
+        s = str(x).strip().replace(",", "")
         if not s:
             return None
-        s = s.replace(",", "")
         return float(s)
     except Exception:
         return None
@@ -191,28 +194,14 @@ def to_int(x):
     try:
         if x is None:
             return None
-        s = str(x).strip()
+        s = str(x).strip().replace(",", "")
         if not s:
             return None
-        s = s.replace(",", "")
         return int(float(s))
     except Exception:
         return None
 
-def short_domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc
-    except Exception:
-        return ""
-
 def normalize_row(row: dict) -> dict:
-    """
-    รองรับคอลัมน์ Shopee หลายแบบ:
-    name/title/product_name
-    url/product_link/link
-    image_link or image_link_1..10
-    price/sale_price/discount_percentage/rating/sold
-    """
     name = (row.get("name") or row.get("title") or row.get("product_name") or row.get("item_name") or "").strip()
     url = (row.get("product_link") or row.get("url") or row.get("link") or row.get("affiliate_link") or "").strip()
 
@@ -224,8 +213,6 @@ def normalize_row(row: dict) -> dict:
     v0 = (row.get("image_link") or row.get("image") or "").strip()
     if v0:
         imgs.append(v0)
-
-    # unique
     images = list(dict.fromkeys([u for u in imgs if u]))
 
     sale_price = to_float(row.get("sale_price") or row.get("final_price") or row.get("saleprice"))
@@ -236,7 +223,6 @@ def normalize_row(row: dict) -> dict:
     discount_pct = to_float(row.get("discount_percentage") or row.get("discount_percent") or row.get("discount"))
     if discount_pct is None and price and sale_price and price > 0 and sale_price <= price:
         discount_pct = round((price - sale_price) / price * 100, 0)
-
     if sale_price is None and price is not None:
         sale_price = price
 
@@ -252,15 +238,11 @@ def normalize_row(row: dict) -> dict:
         "raw": row,
     }
 
-# =========================
-# CSV STREAM (ไม่โหลดทั้งไฟล์)
-# =========================
 def stream_candidates(max_rows: int) -> list[dict]:
     print("INFO: Streaming Shopee CSV...")
     r = requests.get(SHOPEE_CSV_URL, stream=True, timeout=CSV_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
 
-    # sample สำหรับเดา delimiter
     raw = b""
     for chunk in r.iter_content(chunk_size=65536):
         if not chunk:
@@ -273,7 +255,6 @@ def stream_candidates(max_rows: int) -> list[dict]:
     delim = detect_delimiter(sample_text[:2000])
     print(f"INFO: delimiter='{delim}' sample_bytes={len(raw)} content-type={r.headers.get('content-type','')}")
 
-    # ขอใหม่เพื่ออ่านจริง (stream)
     r2 = requests.get(SHOPEE_CSV_URL, stream=True, timeout=CSV_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
     r2.raise_for_status()
     text_stream = io.TextIOWrapper(r2.raw, encoding="utf-8-sig", errors="replace", newline="")
@@ -290,7 +271,6 @@ def stream_candidates(max_rows: int) -> list[dict]:
         if len(p["images"]) < MIN_IMAGES:
             continue
 
-        # คัดของดี: rating/discount
         rating = p["rating"] if p["rating"] is not None else 0.0
         disc = p["discount_pct"] if p["discount_pct"] is not None else 0.0
 
@@ -300,7 +280,6 @@ def stream_candidates(max_rows: int) -> list[dict]:
             continue
 
         goods.append(p)
-
         if scanned >= max_rows:
             break
 
@@ -308,21 +287,20 @@ def stream_candidates(max_rows: int) -> list[dict]:
     if not goods:
         cols = reader.fieldnames or []
         raise SystemExit(
-            "ERROR: No qualified products. ลดเงื่อนไข MIN_RATING / MIN_DISCOUNT_PCT / MIN_IMAGES หรือเช็คคอลัมน์ใน CSV\n"
+            "ERROR: No qualified products. ลองลด MIN_RATING / MIN_DISCOUNT_PCT หรือเช็คคอลัมน์ใน CSV\n"
             f"DEBUG columns={cols[:80]}"
         )
     return goods
 
 # =========================
-# RANK + PICK
+# RANK / PICK (ขายจริง)
 # =========================
 def score_product(p: dict) -> float:
-    # ให้คะแนน: ส่วนลด + เรตติ้ง + ยอดขาย
     disc = p["discount_pct"] or 0.0
     rating = p["rating"] or 0.0
     sold = p["sold"] or 0
-
-    return (disc * 2.0) + (rating * 10.0) + (min(sold, 5000) / 500.0) + random.random()
+    # เน้น: ลดแรง + เรตติ้ง + ยอดขาย
+    return (disc * 2.0) + (rating * 10.0) + (min(sold, 5000) / 400.0) + random.random()
 
 def pick_product(cands: list[dict], state: dict) -> dict:
     used = set(state.get("used_urls", []))
@@ -337,7 +315,7 @@ def pick_product(cands: list[dict], state: dict) -> dict:
     return chosen
 
 # =========================
-# CAPTION (ราคา/เรตติ้ง/ส่วนลด)
+# CAPTION (ราคา/เรตติ้ง/ส่วนลด + ไม่ดูบอท)
 # =========================
 def fmt_money(x):
     if x is None:
@@ -347,10 +325,19 @@ def fmt_money(x):
     except Exception:
         return None
 
+def short_domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc
+    except Exception:
+        return ""
+
 def build_caption(p: dict) -> str:
     hook = random.choice(HOOKS)
     cta = random.choice(CTA)
     tags = " ".join(HASHTAGS)
+
+    # สุ่ม bullet 2-3 บรรทัดกันซ้ำ
+    bullets = random.sample(BULLETS, k=random.choice([2, 3]))
 
     price_now = fmt_money(p.get("sale_price"))
     price_old = fmt_money(p.get("price"))
@@ -377,22 +364,25 @@ def build_caption(p: dict) -> str:
         else:
             lines.append(f"💰 ราคา {price_now} บาท")
 
-    lines += [
+    lines.append("")
+    lines.extend(bullets)
+
+    lines.extend([
         "",
-        f"{cta}",
+        cta,
         f"👉 {p['url']}",
-    ]
+    ])
 
     domain = short_domain(p["url"])
     if domain:
         lines.append(f"🔎 แหล่งซื้อ: {domain}")
 
-    lines += ["", tags]
+    lines.extend(["", tags])
     out = "\n".join(lines).strip()
     return out[:1800]
 
 # =========================
-# FACEBOOK GRAPH API (3 รูป)
+# GRAPH API (upload 3 photos + create post + auto comment)
 # =========================
 def graph_post(path: str, data=None, files=None) -> dict:
     url = f"{GRAPH_BASE}{path}"
@@ -423,7 +413,11 @@ def create_feed_post_with_media(message: str, media_fbids: list[str]) -> str:
     for i, mid in enumerate(media_fbids):
         data[f"attached_media[{i}]"] = json.dumps({"media_fbid": mid})
     js = graph_post(f"/{PAGE_ID}/feed", data=data)
-    return js["id"]
+    return js["id"]  # feed post id
+
+def create_comment_on_post(post_id: str, message: str) -> str:
+    js = graph_post(f"/{post_id}/comments", data={"message": message})
+    return js.get("id", "")
 
 def post_product(p: dict) -> str:
     caption = build_caption(p)
@@ -437,41 +431,65 @@ def post_product(p: dict) -> str:
         time.sleep(1)
 
     post_id = create_feed_post_with_media(caption, media_ids)
+    print("INFO: Created post_id =", post_id)
+
+    if AUTO_COMMENT:
+        comment = random.choice(COMMENT_TEMPLATES).format(link=p["url"])
+        try:
+            cid = create_comment_on_post(post_id, comment)
+            print("INFO: Commented id =", cid)
+        except Exception as e:
+            print("WARN: Comment failed:", str(e))
+
     return post_id
 
 # =========================
-# MAIN (V11 SMART SCHEDULE)
+# MAIN (V14: catch-up missed slots)
 # =========================
 def main():
     now = now_bkk()
-    print("V11 FINAL | Smart Schedule + Catch-up")
+    print("V14 AUTO SALES ENGINE")
+    print("Graph =", GRAPH_VERSION)
     print("Now(BKK) =", now.strftime("%Y-%m-%d %H:%M:%S"))
     print("Schedule =", POST_SCHEDULE_BKK)
+    print("Catchup/run =", MAX_CATCHUP_PER_RUN)
 
     state = load_state()
 
-    # ✅ หาว่า “มี slot ไหนวันนี้ที่ควรโพสต์แล้ว แต่ยังไม่โพสต์” -> โพสต์ชดเชยทันที
-    pending = find_pending_slot(now, state)
+    # โพสต์แรกทันที (ครั้งเดียว) เพื่อทดสอบ/เริ่มระบบ
+    if FIRST_RUN_POST_NOW and not state.get("first_run_done", False):
+        print("INFO: First run -> post now (one time).")
+        cands = stream_candidates(max_rows=STREAM_SCAN_ROWS)
+        p = pick_product(cands, state)
+        post_id = post_product(p)
+        state["first_run_done"] = True
+        # ยังไม่ต้อง mark posted_slots ใน first run (เพราะไม่ได้ผูกกับเวลา)
+        save_state(state)
+        print("DONE: first run post =", post_id)
+        return
+
+    pending = list_pending_slots(now, state)
     if not pending:
-        print("SKIP: No pending slot (ยังไม่ถึงเวลา หรือโพสต์ครบแล้ว)")
+        print("SKIP: No pending slot (ยังไม่ถึงเวลาถัดไป หรือโพสต์ครบแล้ว)")
         save_state(state)
         return
 
-    print("PENDING SLOT =", pending)
+    # ชดเชยตามลำดับเก่า -> ใหม่ แต่จำกัดจำนวนต่อรัน
+    to_do = pending[:max(1, MAX_CATCHUP_PER_RUN)]
+    print("PENDING slots =", pending)
+    print("WILL DO slots =", to_do)
 
-    # โหลด + คัดของดี
-    candidates = stream_candidates(max_rows=STREAM_SCAN_ROWS)
+    # โหลด + คัดของดีครั้งเดียว แล้วโพสต์หลายสล็อตได้ (ประหยัดเวลา)
+    cands = stream_candidates(max_rows=STREAM_SCAN_ROWS)
 
-    # โพสต์ตามจำนวนที่กำหนดต่อการรัน (แนะนำ 1)
-    for i in range(POSTS_THIS_RUN):
-        p = pick_product(candidates, state)
-        print(f"Pick[{i+1}] =", p["name"][:80], "| rating=", p.get("rating"), "disc=", p.get("discount_pct"))
-        pid = post_product(p)
-        print("POSTED ID =", pid)
-        time.sleep(5)
+    for slot in to_do:
+        p = pick_product(cands, state)
+        print(f"POST FOR SLOT {slot} -> {p['name'][:90]} | rating={p.get('rating')} disc={p.get('discount_pct')}")
+        post_id = post_product(p)
+        print("POSTED:", post_id)
+        state.setdefault("posted_slots", []).append(slot)
+        time.sleep(6)
 
-    # ✅ บันทึกว่า slot นี้ทำแล้ว (กันโพสต์ซ้ำ)
-    state.setdefault("posted_slots", []).append(pending)
     save_state(state)
     print("DONE.")
 
