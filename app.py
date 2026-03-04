@@ -15,7 +15,7 @@ GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 STATE_FILE = "state.json"
 MAX_STATE_ITEMS = 5000
-REQ_TIMEOUT = 60
+REQ_TIMEOUT = 60  # Graph timeout
 
 # ---- ENV ----
 PAGE_ID = os.getenv("PAGE_ID")
@@ -27,6 +27,10 @@ END_MONTH_BOOST_DAYS = int(os.getenv("END_MONTH_BOOST_DAYS", "5"))
 DOUBLE_DAY_BOOST = os.getenv("DOUBLE_DAY_BOOST", "1") == "1"
 COMMENT_LINK = os.getenv("COMMENT_LINK", "1") == "1"
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
+
+CSV_TIMEOUT = int(os.getenv("CSV_TIMEOUT", "25"))
+CSV_RETRIES = int(os.getenv("CSV_RETRIES", "5"))
+CSV_RETRY_SLEEP = int(os.getenv("CSV_RETRY_SLEEP", "4"))
 
 HASHTAGS = [
     "#BENHomeElectrical",
@@ -105,21 +109,40 @@ def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-def fetch_csv(url: str) -> list[dict]:
+def fetch_csv_with_retry(url: str) -> list[dict]:
     print("INFO: Fetching CSV...")
-    r = requests.get(url, timeout=REQ_TIMEOUT)
-    r.raise_for_status()
-    content = r.content.decode("utf-8", errors="replace")
-    if content.startswith("\ufeff"):
-        content = content.lstrip("\ufeff")
-    f = io.StringIO(content)
-    reader = csv.DictReader(f)
-    rows = []
-    for row in reader:
-        if not row:
-            continue
-        rows.append({(k.strip() if k else k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()})
-    return rows
+    last_err = None
+
+    for attempt in range(1, CSV_RETRIES + 1):
+        try:
+            print(f"INFO: CSV fetch attempt {attempt}/{CSV_RETRIES} (timeout={CSV_TIMEOUT}s)")
+            r = requests.get(url, timeout=CSV_TIMEOUT, allow_redirects=True)
+            r.raise_for_status()
+
+            content = r.content.decode("utf-8", errors="replace")
+            if content.startswith("\ufeff"):
+                content = content.lstrip("\ufeff")
+
+            # debug small preview
+            preview = content[:300].replace("\n", "\\n")
+            print(f"INFO: CSV preview(300): {preview}")
+
+            f = io.StringIO(content)
+            reader = csv.DictReader(f)
+            rows = []
+            for row in reader:
+                if not row:
+                    continue
+                rows.append({(k.strip() if k else k): (v.strip() if isinstance(v, str) else v) for k, v in row.items()})
+            return rows
+
+        except Exception as e:
+            last_err = e
+            print(f"WARN: CSV fetch failed: {e}")
+            if attempt < CSV_RETRIES:
+                time.sleep(CSV_RETRY_SLEEP)
+
+    die(f"ERROR: Fetch CSV failed after {CSV_RETRIES} attempts. Last error: {last_err}")
 
 def pick_best_url(row: dict) -> str:
     for k in ["url", "product_link", "link", "product_url", "item_link"]:
@@ -138,9 +161,10 @@ def pick_best_name(row: dict) -> str:
 def pick_image_candidates(row: dict) -> list[str]:
     candidates = []
     keys_priority = [
-        "image", "image_url", "image_link", "image_link_1","image_link_2","image_link_3",
-        "image_link_4","image_link_5","image_link_6","image_link_7","image_link_8",
-        "image_link_9","image_link_10","additional_image_link",
+        "image", "image_url", "image_link",
+        "image_link_1","image_link_2","image_link_3","image_link_4","image_link_5",
+        "image_link_6","image_link_7","image_link_8","image_link_9","image_link_10",
+        "additional_image_link",
     ]
     for k in keys_priority:
         v = row.get(k)
@@ -157,7 +181,6 @@ def pick_image_candidates(row: dict) -> list[str]:
             if part.startswith("http"):
                 candidates.append(part)
 
-    # unique keep order
     seen = set()
     uniq = []
     for u in candidates:
@@ -190,7 +213,6 @@ def build_caption(name: str, url: str) -> str:
     lines.append("")
     lines.append(" ".join(HASHTAGS))
 
-    # ถ้าไม่คอมเมนต์ลิงก์ ให้ใส่ในแคปชัน
     if (not COMMENT_LINK) and url:
         lines.append(f"👉 {url}")
     return "\n".join(lines).strip()
@@ -200,10 +222,7 @@ def graph_post(path: str, data: dict) -> dict:
     payload = dict(data)
     payload["access_token"] = PAGE_ACCESS_TOKEN
     r = requests.post(url, data=payload, timeout=REQ_TIMEOUT)
-    try:
-        j = r.json()
-    except Exception:
-        j = {"raw": r.text}
+    j = r.json() if r.headers.get("content-type","").startswith("application/json") else {"raw": r.text}
     if r.status_code >= 400 or ("error" in j):
         raise RuntimeError(f"Graph API error {r.status_code}: {j}")
     return j
@@ -231,7 +250,7 @@ def main():
     state = load_state()
     posted = set(state.get("posted_keys", []))
 
-    rows = fetch_csv(SHOPEE_CSV_URL)
+    rows = fetch_csv_with_retry(SHOPEE_CSV_URL)
     if not rows:
         die("ERROR: CSV is empty.")
 
@@ -240,16 +259,9 @@ def main():
         url = pick_best_url(row)
         name = pick_best_name(row)
         imgs = pick_image_candidates(row)
-
         if not url or not name or not imgs:
             continue
-
-        candidates.append({
-            "key": row_key(row),
-            "name": name,
-            "url": url,
-            "images": imgs,
-        })
+        candidates.append({"key": row_key(row), "name": name, "url": url, "images": imgs})
 
     if not candidates:
         cols = list(rows[0].keys()) if rows else []
@@ -298,4 +310,4 @@ def main():
     print("INFO: state.json updated")
 
 if __name__ == "__main__":
-    main()   
+    main()
