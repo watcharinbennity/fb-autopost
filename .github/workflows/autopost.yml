@@ -2,8 +2,9 @@ name: Auto Post
 
 on:
   schedule:
-    # เวลาไทย (UTC+7) 12:15 = UTC 05:15, 18:30 = UTC 11:30
+    # TH 12:15 = UTC 05:15
     - cron: "15 5 * * *"
+    # TH 18:30 = UTC 11:30
     - cron: "30 11 * * *"
   workflow_dispatch:
 
@@ -34,11 +35,11 @@ jobs:
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          POST_IMAGES_COUNT: "3"
-          END_MONTH_BOOST_DAYS: "5"
-          DOUBLE_DAY_BOOST: "1"
-          COMMENT_LINK: "1"
-          DRY_RUN: "0"
+          POST_IMAGES_COUNT: "3"        # 3 รูปต่อสินค้า
+          END_MONTH_BOOST_DAYS: "5"     # โหมดปลายเดือน (5 วันท้ายเดือน)
+          DOUBLE_DAY_BOOST: "1"         # วันเลขเบิ้ล 3/3,4/4...
+          COMMENT_LINK: "1"             # คอมเมนต์ลิงก์เพิ่ม Reach
+          DRY_RUN: "0"                  # 1=ไม่โพสต์จริง (เทส)
         run: python -u app.py
 
       - name: Commit state.json back to repo
