@@ -1,55 +1,37 @@
 name: fb-autopost
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "15 5 * * *"   # 12:15 Asia/Bangkok
-    - cron: "30 11 * * *"  # 18:30 Asia/Bangkok
-
-concurrency:
-  group: fb-autopost
-  cancel-in-progress: false
+    - cron: '15 5 * * *'
+    - cron: '30 11 * * *'
+  workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run Auto Post
         env:
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          POSTS_FILE: posts.json
-          STATE_FILE: state.json
-          TZ: Asia/Bangkok
-        run: |
-          python app.py
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+        run: python app.py
 
-      - name: Commit state.json back to repo
+      - name: Commit state.json
         run: |
-          if git status --porcelain | grep -q "state.json"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state.json
-            git commit -m "chore: update state.json"
-            git push
-          else
-            echo "No state.json changes."
-          fi
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add state.json
+          git commit -m "update state" || exit 0
+          git push
