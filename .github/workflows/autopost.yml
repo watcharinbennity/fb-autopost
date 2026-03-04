@@ -14,16 +14,13 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
       - name: Run bot
         env:
@@ -33,13 +30,9 @@ jobs:
 
           GRAPH_VERSION: "v25.0"
 
-          # เวลาโพสต์ (เวลาไทย)
           POST_SCHEDULE_BKK: "09:00,12:15,15:30,18:30,21:00"
-
-          # โพสต์ชดเชยได้กี่สล็อตต่อการรัน (แนะนำ 1-2 กันสแปม)
           MAX_CATCHUP_PER_RUN: ${{ github.event.inputs.max_catchup_per_run || '1' }}
 
-          # รูปต่อสินค้า (3 รูป)
           POST_IMAGES_COUNT: "3"
 
           # คัดของดี
@@ -47,13 +40,16 @@ jobs:
           MIN_DISCOUNT_PCT: "20"
           MIN_IMAGES: "3"
           STREAM_SCAN_ROWS: "30000"
-          PICK_TOP_N: "400"
+          PICK_TOP_N: "500"
 
-          # ทำคอมเมนต์ใต้โพสต์ (ช่วย Reach)
+          # V15: บังคับต้องเป็นลิงก์นายหน้าเท่านั้น
+          REQUIRE_AFFILIATE_LINK: "true"
+
+          # โพสต์แล้วคอมเมนต์ลิงก์ใต้โพสต์
           AUTO_COMMENT: "true"
 
-          # ทำโพสต์แรกทันทีเมื่อรันครั้งแรก
-          FIRST_RUN_POST_NOW: "true"
+          # ให้โพสต์ทดลองครั้งแรกทันที (ครั้งเดียว)
+          FIRST_RUN_POST_NOW: "false"
 
         run: python -u app.py
 
