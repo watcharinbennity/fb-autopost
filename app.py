@@ -4,12 +4,11 @@ import csv
 import json
 import random
 import requests
-import time
 from datetime import datetime, timezone, timedelta
 
-# =============================
+# ======================
 # CONFIG
-# =============================
+# ======================
 
 GRAPH_VERSION="v25.0"
 GRAPH_BASE=f"https://graph.facebook.com/{GRAPH_VERSION}"
@@ -20,27 +19,29 @@ SHOPEE_CSV_URL=os.getenv("SHOPEE_CSV_URL")
 
 STATE_FILE="state.json"
 
+STREAM_SAMPLE=25000
 POST_IMAGES=3
-STREAM_SAMPLE=12000
 
-POST_TIMES=["12:15","18:30"]
+POST_TIMES=["09:00","12:15","15:30","18:30","21:00"]
 
-# =============================
+# ======================
 # MARKETING TEXT
-# =============================
+# ======================
 
 HOOKS=[
 "🔥 ของมันต้องมีติดบ้าน",
-"⚡ ไอเท็มงานช่างที่ควรมี",
-"🏠 ของใช้ในบ้านที่ช่วยให้งานง่ายขึ้น",
-"💪 เครื่องมือดี งานก็เสร็จไว",
-"🧰 ช่างมือโปรก็ใช้ตัวนี้",
+"⚡ งานช่างง่ายขึ้นด้วยไอเท็มนี้",
+"🏠 ของใช้ในบ้านที่ควรมี",
+"💪 เครื่องมือดี งานก็ง่าย",
+"🧰 ช่างมือโปรยังใช้",
+"✨ ไอเท็มยอดนิยมตอนนี้",
 ]
 
 CTA=[
 "👉 กดดูรายละเอียด / ราคา ล่าสุด",
-"👉 เช็คราคาและโค้ดส่วนลด",
-"👉 กดสั่งซื้อผ่านลิงก์นี้ได้ทันที",
+"👉 เช็คราคาและโปรโมชั่นล่าสุด",
+"👉 กดสั่งซื้อผ่านลิงก์นี้ได้เลย",
+"👉 ดูรีวิวและราคาได้ที่ลิงก์",
 ]
 
 HASHTAGS=[
@@ -51,48 +52,46 @@ HASHTAGS=[
 "#งานช่าง",
 "#ซ่อมบ้าน",
 "#ของดีบอกต่อ",
+"#เครื่องมือช่างราคาดี",
 ]
 
-# =============================
+# ======================
 # TIME
-# =============================
+# ======================
 
 def now_bkk():
     return datetime.now(timezone(timedelta(hours=7)))
 
 def is_post_time():
-
     now=now_bkk().strftime("%H:%M")
-
     return now in POST_TIMES
 
-# =============================
+# ======================
 # STATE
-# =============================
+# ======================
 
 def load_state():
 
     if not os.path.exists(STATE_FILE):
-        return {"used":[],"first_run":True}
+        return {"used":[],"first":True}
 
     try:
         with open(STATE_FILE,"r") as f:
             return json.load(f)
     except:
-        return {"used":[],"first_run":True}
+        return {"used":[],"first":True}
 
 def save_state(state):
-
     with open(STATE_FILE,"w") as f:
         json.dump(state,f)
 
-# =============================
-# CSV STREAM (BIG FILE SAFE)
-# =============================
+# ======================
+# STREAM CSV (SAFE)
+# ======================
 
 def stream_products():
 
-    print("Streaming Shopee CSV...")
+    print("Streaming Shopee CSV")
 
     r=requests.get(
         SHOPEE_CSV_URL,
@@ -141,31 +140,68 @@ def stream_products():
         if len(sample)>=STREAM_SAMPLE:
             break
 
-    print("Loaded products:",len(sample))
+    print("Products:",len(sample))
 
     return sample
 
-# =============================
-# PRODUCT PICKER
-# =============================
+# ======================
+# PRODUCT RANKING
+# ======================
+
+def rank_products(products):
+
+    ranked=[]
+
+    for p in products:
+
+        score=random.random()
+
+        name=p["name"].lower()
+
+        if "sale" in name:
+            score+=0.5
+
+        if "pro" in name:
+            score+=0.3
+
+        if "tool" in name:
+            score+=0.3
+
+        if "kit" in name:
+            score+=0.2
+
+        if "set" in name:
+            score+=0.2
+
+        ranked.append((score,p))
+
+    ranked.sort(reverse=True,key=lambda x:x[0])
+
+    return [x[1] for x in ranked]
+
+# ======================
+# PICK PRODUCT
+# ======================
 
 def pick_product(products,state):
 
+    ranked=rank_products(products)
+
     used=set(state["used"])
 
-    fresh=[p for p in products if p["url"] not in used]
+    fresh=[p for p in ranked if p["url"] not in used]
 
-    pool=fresh if fresh else products
+    pool=fresh if fresh else ranked
 
-    product=random.choice(pool)
+    product=random.choice(pool[:150])
 
     state["used"].append(product["url"])
 
     return product
 
-# =============================
+# ======================
 # CAPTION BUILDER
-# =============================
+# ======================
 
 def build_caption(product):
 
@@ -186,9 +222,9 @@ def build_caption(product):
 {tags}
 """.strip()
 
-# =============================
-# IMAGE DOWNLOAD
-# =============================
+# ======================
+# IMAGE
+# ======================
 
 def download_image(url):
 
@@ -196,9 +232,9 @@ def download_image(url):
 
     return r.content
 
-# =============================
+# ======================
 # FACEBOOK GRAPH API
-# =============================
+# ======================
 
 def upload_photo(img):
 
@@ -241,21 +277,21 @@ def create_post(message,media_ids):
 
     return r.json()["id"]
 
-# =============================
+# ======================
 # POST PRODUCT
-# =============================
+# ======================
 
 def post_product(product):
 
-    images=product["images"][:POST_IMAGES]
+    imgs=product["images"][:POST_IMAGES]
 
     caption=build_caption(product)
 
     media=[]
 
-    for img_url in images:
+    for url in imgs:
 
-        img=download_image(img_url)
+        img=download_image(url)
 
         mid=upload_photo(img)
 
@@ -265,18 +301,17 @@ def post_product(product):
 
     return pid
 
-# =============================
+# ======================
 # MAIN
-# =============================
+# ======================
 
 def main():
 
-    print("Bot started")
+    print("Affiliate Bot V8")
 
     state=load_state()
 
-    # รันครั้งแรกโพสต์ทันที
-    if state.get("first_run",True):
+    if state.get("first",True):
 
         print("First run post")
 
@@ -288,7 +323,7 @@ def main():
 
         print("Post ID:",pid)
 
-        state["first_run"]=False
+        state["first"]=False
 
         save_state(state)
 
