@@ -2,15 +2,7 @@ name: Auto Post
 
 on:
   schedule:
-    # GitHub Actions cron = UTC
-    # 09:00 BKK = 02:00 UTC
-    # 12:00 BKK = 05:00 UTC
-    # 18:30 BKK = 11:30 UTC
-    # 21:00 BKK = 14:00 UTC
-    - cron: "0 2 * * *"
-    - cron: "0 5 * * *"
-    - cron: "30 11 * * *"
-    - cron: "0 14 * * *"
+    - cron: "*/15 * * * *"   # รันทุก 15 นาที (UTC) แล้วให้ app.py เช็คเวลาเอง + catch-up
   workflow_dispatch:
 
 jobs:
@@ -23,44 +15,37 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Run V30.2 ULTRA
+      - name: Run V30 ULTRA
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          # Affiliate (ค่าหน้านาย)
+          # หน้านาย (Shopee Affiliate)
           SHOPEE_AFFILIATE_ID: "15328100363"
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
 
-          # เวลาโพสต์ไทย
-          SLOTS_BKK: "09:00,12:00,18:30,21:00"
+          # เวลาโพสต์ (เวลาไทย)
+          SLOTS_BKK: "07:30,09:00,12:00,16:30,18:30,21:00"
 
-          # รันครั้งแรกโพสต์ 1 โพสต์
+          # กติกา
           FIRST_RUN_POST_1: "1"
-          FORCE_POST: "0"
-          POSTS_MAX_PER_RUN: "1"
-
-          # ฟิลเตอร์เน้นเพจ
-          MIN_RATING: "4.7"
-          MIN_DISCOUNT_PCT: "15"
+          POSTS_MAX_PER_RUN: "2"
+          MIN_RATING: "4.6"
+          MIN_DISCOUNT_PCT: "10"
+          MIN_SOLD: "30"
           PRICE_MIN: "59"
           PRICE_MAX: "4999"
           REPOST_AFTER_DAYS: "14"
 
-          # รูปกี่รูปต่อโพสต์
-          POST_IMAGES_COUNT: "3"
+          # เน้นหมวดเพจ
+          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|ปลั๊กพ่วง|สายไฟ|เบรกเกอร์|ตู้ไฟ|หลอดไฟ|โคม|สวิตช์|เต้ารับ|มิเตอร์|UPS|แบตเตอรี่|LiFePO4|อินเวอร์เตอร์|โซล่า|ชาร์จ|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|เทปพันสาย|DIY|ซ่อมบ้าน|งานช่าง)"
+          BLOCK_KEYWORDS: "(ครีม|เครื่องสำอาง|บำรุงผิว|ย้อมผม|วิกผม|เสื้อผ้า|รองเท้า|กระเป๋า|ชุดนอน|ผ้าห่ม|หมอน|อาหารเสริม|บุหรี่|แอลกอฮอล์|18\\+)"
 
-          # กันหลุดหมวด
-          CATEGORY_ALLOW: "(Cables|Chargers|Converters|Lighting|Home Improvement|Tools|Hardware|Electrical|Power|Batteries|Solar)"
-          BLOCK_KEYWORDS: "(camera|flash|godox|ttl|hss|lens|tripod|drone|band|strap|watch|ย้อมผม|ครีม|ชุดผ้าปู|ที่นอน|หมอน)"
-          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|ปลั๊กพ่วง|สายไฟ|เบรกเกอร์|หลอดไฟ|โคม|สวิตช์|เต้ารับ|มิเตอร์|UPS|แบตเตอรี่|อินเวอร์เตอร์|โซล่า|ชาร์จ|หัวชาร์จ|อะแดปเตอร์|สายชาร์จ|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|งานช่าง|ซ่อม|DIY)"
           BRAND: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
-
         run: python app.py
