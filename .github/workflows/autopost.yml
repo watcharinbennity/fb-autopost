@@ -2,10 +2,14 @@ name: Auto Post
 
 on:
   schedule:
-    - cron: "0 2 * * *"    # 09:00 TH
-    - cron: "0 5 * * *"    # 12:00 TH
-    - cron: "30 11 * * *"  # 18:30 TH
-    - cron: "0 14 * * *"   # 21:00 TH
+    # ไทย 08:00 = UTC 01:00
+    # ไทย 12:00 = UTC 05:00
+    # ไทย 18:30 = UTC 11:30
+    # ไทย 21:30 = UTC 14:30
+    - cron: "0 1 * * *"
+    - cron: "0 5 * * *"
+    - cron: "30 11 * * *"
+    - cron: "30 14 * * *"
   workflow_dispatch:
 
 jobs:
@@ -20,44 +24,40 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Syntax check
-        run: python -m py_compile app.py
-
-      - name: Run V30 ULTRA FIX
+      - name: Run V31 ULTRA LOCK
         env:
           GRAPH_VERSION: "v25.0"
+
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          # หน้านาย (Shopee Affiliate)
+          # หน้านาย
           SHOPEE_AFFILIATE_ID: "15328100363"
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
 
-          # เวลาโพสต์ (ไทย)
-          SLOTS_BKK: "09:00,12:00,18:30,21:00"
+          # เช็คเวลาโพสในโค้ดด้วย (catch-up)
+          SLOTS_BKK: "08:00,12:00,18:30,21:30"
 
-          # โพสต์ 1 โพสต์ต่อรัน
-          POSTS_MAX_PER_RUN: "1"
-
-          # รับประกันรันครั้งแรกโพสต์ 1
+          # รันครั้งแรกโพส 1 โพส
           FIRST_RUN_POST_1: "1"
 
-          # เน้นให้ตรงเพจ (ปรับได้)
+          # ต่อ 1 run โพสกี่โพส
+          POSTS_MAX_PER_RUN: "1"
+
+          # ล็อคให้ตรงเพจ (แก้เพิ่ม/ลดได้)
+          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|ปลั๊กพ่วง|สายไฟ|เบรกเกอร์|หลอดไฟ|สวิตช์|โซล่า|โซลาร์|อินเวอร์เตอร์|แบตเตอรี่|เครื่องมือ|สว่าน|คีม|ไขควง|งานช่าง|ซ่อม|DIY|บ้าน)"
+          BLOCK_KEYWORDS: "(เสื้อผ้า|แฟชั่น|เครื่องสำอาง|สกินแคร์|ตุ๊กตา|ผ้าปู|ผ้านวม|ย้อมผม|วิกผม|กล้อง|แฟลช|เลนส์)"
+          ALLOW_CATEGORIES: "(Home|Tools|Hardware|Electrical|Lighting|DIY|Cables|Chargers|Converters|Power|Solar)"
+
+          # เงื่อนไขคัดดีล
           MIN_RATING: "4.6"
           MIN_DISCOUNT_PCT: "10"
-          MIN_SOLD: "0"
           PRICE_MIN: "59"
           PRICE_MAX: "4999"
           REPOST_AFTER_DAYS: "14"
 
-          # รูป/วิดีโอ
           POST_IMAGES_COUNT: "3"
-          PREFER_VIDEO: "1"
-          VIDEO_MAX_MB: "80"
 
-          # แฮชแท็ก
-          BRAND: "BEN Home & Electrical"
-          HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ShopeeAffiliate"
         run: python app.py
