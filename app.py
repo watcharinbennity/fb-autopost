@@ -8,10 +8,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+from urllib.parse import quote, urlparse, urlunparse, parse_qsl, urlencode
 
 import requests
-
 
 # =========================
 # CONFIG
@@ -34,31 +33,31 @@ AFF_TAG = os.getenv("AFF_TAG", "BENHomeElectrical").strip()
 
 # Schedule (Bangkok)
 TZ_BKK = timezone(timedelta(hours=7))
-# แนะนำ 6 รอบ/วัน (เนียน ๆ ไม่สแปม) — ปรับได้ที่ env SLOTS_BKK
-SLOTS_BKK = os.getenv("SLOTS_BKK", "07:30,09:00,12:00,16:30,18:30,21:00").split(",")
+SLOTS_BKK = os.getenv("SLOTS_BKK", "09:00,12:00,18:30,21:00").split(",")
 SLOTS_BKK = [s.strip() for s in SLOTS_BKK if s.strip()]
 
 # Run behavior
-POSTS_MAX_PER_RUN = int(os.getenv("POSTS_MAX_PER_RUN", "2"))  # ต่อ 1 run โพสต์ได้กี่โพสต์ (กันสแปม)
+POSTS_MAX_PER_RUN = int(os.getenv("POSTS_MAX_PER_RUN", "1"))  # ต่อ 1 run โพสต์ได้กี่โพสต์ (ปกติ 1)
 FORCE_POST = os.getenv("FORCE_POST", "0").strip().lower() in ("1", "true", "yes")
 FIRST_RUN_POST_1 = os.getenv("FIRST_RUN_POST_1", "1").strip().lower() in ("1", "true", "yes")
+
+# Anti-repeat
+REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
 
 # Selection filters
 MIN_RATING = float(os.getenv("MIN_RATING", "4.6"))
 MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "10"))
-MIN_SOLD = int(os.getenv("MIN_SOLD", "30"))  # ใช้ “คัด” แต่จะไม่โชว์คำว่าขายแล้วในแคปชัน
 PRICE_MIN = float(os.getenv("PRICE_MIN", "59"))
 PRICE_MAX = float(os.getenv("PRICE_MAX", "4999"))
-REPOST_AFTER_DAYS = int(os.getenv("REPOST_AFTER_DAYS", "14"))
 
 # Media
 POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
-PREFER_VIDEO = os.getenv("PREFER_VIDEO", "0").strip().lower() in ("1", "true", "yes")  # ปิดไว้ก่อนเพื่อเสถียร
+PREFER_VIDEO = os.getenv("PREFER_VIDEO", "0").strip().lower() in ("1", "true", "yes")  # ปิดไว้ก่อนให้ชัวร์
 VIDEO_MAX_MB = int(os.getenv("VIDEO_MAX_MB", "80"))
 
 # CSV streaming
 STREAM_MAX_ROWS = int(os.getenv("STREAM_MAX_ROWS", "250000"))
-TOPK_POOL = int(os.getenv("TOPK_POOL", "250"))
+TOPK_POOL = int(os.getenv("TOPK_POOL", "220"))
 
 # Caption
 BRAND = os.getenv("BRAND", "BEN Home & Electrical").strip()
@@ -67,23 +66,24 @@ HASHTAGS = os.getenv(
     "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
 ).strip()
 
-# เน้นให้ตรงเพจ: ไฟฟ้า/อุปกรณ์ไฟ/เครื่องมือ/ซ่อมบ้าน/DIY/โซลาร์
+# Targeting: ให้ตรงแนวเพจ
 ALLOW_KEYWORDS = os.getenv(
     "ALLOW_KEYWORDS",
-    r"(ไฟฟ้า|ปลั๊ก|ปลั๊กพ่วง|สายไฟ|เบรกเกอร์|ตู้ไฟ|ตู้คอนซูเมอร์|ตู้โหลด|หลอดไฟ|โคม|สวิตช์|เต้ารับ|มิเตอร์|UPS|แบตเตอรี่|LiFePO4|อินเวอร์เตอร์|โซล่า|ชาร์จ|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|เทปพันสาย|คัทเอาท์|รีเลย์|คอนแทคเตอร์|DIY|ซ่อมบ้าน|งานช่าง)"
+    r"(ไฟฟ้า|ปลั๊ก|สายไฟ|เบรกเกอร์|หลอดไฟ|โคม|สวิตช์|ปลั๊กพ่วง|รางปลั๊ก|มิเตอร์|UPS|แบตเตอรี่|LiFePO4|อินเวอร์เตอร์|โซล่า|ชาร์จ|อะแดปเตอร์|หัวชาร์จ|สายชาร์จ|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|ปืนกาว|เทปพันสายไฟ|งานช่าง|บ้าน|ซ่อม|DIY|ช่าง|ปลั๊กกันไฟกระชาก)"
 ).strip()
 
-# กันของหลุดหมวด
+# บล็อกของที่ไม่ตรงเพจ (กันหลุดไปพวกแฟชั่น/บิวตี้/ผ้าห่ม/ยาย้อมผม ฯลฯ)
 BLOCK_KEYWORDS = os.getenv(
     "BLOCK_KEYWORDS",
-    r"(ครีม|เครื่องสำอาง|บำรุงผิว|ย้อมผม|วิกผม|เสื้อผ้า|กางเกง|รองเท้า|กระเป๋า|ชุดนอน|ผ้าห่ม|หมอน|อาหารเสริม|เวย์|บุหรี่|แอลกอฮอล์|เซ็กซี่|18\+|ของเล่นผู้ใหญ่|คอนแทคเลนส์|ลดน้ำหนัก)"
+    r"(เสื้อผ้า|แฟชั่น|ชุดนอน|ชุดผ้าปู|ผ้าห่ม|หมอน|ผ้าปู|เครื่องสำอาง|สกินแคร์|ครีม|น้ำหอม|ยาย้อมผม|ย้อมผม|วิกผม|อาหารเสริม|บุหรี่|แอลกอฮอล์|ของเล่นเด็ก|รองเท้า|กระเป๋า|บรา|กางเกงใน)"
 ).strip()
 
-
+# =========================
+# SAFETY CHECK
+# =========================
 def die(msg: str, code: int = 1):
     print("FATAL:", msg)
     raise SystemExit(code)
-
 
 if not PAGE_ID:
     die("Missing env: PAGE_ID")
@@ -91,7 +91,6 @@ if not PAGE_ACCESS_TOKEN:
     die("Missing env: PAGE_ACCESS_TOKEN")
 if not SHOPEE_CSV_URL:
     die("Missing env: SHOPEE_CSV_URL")
-
 
 ALLOW_PAT = re.compile(ALLOW_KEYWORDS, re.IGNORECASE) if ALLOW_KEYWORDS else None
 BLOCK_PAT = re.compile(BLOCK_KEYWORDS, re.IGNORECASE) if BLOCK_KEYWORDS else None
@@ -103,17 +102,15 @@ BLOCK_PAT = re.compile(BLOCK_KEYWORDS, re.IGNORECASE) if BLOCK_KEYWORDS else Non
 def now_bkk() -> datetime:
     return datetime.now(TZ_BKK)
 
-
 def parse_slot_today_bkk(now: datetime, hhmm: str) -> datetime:
     hh, mm = hhmm.split(":")
     return now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
 
-
 def load_state() -> dict:
     base = {
         "used_urls": [],
-        "posted_slots": {},
-        "posted_at": {},        # url -> iso
+        "posted_slots": {},     # {"YYYY-MM-DD": ["09:00","12:00"...]}
+        "posted_at": {},        # {"product_url": "ISO"}
         "first_run_done": False
     }
     if not os.path.exists(STATE_FILE):
@@ -137,14 +134,12 @@ def load_state() -> dict:
     except Exception:
         return base
 
-
 def save_state(state: dict) -> None:
     used = state.get("used_urls", [])
     if len(used) > MAX_STATE_ITEMS:
         state["used_urls"] = used[-MAX_STATE_ITEMS:]
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-
 
 def mark_slot_posted(state: dict, now: datetime, slot_hhmm: str) -> None:
     key = now.strftime("%Y-%m-%d")
@@ -153,11 +148,9 @@ def mark_slot_posted(state: dict, now: datetime, slot_hhmm: str) -> None:
     if slot_hhmm not in state["posted_slots"][key]:
         state["posted_slots"][key].append(slot_hhmm)
 
-
 def due_slots_today(state: dict, now: datetime) -> List[str]:
     """
-    ถ้าเลยเวลาแล้ว แต่ยังไม่โพสต์ -> ถือว่า “due”
-    จะคืนรายการ slot ที่เลยแล้วและยังไม่ถูกโพสต์ เรียงตามเวลา
+    catch-up: ถ้าเลยเวลาแล้วแต่ slot ยังไม่ถูกโพส -> ถือว่า due
     """
     key = now.strftime("%Y-%m-%d")
     posted = set(state.get("posted_slots", {}).get(key, []))
@@ -172,16 +165,17 @@ def due_slots_today(state: dict, now: datetime) -> List[str]:
 # =========================
 # HTTP / GRAPH
 # =========================
+SESSION = requests.Session()
+
 def http_get(url: str, timeout=(25, 180), headers=None, stream=False) -> requests.Response:
-    r = requests.get(url, timeout=timeout, headers=headers, stream=stream)
+    r = SESSION.get(url, timeout=timeout, headers=headers, stream=stream, allow_redirects=True)
     r.raise_for_status()
     return r
-
 
 def graph_post(path: str, data=None, files=None) -> dict:
     url = f"{GRAPH_BASE}{path}"
     params = {"access_token": PAGE_ACCESS_TOKEN}
-    r = requests.post(url, params=params, data=data, files=files, timeout=(20, 80))
+    r = SESSION.post(url, params=params, data=data, files=files, timeout=(20, 80))
     try:
         js = r.json()
     except Exception:
@@ -193,41 +187,36 @@ def graph_post(path: str, data=None, files=None) -> dict:
 
 
 # =========================
-# SHOPEE AFF LINK
+# AFFILIATE LINK
 # =========================
-def build_affiliate_url(raw_url: str) -> str:
+def make_affiliate_link(origin_url: str) -> str:
     """
-    ทำให้เป็นลิงก์นายหน้าแบบเสถียร:
-    - ถ้าเป็น product_link เช่น https://shopee.co.th/product/{shopid}/{itemid} -> ใส่ affiliate params
-    - ถ้าเป็น shope.ee/an_redir?origin_link=... -> ใส่ affiliate params ลงใน origin_link และคง an_redir ไว้
+    ให้ได้รูปแบบที่คุณเห็นว่าใช้งานได้:
+    https://shope.ee/an_redir?origin_link=...&affiliate_id=...&utm_source=facebook&afftag=BENHomeElectrical
     """
-    raw_url = (raw_url or "").strip()
-    if not raw_url:
+    origin_url = (origin_url or "").strip()
+    if not origin_url:
         return ""
 
-    try:
-        u = urlparse(raw_url)
-        qs = dict(parse_qsl(u.query, keep_blank_values=True))
+    # ถ้าเป็น shope.ee/an_redir อยู่แล้ว -> เติมพารามิเตอร์ให้ครบ
+    if "shope.ee/an_redir" in origin_url:
+        u = urlparse(origin_url)
+        q = dict(parse_qsl(u.query, keep_blank_values=True))
+        q.setdefault("affiliate_id", AFFILIATE_ID)
+        q.setdefault("utm_source", AFF_UTM_SOURCE)
+        q.setdefault("afftag", AFF_TAG)
+        # ถ้าไม่มี origin_link ก็ปล่อย (แต่ส่วนมากมี)
+        return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q, doseq=True), u.fragment))
 
-        # กรณีเป็น an_redir
-        if "shope.ee" in (u.netloc or "") and u.path.startswith("/an_redir") and "origin_link" in qs:
-            origin = qs.get("origin_link", "")
-            origin_parsed = urlparse(origin)
-            origin_qs = dict(parse_qsl(origin_parsed.query, keep_blank_values=True))
-            origin_qs["affiliate_id"] = AFFILIATE_ID
-            origin_qs["utm_source"] = AFF_UTM_SOURCE
-            origin_qs["afftag"] = AFF_TAG
-            new_origin = urlunparse(origin_parsed._replace(query=urlencode(origin_qs, doseq=True)))
-            qs["origin_link"] = new_origin
-            return urlunparse(u._replace(query=urlencode(qs, doseq=True)))
-
-        # กรณีเป็นลิงก์ shopee ปกติ
-        qs["affiliate_id"] = AFFILIATE_ID
-        qs["utm_source"] = AFF_UTM_SOURCE
-        qs["afftag"] = AFF_TAG
-        return urlunparse(u._replace(query=urlencode(qs, doseq=True)))
-    except Exception:
-        return raw_url
+    # เอา shopee.co.th/product/... เป็น origin_link
+    origin_enc = quote(origin_url, safe="")
+    return (
+        "https://shope.ee/an_redir"
+        f"?origin_link={origin_enc}"
+        f"&affiliate_id={quote(AFFILIATE_ID)}"
+        f"&utm_source={quote(AFF_UTM_SOURCE)}"
+        f"&afftag={quote(AFF_TAG)}"
+    )
 
 
 # =========================
@@ -236,16 +225,16 @@ def build_affiliate_url(raw_url: str) -> str:
 @dataclass
 class Product:
     title: str
-    url: str
+    product_link: str           # shopee.co.th/product/...
+    short_link: str             # shope.ee/...
+    affiliate_link: str         # final
     images: List[str]
     price: Optional[float]
     sale_price: Optional[float]
     discount_pct: Optional[float]
     rating: Optional[float]
-    sold: Optional[int]
-    category: str
+    category_text: str
     raw: Dict
-
 
 def fnum(x) -> Optional[float]:
     try:
@@ -258,36 +247,16 @@ def fnum(x) -> Optional[float]:
     except Exception:
         return None
 
-
-def fint(x) -> Optional[int]:
-    try:
-        if x is None:
-            return None
-        s = str(x).strip().replace(",", "")
-        if s == "":
-            return None
-        return int(float(s))
-    except Exception:
-        return None
-
-
-def text(x) -> str:
-    return ("" if x is None else str(x)).strip()
-
+def normalize_spaces(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
 def extract_images(row: Dict) -> List[str]:
+    # รองรับ image_link_1..10 / image_link / image_link_3..4 ที่คุณมี
     imgs = []
-    # จากตัวอย่างคุณมี image_link, image_link_3, image_link_4 ... image_link_10
-    for i in range(1, 11):
-        v = text(row.get(f"image_link_{i}", ""))
+    for k in ["image_link"] + [f"image_link_{i}" for i in range(1, 11)] + [f"image_link_{i}" for i in range(2, 11)]:
+        v = normalize_spaces(row.get(k, ""))
         if v.startswith("http"):
             imgs.append(v)
-    v0 = text(row.get("image_link", ""))
-    if v0.startswith("http"):
-        imgs.append(v0)
-    v_add = text(row.get("additional_image_link", ""))
-    if v_add.startswith("http"):
-        imgs.append(v_add)
 
     # unique keep order
     seen = set()
@@ -298,116 +267,127 @@ def extract_images(row: Dict) -> List[str]:
             out.append(u)
     return out
 
+def pick_best_origin_link(row: Dict) -> str:
+    # ในไฟล์คุณมี product_link + product_short link (มีช่องว่างในชื่อ)
+    pl = normalize_spaces(row.get("product_link", ""))
+    sl = normalize_spaces(row.get("product_short link", ""))  # ตามหัวจริงที่คุณส่ง
+    if pl.startswith("http"):
+        return pl
+    if sl.startswith("http"):
+        return sl
+    # เผื่อบางไฟล์ใช้ชื่ออื่น
+    for k in ["product_short_link", "product_shortlink", "url", "link"]:
+        v = normalize_spaces(row.get(k, ""))
+        if v.startswith("http"):
+            return v
+    return ""
 
-def pick_url(row: Dict) -> str:
-    # จากหัวข้อจริงของคุณมี product_link และ product_short link (มี space)
-    u = text(row.get("product_link", "")) or text(row.get("product_short link", "")) or text(row.get("url", ""))
-    return u
+def row_category_text(row: Dict) -> str:
+    parts = []
+    for k in ["global_category1", "global_category2", "global_category3", "global_brand"]:
+        v = normalize_spaces(row.get(k, ""))
+        if v:
+            parts.append(v)
+    return " | ".join(parts)
 
+def is_relevant(title: str, cat: str) -> bool:
+    txt = f"{title} {cat}".strip()
+    if BLOCK_PAT and BLOCK_PAT.search(txt):
+        return False
+    # ต้อง match allow อย่างน้อย 1 (เพื่อกันหลุดหมวดเพจ)
+    if ALLOW_PAT:
+        return bool(ALLOW_PAT.search(txt))
+    return True
 
-def normalize_row(row: Dict) -> Product:
-    title = text(row.get("title", "")) or text(row.get("name", ""))
-    url = pick_url(row)
-    images = extract_images(row)
+def normalize_product(row: Dict) -> Optional[Product]:
+    title = normalize_spaces(row.get("title") or row.get("name") or row.get("product_name") or "")
+    if not title:
+        return None
 
+    origin = pick_best_origin_link(row)
+    if not origin:
+        return None
+
+    imgs = extract_images(row)
+    if not imgs:
+        return None
+
+    cat = row_category_text(row)
+
+    # ราคา / โปร
     price = fnum(row.get("price"))
     sale_price = fnum(row.get("sale_price"))
-    discount_pct = fnum(row.get("discount_percentage"))
+    dp = fnum(row.get("discount_percentage"))
+    if dp is None and price and sale_price and price > 0 and sale_price < price:
+        dp = (price - sale_price) * 100.0 / price
 
     rating = fnum(row.get("item_rating")) or fnum(row.get("rating"))
-    sold = fint(row.get("item_sold")) or fint(row.get("historical_sold")) or fint(row.get("sold"))
-    category = text(row.get("global_category1", "")) + " " + text(row.get("global_category2", "")) + " " + text(row.get("global_category3", ""))
 
+    # กรองช่วงราคา
+    eff = sale_price if sale_price is not None else price
+    if eff is None:
+        return None
+    if not (PRICE_MIN <= eff <= PRICE_MAX):
+        return None
+
+    # กรองเรตติ้ง/ส่วนลด
+    if rating is not None and rating < MIN_RATING:
+        return None
+    if dp is not None and dp < MIN_DISCOUNT_PCT:
+        return None
+
+    if not is_relevant(title, cat):
+        return None
+
+    # ทำลิงก์นายหน้า
+    aff = make_affiliate_link(origin)
+
+    # เก็บ product_link/short_link เพื่อ debug
+    pl = normalize_spaces(row.get("product_link", ""))
+    sl = normalize_spaces(row.get("product_short link", ""))
     return Product(
         title=title,
-        url=url,
-        images=images,
+        product_link=pl,
+        short_link=sl,
+        affiliate_link=aff,
+        images=imgs[:10],
         price=price,
         sale_price=sale_price,
-        discount_pct=discount_pct,
+        discount_pct=dp,
         rating=rating,
-        sold=sold,
-        category=category.strip(),
+        category_text=cat,
         raw=row,
     )
 
 
-def effective_price(p: Product) -> Optional[float]:
-    return p.sale_price if p.sale_price is not None else p.price
-
-
-def pass_keywords(p: Product) -> bool:
-    hay = f"{p.title} {p.category}"
-    if BLOCK_PAT and BLOCK_PAT.search(hay):
-        return False
-    if ALLOW_PAT:
-        return bool(ALLOW_PAT.search(hay))
-    return True
-
-
-def product_pass(p: Product, state: dict, now: datetime) -> bool:
-    if not p.title or not p.url:
-        return False
-    if len(p.images) < 1:
-        return False
-
-    if not pass_keywords(p):
-        return False
-
-    ep = effective_price(p)
-    if ep is None or not (PRICE_MIN <= ep <= PRICE_MAX):
-        return False
-    if p.rating is not None and p.rating < MIN_RATING:
-        return False
-    if p.sold is not None and p.sold < MIN_SOLD:
-        return False
-    if p.discount_pct is not None and p.discount_pct < MIN_DISCOUNT_PCT:
-        return False
-
-    # กันซ้ำภายใน REPOST_AFTER_DAYS
-    posted_at = state.get("posted_at", {}).get(p.url)
-    if posted_at:
-        try:
-            last = datetime.fromisoformat(posted_at)
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=TZ_BKK)
-            if now - last < timedelta(days=REPOST_AFTER_DAYS):
-                return False
-        except Exception:
-            pass
-
-    return True
-
+# =========================
+# SCORE + PICK
+# =========================
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
 
 def score_product(p: Product) -> float:
-    """
-    คะแนนเน้น:
-    - เรตติ้งสูง
-    - ส่วนลดสูง
-    - sold ใช้ช่วยคัด แต่ไม่โชว์ในโพสต์
-    """
     r = p.rating if p.rating is not None else 4.0
     d = p.discount_pct if p.discount_pct is not None else 0.0
-    s = p.sold if p.sold is not None else 0
-    ep = effective_price(p) or 9999.0
+    eff = p.sale_price if p.sale_price is not None else p.price
+    eff = eff if eff is not None else 9999.0
 
-    r_score = max(0.0, min(1.0, (r - 4.0) / 1.0))
-    d_score = max(0.0, min(1.0, d / 70.0))
-    s_score = max(0.0, min(1.0, (s ** 0.5) / 70.0))
+    # ให้ความสำคัญ: รีวิวดี + ลดเยอะ + ราคาพอเหมาะ
+    r_score = clamp((r - 4.0) / 1.0, 0, 1)       # 4.0-5.0
+    d_score = clamp(d / 70.0, 0, 1)              # 0-70%
+    price_score = 1.0 - clamp((eff - PRICE_MIN) / max(1.0, (PRICE_MAX - PRICE_MIN)), 0, 1) * 0.12
 
-    # ให้ราคาช่วงกลางๆ ดูดีขึ้นนิด
-    price_score = 1.0 - max(0.0, min(1.0, (ep - PRICE_MIN) / max(1.0, (PRICE_MAX - PRICE_MIN)))) * 0.15
-
-    base = (0.52 * r_score) + (0.33 * d_score) + (0.15 * s_score)
+    base = (0.55 * r_score) + (0.45 * d_score)
     base *= price_score
+
+    # เพิ่มน้ำหนักถ้าหมวดตรงมาก
+    if re.search(r"(Electrical|Tools|Home Improvement|Cables|Chargers|Converters)", p.category_text, re.I):
+        base *= 1.08
+
     base *= random.uniform(0.97, 1.03)
     return base
 
-
-# =========================
-# CSV STREAMING
-# =========================
-def stream_top_products(csv_url: str, state: dict, now: datetime) -> List[Tuple[float, Product]]:
+def stream_top_products(csv_url: str) -> List[Tuple[float, Product]]:
     print("INFO: Streaming Shopee CSV ...")
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -430,8 +410,8 @@ def stream_top_products(csv_url: str, state: dict, now: datetime) -> List[Tuple[
             print(f"INFO: Stop at STREAM_MAX_ROWS={STREAM_MAX_ROWS}")
             break
 
-        p = normalize_row(row)
-        if not product_pass(p, state, now):
+        p = normalize_product(row)
+        if not p:
             continue
 
         sc = score_product(p)
@@ -449,9 +429,8 @@ def stream_top_products(csv_url: str, state: dict, now: datetime) -> List[Tuple[
 
     print(f"INFO: Done rows={rows_seen} kept={kept} top_pool={len(top)}")
     if not top:
-        raise SystemExit("ERROR: No usable products found. ลองลด MIN_* หรือปรับ ALLOW/BLOCK/PRICE ได้")
+        raise SystemExit("ERROR: No usable products found. ลองลด MIN_RATING/MIN_DISCOUNT_PCT หรือปรับ allow/block")
     return top
-
 
 def weighted_choice(items: List[Tuple[float, Product]]) -> Product:
     total = sum(max(0.001, sc) for sc, _ in items)
@@ -463,15 +442,33 @@ def weighted_choice(items: List[Tuple[float, Product]]) -> Product:
             return p
     return items[-1][1]
 
-
-def pick_product(top_items: List[Tuple[float, Product]], state: dict) -> Product:
+def pick_product(top_items: List[Tuple[float, Product]], state: dict, now: datetime) -> Product:
     used = set(state.get("used_urls", []))
-    fresh = [(sc, p) for sc, p in top_items if p.url not in used]
+    cutoff = now - timedelta(days=REPOST_AFTER_DAYS)
+    posted_at = state.get("posted_at", {})
+
+    def ok(p: Product) -> bool:
+        if p.affiliate_link and p.affiliate_link not in used:
+            # กันโพสซ้ำภายใน REPOST_AFTER_DAYS
+            last_iso = posted_at.get(p.affiliate_link)
+            if last_iso:
+                try:
+                    last_dt = datetime.fromisoformat(last_iso)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=TZ_BKK)
+                    if last_dt > cutoff:
+                        return False
+                except Exception:
+                    pass
+            return True
+        return False
+
+    fresh = [(sc, p) for sc, p in top_items if ok(p)]
     pool = fresh if fresh else top_items
     chosen = weighted_choice(pool)
 
-    state.setdefault("used_urls", []).append(chosen.url)
-    state.setdefault("posted_at", {})[chosen.url] = now_bkk().isoformat()
+    state.setdefault("used_urls", []).append(chosen.affiliate_link or chosen.product_link or chosen.short_link or chosen.title)
+    state.setdefault("posted_at", {})[chosen.affiliate_link or chosen.product_link or chosen.title] = now.isoformat()
     return chosen
 
 
@@ -482,7 +479,7 @@ HOOKS = [
     "🔥 ของมันต้องมีติดบ้าน!",
     "⚡ สายช่างต้องมี ช่วยให้งานไวขึ้นจริง",
     "✅ คัดตัวฮิตรีวิวดี ราคาโดน",
-    "🏡 ของใช้/อุปกรณ์ไฟฟ้าที่ทำให้ชีวิตง่ายขึ้น",
+    "🏡 ของใช้ในบ้านที่ทำให้ชีวิตง่ายขึ้น",
     "🎯 เลือกให้แล้ว “คุ้มสุด” สำหรับงบนี้",
 ]
 
@@ -490,14 +487,14 @@ BENEFITS = [
     "ใช้งานง่าย มือใหม่ก็ทำเองได้",
     "ประหยัดเวลา งานเสร็จไวขึ้น",
     "คุ้มราคา คุณภาพเกินตัว",
-    "เหมาะกับงานบ้าน/งานช่างทั่วไป",
+    "เหมาะกับใช้ในบ้าน/งานช่างทั่วไป",
     "รีวิวดี น่าใช้จริง",
 ]
 
 CTA = [
     "กดลิงก์ดูโปร/โค้ดส่วนลดตอนนี้เลย 👇",
-    "ดูรูป + รีวิวจริง + ราคาล่าสุดในลิงก์ได้เลย ✅",
-    "อยากได้แบบไหน ทักแชทได้ เดี๋ยวช่วยเลือกให้ 💬",
+    "ดูรีวิวจริง + ราคาล่าสุดในลิงก์ได้เลย ✅",
+    "ทักแชทได้ครับ เดี๋ยวช่วยเลือกให้ 💬",
 ]
 
 def fmt_money(x: Optional[float]) -> str:
@@ -505,28 +502,25 @@ def fmt_money(x: Optional[float]) -> str:
         return "-"
     return f"{x:,.0f}"
 
-
 def fmt_pct(x: Optional[float]) -> str:
     if x is None:
         return "-"
     return f"{x:.0f}%"
-
 
 def build_caption(p: Product) -> str:
     hook = random.choice(HOOKS)
     benefit = random.choice(BENEFITS)
     cta = random.choice(CTA)
 
-    aff_url = build_affiliate_url(p.url)
-
+    # price line
+    eff = p.sale_price if p.sale_price is not None else p.price
     if p.sale_price is not None and p.price is not None and p.sale_price < p.price:
         price_line = f"💸 โปรวันนี้: {fmt_money(p.sale_price)} บาท (ปกติ {fmt_money(p.price)} | ลด {fmt_pct(p.discount_pct)})"
     else:
-        price_line = f"💸 ราคา: {fmt_money(effective_price(p))} บาท | ลด {fmt_pct(p.discount_pct)}"
+        price_line = f"💸 ราคา: {fmt_money(eff)} บาท | ลด {fmt_pct(p.discount_pct)}"
 
     rating_line = f"⭐ เรตติ้ง: {p.rating:.1f}/5" if p.rating is not None else "⭐ เรตติ้ง: -"
 
-    # ❌ ไม่ใส่ “ขายแล้ว” ตามที่คุณสั่ง
     parts = [
         f"🏠⚡ {BRAND}",
         hook,
@@ -539,30 +533,33 @@ def build_caption(p: Product) -> str:
         f"✅ จุดเด่น: {benefit}",
         "✅ ดูรูป/รีวิวจริงก่อนซื้อได้",
         "",
-        "👇 ลิงก์นายหน้า (โปร/โค้ดอาจเปลี่ยนไว)",
-        aff_url,
+        f"👉 {p.affiliate_link}",
         "",
         cta,
         "",
         HASHTAGS,
     ]
-    return "\n".join([x for x in parts if x is not None]).strip()
+    # clean double blank
+    out = []
+    for s in parts:
+        if s == "" and (not out or out[-1] == ""):
+            continue
+        out.append(s)
+    return "\n".join(out).strip()
 
 
 # =========================
-# FACEBOOK POST (IMAGES 1-3)
+# FACEBOOK: POST (3 images)
 # =========================
 def download_image_bytes(url: str) -> bytes:
     r = http_get(url, timeout=(20, 80), stream=True, headers={"User-Agent": "Mozilla/5.0"})
     return r.content
-
 
 def upload_unpublished_photo(page_id: str, image_bytes: bytes) -> str:
     files = {"source": ("image.jpg", image_bytes, "image/jpeg")}
     data = {"published": "false"}
     js = graph_post(f"/{page_id}/photos", data=data, files=files)
     return js["id"]
-
 
 def create_feed_post_with_media(page_id: str, message: str, media_fbids: List[str]) -> str:
     data = {"message": message}
@@ -571,9 +568,11 @@ def create_feed_post_with_media(page_id: str, message: str, media_fbids: List[st
     js = graph_post(f"/{page_id}/feed", data=data)
     return js["id"]
 
-
 def post_images(p: Product, caption: str) -> str:
-    imgs = p.images[:max(1, POST_IMAGES_COUNT)]
+    imgs = p.images[:POST_IMAGES_COUNT]
+    if not imgs:
+        raise RuntimeError("No images to post")
+
     media_ids = []
     for u in imgs:
         img_bytes = download_image_bytes(u)
@@ -590,49 +589,31 @@ def post_images(p: Product, caption: str) -> str:
 # =========================
 def main():
     now = now_bkk()
-    print("==== V30 ULTRA (BKK) ====")
-    print("INFO: Now =", now.isoformat())
+    print("==== V30 ULTRA FIX ====")
+    print("INFO: Now(BKK) =", now.isoformat())
     print("INFO: Graph =", GRAPH_VERSION)
-    print("INFO: Slots(BKK) =", SLOTS_BKK)
+    print("INFO: Slots =", SLOTS_BKK)
     print("INFO: Filters: rating>=", MIN_RATING, "discount>=", MIN_DISCOUNT_PCT,
-          "sold>=", MIN_SOLD, "price=[", PRICE_MIN, "..", PRICE_MAX, "]")
-    print("INFO: Affiliate =", AFFILIATE_ID, "| tag =", AFF_TAG)
+          "price=[", PRICE_MIN, "..", PRICE_MAX, "]")
+    print("INFO: FIRST_RUN_POST_1 =", FIRST_RUN_POST_1)
 
     state = load_state()
 
-    # First run: ให้โพสต์ 1 โพสต์ทันที (ตามที่คุณสั่ง)
-    if FIRST_RUN_POST_1 and not state.get("first_run_done", False) and not FORCE_POST:
-        print("INFO: First run detected -> will post 1 immediately.")
-        slot_plan = ["FIRST_RUN"]
-    else:
-        due = due_slots_today(state, now)
-        if not due and not FORCE_POST:
-            print("INFO: No due slot. Exit. (Set FORCE_POST=1 to test)")
-            return
-        slot_plan = due if due else ["MANUAL"]
-
-    # ดึง top pool
-    top_items = stream_top_products(SHOPEE_CSV_URL, state, now)
-
-    posts_done = 0
-    # catch-up: ถ้าวันนี้พลาดหลาย slot ให้ไล่โพสต์ตามลำดับ (จำกัด POSTS_MAX_PER_RUN)
-    for slot_used in slot_plan[:POSTS_MAX_PER_RUN]:
-        p = pick_product(top_items, state)
-        caption = build_caption(p)
-
-        print("INFO: Slot =", slot_used, "| Picked:", p.title[:90], "| images:", len(p.images))
-        post_id = post_images(p, caption)
-        print("OK: Posted feed id =", post_id)
-
-        if slot_used not in ("MANUAL", "FIRST_RUN"):
-            mark_slot_posted(state, now, slot_used)
-
-        posts_done += 1
-        time.sleep(4)
-
-    # mark first run done
+    # 1) first run -> โพส 1 โพสทันที
     if FIRST_RUN_POST_1 and not state.get("first_run_done", False):
-        state["first_run_done"] = True
-
-    save_state(state)
-    print("INFO: Done. posts_done =", 
+        print("INFO: First run detected -> will post 1 immediately")
+        slot_used = "FIRST_RUN"
+        do_post = True
+    else:
+        # 2) catch-up slot
+        due = due_slots_today(state, now)
+        if due:
+            slot_used = due[0]
+            print("INFO: Due slot ->", slot_used)
+            do_post = True
+        elif FORCE_POST:
+            slot_used = "MANUAL"
+            print("INFO: FORCE_POST enabled -> manual post")
+            do_post = True
+        else:
+            print("INFO: No due slot (alrea
