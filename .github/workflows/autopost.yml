@@ -14,16 +14,12 @@ on:
         required: false
         default: "1"
       force_post:
-        description: "Force post immediately (test)"
+        description: "Force post immediately"
         required: false
         default: "0"
 
-concurrency:
-  group: autopost-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  post:
+  autopost:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -34,10 +30,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Run V21 GOD MODE
+      - name: Run V22 GOD MODE PRO
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -49,25 +45,17 @@ jobs:
 
           POST_IMAGES_COUNT: "3"
 
-          # Filters (ปรับได้)
-          MIN_RATING: "4.6"
-          MIN_DISCOUNT_PCT: "10"
-          MIN_SOLD: "30"
-          PRICE_MIN: "79"
-          PRICE_MAX: "1999"
-
-          # CSV streaming
           STREAM_MAX_ROWS: "250000"
           TOPK_POOL: "200"
 
         run: python -u app.py
 
-      - name: Commit state.json back to repo
+      - name: Save state
         run: |
           if [ -f state.json ]; then
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git add state.json
-            git commit -m "update state" || echo "No changes"
-            git push || echo "Push skipped"
+            git commit -m "update state" || echo "No change"
+            git push || echo "skip push"
           fi
