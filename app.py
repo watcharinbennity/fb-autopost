@@ -4,8 +4,8 @@ import json
 import random
 import time
 import csv
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -13,34 +13,43 @@ import requests
 # =========================
 # CONFIG
 # =========================
-GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0")  # ✅ v25.0
+GRAPH_VERSION = os.getenv("GRAPH_VERSION", "v25.0")
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
-STATE_FILE = "state.json"
+STATE_FILE = os.getenv("STATE_FILE", "state.json")
 MAX_STATE_ITEMS = 9000
 
+# timeouts
 CSV_CONNECT_TIMEOUT = 25
 CSV_READ_TIMEOUT = 180
-
 IMG_CONNECT_TIMEOUT = 20
 IMG_READ_TIMEOUT = 80
-
+VID_CONNECT_TIMEOUT = 20
+VID_READ_TIMEOUT = 120
 GRAPH_CONNECT_TIMEOUT = 20
 GRAPH_READ_TIMEOUT = 80
 
+# posting
 POST_IMAGES_COUNT = int(os.getenv("POST_IMAGES_COUNT", "3"))
-END_MONTH_BOOST_DAYS = int(os.getenv("END_MONTH_BOOST_DAYS", "3"))
 POSTS_THIS_RUN = int(os.getenv("POSTS_THIS_RUN", "1"))
+FORCE_POST = os.getenv("FORCE_POST", "0").strip().lower() in ("1", "true", "yes")
 
+# selection filters (tune)
 MIN_RATING = float(os.getenv("MIN_RATING", "4.7"))
-MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "20"))
-MIN_SOLD = int(os.getenv("MIN_SOLD", "80"))
+MIN_DISCOUNT_PCT = float(os.getenv("MIN_DISCOUNT_PCT", "15"))
+MIN_SOLD = int(os.getenv("MIN_SOLD", "50"))
 PRICE_MIN = float(os.getenv("PRICE_MIN", "79"))
-PRICE_MAX = float(os.getenv("PRICE_MAX", "1990"))
+PRICE_MAX = float(os.getenv("PRICE_MAX", "1999"))
 
+# CSV streaming
 STREAM_MAX_ROWS = int(os.getenv("STREAM_MAX_ROWS", "300000"))
 TOPK_POOL = int(os.getenv("TOPK_POOL", "250"))
 
+# video
+PREFER_VIDEO = os.getenv("PREFER_VIDEO", "1").strip().lower() in ("1", "true", "yes")
+VIDEO_MAX_MB = int(os.getenv("VIDEO_MAX_MB", "80"))
+
+# schedule (BKK)
 SLOTS_BKK = ["09:00", "12:15", "15:30", "18:30", "21:00"]
 
 HASHTAGS = [
@@ -67,7 +76,7 @@ BENEFITS = [
     "ประหยัดเวลา งานเสร็จไวขึ้น",
     "คุ้มราคา คุณภาพเกินตัว",
     "เหมาะกับใช้ในบ้าน/งานช่างทั่วไป",
-    "รีวิวดี มีคนซื้อซ้ำเยอะ",
+    "รีวิวดี มีคนซื้อเยอะ",
 ]
 
 CTA = [
@@ -79,9 +88,9 @@ CTA = [
 # =========================
 # ENV
 # =========================
-PAGE_ID = os.getenv("PAGE_ID")
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL")
+PAGE_ID = os.getenv("PAGE_ID", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
 if not PAGE_ID:
     raise SystemExit("ERROR: Missing env: PAGE_ID")
@@ -97,18 +106,11 @@ if not SHOPEE_CSV_URL:
 def now_bkk() -> datetime:
     return datetime.now(timezone(timedelta(hours=7)))
 
+
 def parse_slot_today_bkk(now: datetime, hhmm: str) -> datetime:
     hh, mm = hhmm.split(":")
     return now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
 
-def is_end_month_boost(now: datetime) -> bool:
-    next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
-    last_day = next_month - timedelta(days=1)
-    return (last_day.day - now.day) < END_MONTH_BOOST_DAYS
-
-def is_campaign_day(now: datetime) -> bool:
-    md = f"{now.month}.{now.day}"
-    return md in {f"{m}.{m}" for m in range(1, 13)} or now.day in {15, 25}
 
 def load_state() -> dict:
     base = {"used_urls": [], "posted_slots": {}}
@@ -129,6 +131,7 @@ def load_state() -> dict:
     except Exception:
         return base
 
+
 def save_state(state: dict) -> None:
     used = state.get("used_urls", [])
     if len(used) > MAX_STATE_ITEMS:
@@ -136,12 +139,14 @@ def save_state(state: dict) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
+
 def mark_slot_posted(state: dict, now: datetime, slot_hhmm: str) -> None:
     key = now.strftime("%Y-%m-%d")
     state.setdefault("posted_slots", {})
     state["posted_slots"].setdefault(key, [])
     if slot_hhmm not in state["posted_slots"][key]:
         state["posted_slots"][key].append(slot_hhmm)
+
 
 def due_slots_today(state: dict, now: datetime) -> List[str]:
     key = now.strftime("%Y-%m-%d")
@@ -161,6 +166,7 @@ def http_get(url: str, timeout=(25, 180), headers=None, stream=False) -> request
     r = requests.get(url, timeout=timeout, headers=headers, stream=stream)
     r.raise_for_status()
     return r
+
 
 def graph_post(path: str, data=None, files=None) -> dict:
     url = f"{GRAPH_BASE}{path}"
@@ -187,6 +193,7 @@ class Product:
     name: str
     url: str
     images: List[str]
+    video_url: Optional[str]
     price: Optional[float]
     sale_price: Optional[float]
     discount_pct: Optional[float]
@@ -194,26 +201,34 @@ class Product:
     sold: Optional[int]
     raw: Dict
 
+
 def fnum(x) -> Optional[float]:
     try:
-        if x is None: return None
+        if x is None:
+            return None
         s = str(x).strip().replace(",", "")
-        if s == "": return None
+        if s == "":
+            return None
         return float(s)
     except Exception:
         return None
 
+
 def fint(x) -> Optional[int]:
     try:
-        if x is None: return None
+        if x is None:
+            return None
         s = str(x).strip().replace(",", "")
-        if s == "": return None
+        if s == "":
+            return None
         return int(float(s))
     except Exception:
         return None
 
+
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
 
 def extract_images(row: Dict) -> List[str]:
     imgs = []
@@ -224,6 +239,8 @@ def extract_images(row: Dict) -> List[str]:
     v0 = str(row.get("image_link", "")).strip()
     if v0:
         imgs.append(v0)
+
+    # unique keep order
     seen = set()
     out = []
     for u in imgs:
@@ -232,10 +249,21 @@ def extract_images(row: Dict) -> List[str]:
             out.append(u)
     return out
 
+
+def extract_video(row: Dict) -> Optional[str]:
+    # รองรับหลายชื่อที่เจอบ่อย
+    for k in ["video_url", "video_link", "video", "reel_video", "reels_video", "short_video"]:
+        v = str(row.get(k, "")).strip()
+        if v:
+            return v
+    return None
+
+
 def normalize_row(row: Dict) -> Product:
     name = (row.get("name") or row.get("title") or "").strip()
     url = (row.get("url") or row.get("product_link") or "").strip()
     images = extract_images(row)
+    video_url = extract_video(row)
 
     price = fnum(row.get("price"))
     sale_price = fnum(row.get("sale_price"))
@@ -247,14 +275,23 @@ def normalize_row(row: Dict) -> Product:
     rating = fnum(row.get("item_rating")) or fnum(row.get("rating"))
     sold = fint(row.get("item_sold")) or fint(row.get("historical_sold")) or fint(row.get("sold"))
 
-    return Product(name, url, images, price, sale_price, dp, rating, sold, row)
+    return Product(
+        name=name, url=url, images=images, video_url=video_url,
+        price=price, sale_price=sale_price, discount_pct=dp,
+        rating=rating, sold=sold, raw=row
+    )
+
 
 def effective_price(p: Product) -> Optional[float]:
     return p.sale_price if p.sale_price is not None else p.price
 
+
 def product_pass(p: Product) -> bool:
-    if not p.name or not p.url or len(p.images) < 1:
+    if not p.name or not p.url:
         return False
+    if len(p.images) < 1 and not p.video_url:
+        return False
+
     ep = effective_price(p)
     if ep is None:
         return False
@@ -268,21 +305,36 @@ def product_pass(p: Product) -> bool:
         return False
     return True
 
+
+def is_campaign_day(now: datetime) -> bool:
+    md = f"{now.month}.{now.day}"
+    return md in {f"{m}.{m}" for m in range(1, 13)} or now.day in {15, 25}
+
+
+def is_end_month_boost(now: datetime) -> bool:
+    end_boost_days = 3
+    next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+    last_day = next_month - timedelta(days=1)
+    return (last_day.day - now.day) < end_boost_days
+
+
 def score_product(p: Product, now: datetime) -> float:
     r = p.rating if p.rating is not None else 4.0
     d = p.discount_pct if p.discount_pct is not None else 0.0
     s = p.sold if p.sold is not None else 0
     ep = effective_price(p) or 999.0
 
-    r_score = clamp((r - 4.0) / 1.0, 0, 1)     # 4..5
-    d_score = clamp(d / 70.0, 0, 1)            # 0..70
-    s_score = clamp((s ** 0.5) / 70.0, 0, 1)   # sqrt scale
+    r_score = clamp((r - 4.0) / 1.0, 0, 1)
+    d_score = clamp(d / 70.0, 0, 1)
+    s_score = clamp((s ** 0.5) / 70.0, 0, 1)
+
     price_score = 1.0 - clamp((ep - PRICE_MIN) / max(1.0, (PRICE_MAX - PRICE_MIN)), 0, 1) * 0.15
-    # ↑ ของถูกนิดหน่อยได้เปรียบ แต่ไม่บ้า
 
     base = (0.46 * r_score) + (0.34 * d_score) + (0.20 * s_score)
     base *= price_score
 
+    if p.video_url:
+        base *= 1.08  # ให้คะแนนวิดีโอนิดนึง
     if is_campaign_day(now):
         base *= 1.15
     if is_end_month_boost(now):
@@ -293,30 +345,29 @@ def score_product(p: Product, now: datetime) -> float:
 
 
 # =========================
-# CSV STREAMING (TOUGH)
+# CSV STREAMING (SAFE)
 # =========================
-def stream_top_products(url: str, now: datetime) -> List[Tuple[float, Product]]:
-    print("INFO: Streaming Shopee CSV (tough mode)...")
+def stream_top_products(csv_url: str, now: datetime) -> List[Tuple[float, Product]]:
+    print("INFO: Streaming Shopee CSV ...")
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "text/csv,application/octet-stream,*/*",
         "Connection": "keep-alive",
     }
-    r = http_get(url, timeout=(CSV_CONNECT_TIMEOUT, CSV_READ_TIMEOUT), headers=headers, stream=True)
+    r = http_get(csv_url, timeout=(CSV_CONNECT_TIMEOUT, CSV_READ_TIMEOUT), headers=headers, stream=True)
     r.raw.decode_content = True
 
-    print(f"INFO: content-type={r.headers.get('content-type','')} content-length={r.headers.get('content-length','')}")
     text_stream = io.TextIOWrapper(r.raw, encoding="utf-8-sig", errors="replace", newline="")
     reader = csv.DictReader(text_stream)
 
     top: List[Tuple[float, Product]] = []
-    seen_rows = 0
+    rows_seen = 0
     kept = 0
 
     for row in reader:
-        seen_rows += 1
-        if seen_rows > STREAM_MAX_ROWS:
-            print(f"INFO: stop at STREAM_MAX_ROWS={STREAM_MAX_ROWS}")
+        rows_seen += 1
+        if rows_seen > STREAM_MAX_ROWS:
+            print(f"INFO: Stop at STREAM_MAX_ROWS={STREAM_MAX_ROWS}")
             break
 
         p = normalize_row(row)
@@ -333,13 +384,14 @@ def stream_top_products(url: str, now: datetime) -> List[Tuple[float, Product]]:
             if sc > top[worst_i][0]:
                 top[worst_i] = (sc, p)
 
-        if seen_rows % 50000 == 0:
-            print(f"INFO: rows={seen_rows} kept={kept} top_pool={len(top)}")
+        if rows_seen % 50000 == 0:
+            print(f"INFO: rows={rows_seen} kept={kept} top_pool={len(top)}")
 
-    print(f"INFO: done rows={seen_rows} kept={kept} top_pool={len(top)}")
+    print(f"INFO: Done rows={rows_seen} kept={kept} top_pool={len(top)}")
     if not top:
-        raise SystemExit("ERROR: No usable products after filters. (ลองลด MIN_* หรือขยายราคา)")
+        raise SystemExit("ERROR: No usable products found. ลด MIN_* หรือขยายช่วงราคาได้")
     return top
+
 
 def weighted_choice(items: List[Tuple[float, Product]]) -> Product:
     total = sum(max(0.001, sc) for sc, _ in items)
@@ -351,6 +403,7 @@ def weighted_choice(items: List[Tuple[float, Product]]) -> Product:
             return p
     return items[-1][1]
 
+
 def pick_product(top_items: List[Tuple[float, Product]], state: dict) -> Product:
     used = set(state.get("used_urls", []))
     fresh = [(sc, p) for sc, p in top_items if p.url not in used]
@@ -361,26 +414,26 @@ def pick_product(top_items: List[Tuple[float, Product]], state: dict) -> Product
 
 
 # =========================
-# CAPTION (TH SELLING)
+# CAPTION
 # =========================
 def fmt_money(x: Optional[float]) -> str:
-    if x is None: return "-"
+    if x is None:
+        return "-"
     return f"{x:,.0f}"
 
+
 def fmt_pct(x: Optional[float]) -> str:
-    if x is None: return "-"
+    if x is None:
+        return "-"
     return f"{x:.0f}%"
+
 
 def build_caption(p: Product, now: datetime) -> str:
     hook = random.choice(HOOKS)
     benefit = random.choice(BENEFITS)
     cta = random.choice(CTA)
 
-    campaign = is_campaign_day(now)
-    boost = is_end_month_boost(now)
-
     ep = effective_price(p)
-    price_line = ""
     if p.sale_price is not None and p.price is not None and p.sale_price < p.price:
         price_line = f"💸 โปรวันนี้: {fmt_money(p.sale_price)} บาท (ปกติ {fmt_money(p.price)} | ลด {fmt_pct(p.discount_pct)})"
     else:
@@ -390,10 +443,10 @@ def build_caption(p: Product, now: datetime) -> str:
     sold_line = f"📦 ขายแล้ว: {p.sold:,} ชิ้น" if p.sold is not None else "📦 ขายแล้ว: -"
 
     urgency = []
-    if campaign:
-        urgency.append("🎉 รอบแคมเปญ! โค้ดส่วนลด/โปรเปลี่ยนไว รีบเช็คในลิงก์")
-    if boost:
-        urgency.append("🔥 ปลายเดือนของจำเป็น คุ้ม ๆ ชิ้นนี้น่าเก็บ")
+    if is_campaign_day(now):
+        urgency.append("🎉 รอบแคมเปญ! โค้ด/โปรเปลี่ยนไว รีบเช็คในลิงก์")
+    if is_end_month_boost(now):
+        urgency.append("🔥 โค้งสุดท้ายปลายเดือน ของจำเป็นคุ้ม ๆ")
 
     tags = " ".join(HASHTAGS)
 
@@ -407,8 +460,7 @@ def build_caption(p: Product, now: datetime) -> str:
         sold_line,
         "",
         f"✅ จุดเด่น: {benefit}",
-        "✅ เหมาะกับบ้าน/งานช่าง ใช้ได้บ่อย",
-        "✅ ดูรีวิว+รูปจริงก่อนซื้อได้ในลิงก์",
+        "✅ ดูรูป/รีวิวจริงก่อนซื้อได้",
         "",
         *urgency,
         "",
@@ -416,7 +468,7 @@ def build_caption(p: Product, now: datetime) -> str:
         "",
         cta,
         "",
-        tags
+        tags,
     ]
 
     out = []
@@ -428,18 +480,20 @@ def build_caption(p: Product, now: datetime) -> str:
 
 
 # =========================
-# FACEBOOK POST
+# FACEBOOK: IMAGE POST (3 images)
 # =========================
 def download_image_bytes(url: str) -> bytes:
     r = http_get(url, timeout=(IMG_CONNECT_TIMEOUT, IMG_READ_TIMEOUT), stream=True,
                  headers={"User-Agent": "Mozilla/5.0"})
     return r.content
 
+
 def upload_unpublished_photo(page_id: str, image_bytes: bytes) -> str:
     files = {"source": ("image.jpg", image_bytes, "image/jpeg")}
     data = {"published": "false"}
     js = graph_post(f"/{page_id}/photos", data=data, files=files)
     return js["id"]
+
 
 def create_feed_post_with_media(page_id: str, message: str, media_fbids: List[str]) -> str:
     data = {"message": message}
@@ -448,58 +502,122 @@ def create_feed_post_with_media(page_id: str, message: str, media_fbids: List[st
     js = graph_post(f"/{page_id}/feed", data=data)
     return js["id"]
 
-def post_product(p: Product, now: datetime) -> str:
-    caption = build_caption(p, now)
+
+def post_images(p: Product, caption: str) -> str:
     imgs = p.images[:POST_IMAGES_COUNT]
+    if not imgs:
+        raise RuntimeError("No images to post")
+
     media_ids = []
     for u in imgs:
         img_bytes = download_image_bytes(u)
         mid = upload_unpublished_photo(PAGE_ID, img_bytes)
         media_ids.append(mid)
-    return create_feed_post_with_media(PAGE_ID, caption, media_ids)
+        time.sleep(1.2)
+
+    post_id = create_feed_post_with_media(PAGE_ID, caption, media_ids)
+    return post_id
+
+
+# =========================
+# FACEBOOK: VIDEO POST (Page Videos)
+# Uses /{page-id}/videos (documented)
+# NOTE: Meta may surface videos as Reels depending on rollout.
+# =========================
+def head_size_mb(url: str) -> Optional[float]:
+    try:
+        r = requests.head(url, timeout=(VID_CONNECT_TIMEOUT, 20), allow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code >= 400:
+            return None
+        cl = r.headers.get("content-length")
+        if not cl:
+            return None
+        return int(cl) / (1024 * 1024)
+    except Exception:
+        return None
+
+
+def post_video_by_url(caption: str, video_url: str) -> str:
+    """
+    POST /{page-id}/videos with file_url (supported by Page Videos edge)
+    """
+    # size guard (optional)
+    mb = head_size_mb(video_url)
+    if mb is not None and mb > VIDEO_MAX_MB:
+        raise RuntimeError(f"Video too large: {mb:.1f}MB > {VIDEO_MAX_MB}MB")
+
+    data = {
+        "description": caption,
+        "file_url": video_url,   # key for remote URL upload
+    }
+    js = graph_post(f"/{PAGE_ID}/videos", data=data)
+    # returns id of video
+    return js.get("id", "unknown_video_id")
 
 
 # =========================
 # MAIN
 # =========================
 def main():
-    print("==== V17 THAILAND ULTRA PRO ====")
     now = now_bkk()
-    print(f"INFO: Now (BKK) = {now.isoformat()}")
-    print(f"INFO: Graph = {GRAPH_VERSION}")
-    print(f"INFO: Campaign day = {is_campaign_day(now)} | End-month boost = {is_end_month_boost(now)}")
-    print(f"INFO: Schedule slots = {SLOTS_BKK}")
+    print("==== V19 ULTRA ====")
+    print("INFO: Now(BKK) =", now.isoformat())
+    print("INFO: Graph =", GRAPH_VERSION)
+    print("INFO: PREFER_VIDEO =", PREFER_VIDEO, "| VIDEO_MAX_MB =", VIDEO_MAX_MB)
+    print("INFO: Filters: rating>=", MIN_RATING, "discount>=", MIN_DISCOUNT_PCT,
+          "sold>=", MIN_SOLD, "price=[", PRICE_MIN, "..", PRICE_MAX, "]")
 
     state = load_state()
+
     due = due_slots_today(state, now)
+    if not due and not FORCE_POST:
+        print("INFO: No due slot (past times already posted). Exit. (Set FORCE_POST=1 to test)")
+        return
+
     if due:
-        print(f"INFO: Due slots today (catch-up) = {due}")
+        print("INFO: Due slots today (catch-up) =", due)
+        slot_used = due[0]
+        print("INFO: Will post for slot =", slot_used)
     else:
-        print("INFO: No due slots for past times -> exit (unless FORCE_POST=1)")
-        if os.getenv("FORCE_POST", "").strip().lower() not in ("1", "true", "yes"):
-            return
+        slot_used = "MANUAL"
+        print("INFO: FORCE_POST enabled -> manual post")
 
     top_items = stream_top_products(SHOPEE_CSV_URL, now)
+    posts_done = 0
 
     for _ in range(POSTS_THIS_RUN):
-        slot_used = None
-        if due:
-            slot_used = due.pop(0)
-            print(f"INFO: Posting for due slot = {slot_used}")
-
         p = pick_product(top_items, state)
-        print(f"INFO: Picked: {p.name[:80]} | rating={p.rating} discount={p.discount_pct} sold={p.sold} price={effective_price(p)}")
+        caption = build_caption(p, now)
 
-        post_id = post_product(p, now)
-        print(f"OK: Posted feed id = {post_id}")
+        print("INFO: Picked:", p.name[:90], "| video?", bool(p.video_url), "| images:", len(p.images))
 
-        if slot_used:
+        # Prefer video if exists and enabled
+        try:
+            if PREFER_VIDEO and p.video_url:
+                vid_id = post_video_by_url(caption, p.video_url)
+                print("OK: Posted VIDEO id =", vid_id)
+            else:
+                post_id = post_images(p, caption)
+                print("OK: Posted IMAGES feed id =", post_id)
+        except Exception as e:
+            # fallback: if video fails -> try images
+            if p.video_url:
+                print("WARN: Video post failed -> fallback to images. Reason:", str(e))
+                post_id = post_images(p, caption)
+                print("OK: Posted IMAGES(feed) fallback id =", post_id)
+            else:
+                raise
+
+        if slot_used != "MANUAL":
             mark_slot_posted(state, now, slot_used)
 
+        posts_done += 1
         time.sleep(5)
 
     save_state(state)
-    print("INFO: done.")
+    print("INFO: Done. posts_done =", posts_done)
+
 
 if __name__ == "__main__":
     main()
