@@ -2,8 +2,10 @@ name: Auto Post
 
 on:
   schedule:
-    - cron: "0 5 * * *"     # 12:00 TH
-    - cron: "30 11 * * *"   # 18:30 TH
+    - cron: "0 2 * * *"
+    - cron: "0 5 * * *"
+    - cron: "30 11 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch:
 
 jobs:
@@ -18,27 +20,33 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run V30 ULTRA TH
+      - name: Run V30 ULTRA
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-          # Affiliate (ของคุณ)
+          # หน้านาย (ของคุณ)
           SHOPEE_AFFILIATE_ID: "15328100363"
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
 
-          # รันครั้งแรกโพสต์ 1 แน่นอน
+          # เวลาโพสต์ไทย
+          SLOTS_BKK: "09:00,12:00,18:30,21:00"
+
+          # รันครั้งแรกให้โพสต์ 1 โพสต์แน่นอน
           FIRST_RUN_POST_1: "1"
 
-          # ถ้ากดรันเองจะให้โพสต์ทันที ตั้งเป็น 1
-          FORCE_POST: "0"
-
-          # slot เวลาไทย (แก้ได้)
-          SLOTS_BKK: "12:00,18:30,21:00"
-
-          # จำกัด 1 โพสต์ต่อ run (แนะนำเพื่อความปลอดภัย)
+          # โพสต์ต่อ 1 run
           POSTS_MAX_PER_RUN: "1"
+
+          # กรองให้ตรงเพจ (กันหลุดหมวด)
+          MIN_RATING: "4.6"
+          MIN_DISCOUNT_PCT: "10"
+          PRICE_MIN: "59"
+          PRICE_MAX: "4999"
+
+          # รูปต่อโพสต์
+          POST_IMAGES_COUNT: "3"
         run: python app.py
