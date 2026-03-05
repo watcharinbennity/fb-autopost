@@ -2,20 +2,21 @@ name: Auto Post
 
 on:
   schedule:
+    # 09:00 TH = 02:00 UTC
     - cron: "0 2 * * *"
-    - cron: "15 5 * * *"
-    - cron: "30 8 * * *"
+    # 12:00 TH = 05:00 UTC
+    - cron: "0 5 * * *"
+    # 18:30 TH = 11:30 UTC
     - cron: "30 11 * * *"
+    # 21:00 TH = 14:00 UTC
     - cron: "0 14 * * *"
-    - cron: "30 15 * * *"
+
   workflow_dispatch:
 
 jobs:
   autopost:
     runs-on: ubuntu-latest
-
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -24,12 +25,11 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run AI SALES ENGINE
+      - name: Run V30 ULTRA AI
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          AFFILIATE_ID: ${{ secrets.AFFILIATE_ID }}
-
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
         run: python app.py
