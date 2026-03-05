@@ -15,12 +15,13 @@ import requests
 # =========================================================
 # V30.2 ULTRA — BEN Home & Electrical Shopee Affiliate Autopost
 # Graph: v25.0
-# FIX:
-# - REMOVE "ขายแล้ว" line completely
-# - Stronger filtering to match page niche (block camera/flash/etc.)
-# - Category allow + keyword allow + keyword block
-# - Catch-up posting if past slot not posted
+# Features:
 # - First run posts 1 post
+# - Catch-up posting if past slot not posted
+# - Strong niche filtering (category allow + keyword allow + keyword block)
+# - Remove "ขายแล้ว" from caption completely
+# - Attach 1-3 images as a single feed post
+# - Ensure affiliate link params (affiliate_id + utm_source + afftag)
 # =========================================================
 
 # =========================
@@ -88,7 +89,6 @@ BLOCK_KEYWORDS = os.getenv(
 ).strip()
 
 # Category allow (เอาเฉพาะหมวดที่เข้ากับเพจ)
-# ถ้าหมวดใน CSV เป็นอังกฤษ เช่น "Cables, Chargers & Converters" จะผ่าน
 CATEGORY_ALLOW = os.getenv(
     "CATEGORY_ALLOW",
     r"(Cables|Chargers|Converters|Lighting|Home Improvement|Tools|Hardware|Electrical|Power|Batteries|Solar|DIY|Repair|เครื่องมือ|ช่าง|ไฟฟ้า|อุปกรณ์ไฟฟ้า|หลอดไฟ|ปลั๊ก|สายไฟ|เบรกเกอร์|สวิตช์)"
@@ -205,14 +205,17 @@ def ensure_aff_params(url: str) -> str:
         new_q = urlencode(q, doseq=True)
         return urlunparse((u.scheme, u.netloc, u.path, u.params, new_q, u.fragment))
 
+    # already short redirect
     if "shope.ee/an_redir" in url:
         return with_params(url)
 
+    # normal product link -> wrap to shope.ee redir
     if "shopee.co.th/" in url and "/product/" in url:
         origin = url
         redir = "https://shope.ee/an_redir?origin_link=" + quote(origin, safe="")
         return with_params(redir)
 
+    # fallback: just append params
     return with_params(url)
 
 # =========================
@@ -251,8 +254,10 @@ CAT_ALLOW_RE = re.compile(CATEGORY_ALLOW, flags=re.IGNORECASE) if CATEGORY_ALLOW
 
 def extract_images(row: Dict) -> List[str]:
     imgs = []
-    for k in ["image_link", "image_link_3", "image_link_4", "image_link_5", "image_link_6",
-              "image_link_7", "image_link_8", "image_link_9", "image_link_10"]:
+    for k in [
+        "image_link", "image_link_3", "image_link_4", "image_link_5",
+        "image_link_6", "image_link_7", "image_link_8", "image_link_9", "image_link_10"
+    ]:
         v = str(row.get(k, "")).strip()
         if v:
             imgs.append(v)
@@ -272,7 +277,10 @@ def extract_images(row: Dict) -> List[str]:
 def normalize_row(row: Dict) -> Product:
     title = (row.get("title") or row.get("name") or "").strip()
     product_link = (row.get("product_link") or row.get("url") or "").strip()
-    product_short = (row.get("product_short link") or row.get("product_short_link") or row.get("product_short") or "").strip()
+    product_short = (
+        row.get("product_short link") or row.get("product_short_link") or row.get("product_short") or ""
+    )
+    product_short = str(product_short).strip()
 
     images = extract_images(row)
 
@@ -327,8 +335,6 @@ def pass_filters(p: Product) -> bool:
         return False
     if ALLOW_RE and not ALLOW_RE.search(blob):
         return False
-
-    # Category allow (กันของหลุดหมวดแบบเข้ม)
     if CAT_ALLOW_RE and not CAT_ALLOW_RE.search(p.category_text):
         return False
 
