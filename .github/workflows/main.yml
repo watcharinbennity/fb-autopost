@@ -1,12 +1,16 @@
-name: Auto Post (V30 ULTRA)
+name: Auto Post (V38 ULTRA)
 
 on:
   workflow_dispatch:
   schedule:
-    # Bangkok 12:00 -> UTC 05:00
+    # BKK 12:00 -> UTC 05:00
     - cron: "0 5 * * *"
-    # Bangkok 18:30 -> UTC 11:30
+    # BKK 18:30 -> UTC 11:30
     - cron: "30 11 * * *"
+
+concurrency:
+  group: fb-autopost-v38
+  cancel-in-progress: false
 
 jobs:
   autopost:
@@ -23,14 +27,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: state.json
-          key: fb-autopost-state-v30
+          key: fb-autopost-state-v38
           restore-keys: |
             fb-autopost-state-
 
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Run V30 ULTRA
+      - name: Run V38 ULTRA
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -38,15 +42,27 @@ jobs:
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # (เลือกได้) ตั้งค่าเพิ่มเองได้ใน Variables/Secrets ถ้าต้องการ
-          # SHOPEE_AFF_TAG: "BENHomeElectrical"
-          # SLOTS_BKK: "09:00,12:00,18:30,21:00"
-          # POSTS_MAX_PER_RUN: "1"
-          # FORCE_POST: "0"
+          # V38 settings (ปรับได้ใน Secrets/Variables)
+          BRAND: "BEN Home & Electrical"
+          SLOTS_BKK: "12:00,18:30"
+          POSTS_MAX_PER_RUN: "1"
+          FIRST_RUN_POST_1: "1"
+          FORCE_POST: "0"
+
+          # คัดให้ตรงเพจเข้ม ๆ
+          STRICT_MODE: "1"
+          MIN_RATING: "4.7"
+          MIN_DISCOUNT_PCT: "10"
+          MIN_SOLD: "50"
+
+          # โพสต์รูปเท่านั้น (ตามที่คุณต้องการ)
+          PREFER_VIDEO: "0"
+          POST_IMAGES_COUNT: "3"
+
         run: python app.py
 
       - name: Save state cache
         uses: actions/cache@v4
         with:
           path: state.json
-          key: fb-autopost-state-v30
+          key: fb-autopost-state-v38
