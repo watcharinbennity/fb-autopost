@@ -2,15 +2,8 @@ name: Auto Post
 
 on:
   schedule:
-    # 09:00 TH = 02:00 UTC
-    - cron: "0 2 * * *"
-    # 12:00 TH = 05:00 UTC
-    - cron: "0 5 * * *"
-    # 18:30 TH = 11:30 UTC
-    - cron: "30 11 * * *"
-    # 21:00 TH = 14:00 UTC
-    - cron: "0 14 * * *"
-
+    - cron: "0 5 * * *"     # 12:00 TH
+    - cron: "30 11 * * *"   # 18:30 TH
   workflow_dispatch:
 
 jobs:
@@ -25,11 +18,27 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run V30 ULTRA AI
+      - name: Run V30 ULTRA TH
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+
+          # Affiliate (ของคุณ)
+          SHOPEE_AFFILIATE_ID: "15328100363"
+          AFF_UTM_SOURCE: "facebook"
+          AFF_TAG: "BENHomeElectrical"
+
+          # รันครั้งแรกโพสต์ 1 แน่นอน
+          FIRST_RUN_POST_1: "1"
+
+          # ถ้ากดรันเองจะให้โพสต์ทันที ตั้งเป็น 1
+          FORCE_POST: "0"
+
+          # slot เวลาไทย (แก้ได้)
+          SLOTS_BKK: "12:00,18:30,21:00"
+
+          # จำกัด 1 โพสต์ต่อ run (แนะนำเพื่อความปลอดภัย)
+          POSTS_MAX_PER_RUN: "1"
         run: python app.py
