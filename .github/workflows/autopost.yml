@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  post:
+  autopost:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,7 +22,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run ULTRA SALES ENGINE
+      - name: Run V24 AI SALES ENGINE
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
