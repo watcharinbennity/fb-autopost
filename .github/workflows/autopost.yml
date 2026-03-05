@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run V19 ULTRA
+      - name: Run V21 GOD MODE
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -49,20 +49,16 @@ jobs:
 
           POST_IMAGES_COUNT: "3"
 
-          # โหดแบบขายได้จริง (ปรับได้)
-          MIN_RATING: "4.7"
-          MIN_DISCOUNT_PCT: "15"
-          MIN_SOLD: "50"
+          # Filters (ปรับได้)
+          MIN_RATING: "4.6"
+          MIN_DISCOUNT_PCT: "10"
+          MIN_SOLD: "30"
           PRICE_MIN: "79"
           PRICE_MAX: "1999"
 
-          # CSV แข็ง ๆ
-          STREAM_MAX_ROWS: "300000"
-          TOPK_POOL: "250"
-
-          # วิดีโอ
-          PREFER_VIDEO: "1"
-          VIDEO_MAX_MB: "80"
+          # CSV streaming
+          STREAM_MAX_ROWS: "250000"
+          TOPK_POOL: "200"
 
         run: python -u app.py
 
