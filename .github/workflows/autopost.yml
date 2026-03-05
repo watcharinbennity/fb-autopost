@@ -2,26 +2,16 @@ name: Auto Post
 
 on:
   schedule:
-    - cron: "0 2 * * *"    # 09:00 BKK
-    - cron: "15 5 * * *"   # 12:15 BKK
-    - cron: "30 8 * * *"   # 15:30 BKK
-    - cron: "30 11 * * *"  # 18:30 BKK
-    - cron: "0 14 * * *"   # 21:00 BKK
+    - cron: "0 2 * * *"
+    - cron: "15 5 * * *"
+    - cron: "30 8 * * *"
+    - cron: "30 11 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch:
-    inputs:
-      posts_this_run:
-        description: "How many posts this run"
-        required: false
-        default: "1"
-      force_post:
-        description: "Force post immediately"
-        required: false
-        default: "0"
 
 jobs:
-  autopost:
+  post:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -30,32 +20,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Run V22 GOD MODE PRO
+      - name: Run ULTRA SALES ENGINE
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-
-          POSTS_THIS_RUN: ${{ github.event.inputs.posts_this_run || '1' }}
-          FORCE_POST: ${{ github.event.inputs.force_post || '0' }}
-
-          POST_IMAGES_COUNT: "3"
-
-          STREAM_MAX_ROWS: "250000"
-          TOPK_POOL: "200"
-
-        run: python -u app.py
-
-      - name: Save state
-        run: |
-          if [ -f state.json ]; then
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add state.json
-            git commit -m "update state" || echo "No change"
-            git push || echo "skip push"
-          fi
+        run: python app.py
