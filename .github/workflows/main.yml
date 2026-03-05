@@ -1,0 +1,52 @@
+name: Auto Post (V30 ULTRA)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Bangkok 12:00 -> UTC 05:00
+    - cron: "0 5 * * *"
+    # Bangkok 18:30 -> UTC 11:30
+    - cron: "30 11 * * *"
+
+jobs:
+  autopost:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: fb-autopost-state-v30
+          restore-keys: |
+            fb-autopost-state-
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run V30 ULTRA
+        env:
+          GRAPH_VERSION: "v25.0"
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+
+          # (เลือกได้) ตั้งค่าเพิ่มเองได้ใน Variables/Secrets ถ้าต้องการ
+          # SHOPEE_AFF_TAG: "BENHomeElectrical"
+          # SLOTS_BKK: "09:00,12:00,18:30,21:00"
+          # POSTS_MAX_PER_RUN: "1"
+          # FORCE_POST: "0"
+        run: python app.py
+
+      - name: Save state cache
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: fb-autopost-state-v30
