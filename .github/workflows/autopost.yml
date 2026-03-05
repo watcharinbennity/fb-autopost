@@ -13,6 +13,10 @@ on:
         description: "How many posts this run"
         required: false
         default: "1"
+      force_post:
+        description: "Force post immediately (test)"
+        required: false
+        default: "0"
 
 concurrency:
   group: autopost-${{ github.ref }}
@@ -21,10 +25,11 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -32,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Auto Post (V17 TH ULTRA PRO)
+      - name: Run V19 ULTRA
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -40,17 +45,24 @@ jobs:
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
           POSTS_THIS_RUN: ${{ github.event.inputs.posts_this_run || '1' }}
+          FORCE_POST: ${{ github.event.inputs.force_post || '0' }}
+
           POST_IMAGES_COUNT: "3"
 
-          # คัดของให้ “โหด”
+          # โหดแบบขายได้จริง (ปรับได้)
           MIN_RATING: "4.7"
-          MIN_DISCOUNT_PCT: "20"
-          MIN_SOLD: "80"
+          MIN_DISCOUNT_PCT: "15"
+          MIN_SOLD: "50"
           PRICE_MIN: "79"
-          PRICE_MAX: "1990"
+          PRICE_MAX: "1999"
 
+          # CSV แข็ง ๆ
           STREAM_MAX_ROWS: "300000"
           TOPK_POOL: "250"
+
+          # วิดีโอ
+          PREFER_VIDEO: "1"
+          VIDEO_MAX_MB: "80"
 
         run: python -u app.py
 
