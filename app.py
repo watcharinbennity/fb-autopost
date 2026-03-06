@@ -14,11 +14,60 @@ STATE_FILE = "state.json"
 MIN_RATING = 4.7
 MIN_SOLD = 500
 
-ALLOWED = [
+KEYWORDS = [
 "led","light","lamp","solar",
 "ปลั๊ก","ปลั๊กไฟ","สายไฟ",
 "โคมไฟ","ไฟ","สปอตไลท์",
 "tool","ไขควง","สว่าน"
+]
+
+CAPTION_STYLE = [
+"""
+⚡ แนะนำจาก BEN Home & Electrical
+
+{title}
+
+⭐ รีวิว {rating}
+🔥 ขายแล้ว {sold}
+💰 ราคา {price} บาท
+
+🛒 สั่งซื้อสินค้า
+{link}
+
+#BENHomeElectrical
+#ShopeeAffiliate
+""",
+
+"""
+🔥 สินค้าขายดีจาก BEN Home & Electrical
+
+{title}
+
+⭐ คะแนนรีวิว {rating}
+📦 ยอดขาย {sold}
+💰 ราคา {price} บาท
+
+ซื้อเลย
+{link}
+
+#ShopeeAffiliate
+#BENHomeElectrical
+""",
+
+"""
+⚡ ของมันต้องมี!
+
+{title}
+
+⭐ รีวิว {rating}
+🔥 ขายไปแล้ว {sold}
+💰 ราคา {price}
+
+ดูสินค้า
+{link}
+
+#BENHomeElectrical
+"""
 ]
 
 
@@ -51,27 +100,11 @@ def allow_product(name):
 
     name = name.lower()
 
-    for k in ALLOWED:
+    for k in KEYWORDS:
         if k in name:
             return True
 
     return False
-
-
-def score_product(p):
-
-    rating = float(p.get("item_rating",0))
-    sold = int(p.get("item_sold",0))
-
-    score = rating*40 + sold*0.6
-
-    name = p.get("title","").lower()
-
-    for k in ALLOWED:
-        if k in name:
-            score += 20
-
-    return score
 
 
 def valid(p):
@@ -79,16 +112,34 @@ def valid(p):
     rating=float(p.get("item_rating",0))
     sold=int(p.get("item_sold",0))
 
-    if rating<MIN_RATING:
+    if rating < MIN_RATING:
         return False
 
-    if sold<MIN_SOLD:
+    if sold < MIN_SOLD:
         return False
 
     if not allow_product(p.get("title","")):
         return False
 
     return True
+
+
+def score(p):
+
+    rating=float(p.get("item_rating",0))
+    sold=int(p.get("item_sold",0))
+
+    score = rating*40 + sold*0.6
+
+    name=p.get("title","").lower()
+
+    for k in KEYWORDS:
+        if k in name:
+            score+=20
+
+    score += random.random()*10
+
+    return score
 
 
 def pick(products,state):
@@ -110,9 +161,9 @@ def pick(products,state):
     if not pool:
         return None
 
-    ranked=sorted(pool,key=score_product,reverse=True)
+    ranked=sorted(pool,key=score,reverse=True)
 
-    top=ranked[:20]
+    top=ranked[:30]
 
     return random.choice(top)
 
@@ -124,31 +175,15 @@ def aff(link):
 
 def caption(p):
 
-    name=p.get("title")
-    rating=p.get("item_rating")
-    sold=p.get("item_sold")
-    price=p.get("sale_price")
+    style=random.choice(CAPTION_STYLE)
 
-    link=aff(p.get("product_link"))
-
-    text=f"""
-⚡ แนะนำจาก BEN Home & Electrical
-
-{name}
-
-⭐ รีวิว {rating}
-🔥 ขายแล้ว {sold}
-💰 ราคา {price} บาท
-
-🛒 สั่งซื้อสินค้า
-{link}
-
-#BENHomeElectrical
-#ShopeeAffiliate
-#อุปกรณ์ไฟฟ้า
-"""
-
-    return text
+    return style.format(
+        title=p.get("title"),
+        rating=p.get("item_rating"),
+        sold=p.get("item_sold"),
+        price=p.get("sale_price"),
+        link=aff(p.get("product_link"))
+    )
 
 
 def upload(img):
@@ -193,9 +228,7 @@ def main():
 
     res=post(p)
 
-    link=p.get("product_link")
-
-    state["posted_links"].append(link)
+    state["posted_links"].append(p.get("product_link"))
 
     save_state(state)
 
