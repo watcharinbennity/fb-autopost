@@ -1,4 +1,4 @@
-name: Auto Post V56
+name: Auto Post V60
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
   autopost:
 
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
 
     steps:
 
