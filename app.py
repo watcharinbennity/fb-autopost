@@ -4,26 +4,26 @@ import json
 import random
 import requests
 
-PAGE_ID = os.getenv("PAGE_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
-AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID=os.getenv("PAGE_ID")
+TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL=os.getenv("SHOPEE_CSV_URL")
+AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
-STATE_FILE = "state.json"
+STATE_FILE="state.json"
 
-MIN_RATING = 4.7
-MIN_SOLD = 500
+MIN_RATING=4.7
+MIN_SOLD=500
 
-KEYWORDS = [
+KEYWORDS=[
 "led","light","lamp","solar",
 "ปลั๊ก","ปลั๊กไฟ","สายไฟ",
 "โคมไฟ","ไฟ","สปอตไลท์",
 "tool","ไขควง","สว่าน"
 ]
 
-CAPTION_STYLE = [
-"""
-⚡ แนะนำจาก BEN Home & Electrical
+CAPTION_STYLE=[
+
+"""⚡ แนะนำจาก BEN Home & Electrical
 
 {title}
 
@@ -31,47 +31,40 @@ CAPTION_STYLE = [
 🔥 ขายแล้ว {sold}
 💰 ราคา {price} บาท
 
-🛒 สั่งซื้อสินค้า
+🛒 สั่งซื้อ
 {link}
 
-#BENHomeElectrical
-#ShopeeAffiliate
-""",
+#BENHomeElectrical #ShopeeAffiliate""",
 
-"""
-🔥 สินค้าขายดีจาก BEN Home & Electrical
+"""🔥 สินค้าขายดี
 
 {title}
 
-⭐ คะแนนรีวิว {rating}
-📦 ยอดขาย {sold}
-💰 ราคา {price} บาท
+⭐ {rating}
+📦 ขายแล้ว {sold}
+💰 {price} บาท
 
-ซื้อเลย
 {link}
 
-#ShopeeAffiliate
-#BENHomeElectrical
-""",
+#BENHomeElectrical""",
 
-"""
-⚡ ของมันต้องมี!
+"""🏠 ของมันต้องมี
 
 {title}
 
-⭐ รีวิว {rating}
-🔥 ขายไปแล้ว {sold}
-💰 ราคา {price}
+⭐ {rating}
+🔥 {sold} คนซื้อ
 
-ดูสินค้า
-{link}
+💰 {price} บาท
 
-#BENHomeElectrical
-"""
+👉 {link}
+
+#ShopeeAffiliate"""
 ]
 
 
 def load_state():
+
     if not os.path.exists(STATE_FILE):
         return {"posted_links":[]}
 
@@ -80,25 +73,26 @@ def load_state():
 
 
 def save_state(state):
+
     with open(STATE_FILE,"w") as f:
         json.dump(state,f)
 
 
 def read_feed():
 
-    r = requests.get(CSV_URL)
+    r=requests.get(CSV_URL)
     r.raise_for_status()
 
-    lines = r.text.splitlines()
+    lines=r.text.splitlines()
 
-    reader = csv.DictReader(lines)
+    reader=csv.DictReader(lines)
 
     return list(reader)
 
 
-def allow_product(name):
+def allow(name):
 
-    name = name.lower()
+    name=name.lower()
 
     for k in KEYWORDS:
         if k in name:
@@ -112,13 +106,13 @@ def valid(p):
     rating=float(p.get("item_rating",0))
     sold=int(p.get("item_sold",0))
 
-    if rating < MIN_RATING:
+    if rating<MIN_RATING:
         return False
 
-    if sold < MIN_SOLD:
+    if sold<MIN_SOLD:
         return False
 
-    if not allow_product(p.get("title","")):
+    if not allow(p.get("title","")):
         return False
 
     return True
@@ -129,17 +123,17 @@ def score(p):
     rating=float(p.get("item_rating",0))
     sold=int(p.get("item_sold",0))
 
-    score = rating*40 + sold*0.6
+    s=rating*40+sold*0.6
 
     name=p.get("title","").lower()
 
     for k in KEYWORDS:
         if k in name:
-            score+=20
+            s+=20
 
-    score += random.random()*10
+    s+=random.random()*10
 
-    return score
+    return s
 
 
 def pick(products,state):
