@@ -3,8 +3,8 @@ name: BEN Auto Post AI
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 5 * * *"      # 12:00 ไทย
-    - cron: "30 11 * * *"    # 18:30 ไทย
+    - cron: "0 5 * * *"
+    - cron: "30 11 * * *"
 
 permissions:
   contents: write
