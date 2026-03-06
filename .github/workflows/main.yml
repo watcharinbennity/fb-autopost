@@ -1,29 +1,31 @@
-name: BEN Auto Post V40
+name: BEN Auto Post V60
 
 on:
   workflow_dispatch:
   schedule:
+    - cron: "0 1 * * *"
+    - cron: "0 3 * * *"
     - cron: "0 5 * * *"
-    - cron: "30 11 * * *"
+    - cron: "0 8 * * *"
+    - cron: "0 11 * * *"
+    - cron: "0 14 * * *"
 
 permissions:
   contents: write
 
 jobs:
   autopost:
-
     runs-on: ubuntu-latest
+    timeout-minutes: 8
 
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - run: |
-          pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
       - name: Run Bot
         env:
