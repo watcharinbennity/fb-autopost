@@ -647,37 +647,4 @@ def main():
         except Exception:
             continue
 
-    cands = pick_candidates(products, state, k=40)
-    if not cands:
-        log("INFO: No candidates matched filters")
-        state["last_run_ts"] = now_bkk().isoformat()
-        state["first_run_done"] = True
-        save_state(state)
-        log("INFO: Done")
-        return
-
-    random.shuffle(cands)
-    to_post = cands[:max(1, POSTS_MAX_PER_RUN)]
-
-    posts_done = 0
-    for p in to_post:
-        try:
-            pid = p.itemid or p.link
-            log(f"INFO: posting product id={pid} name={p.name[:60]}")
-            post_id = post_one(p, state)
-            posts_done += 1
-            log(f"INFO: posted fb_post_id={post_id}")
-        except Exception as e:
-            log(f"ERROR: post failed: {e}")
-
-    now_dt = now_bkk()
-    state["last_run_ts"] = now_dt.isoformat()
-    state["first_run_done"] = True
-    state["last_post_slot_key"] = nearest_slot_key(now_dt, parse_slots(SLOTS_BKK))
-    save_state(state)
-
-    log(f"INFO: Done. posts_done={posts_done}")
-
-
-if __name__ == "__main__":
-    main()
+    cands = pick_candida
