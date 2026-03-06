@@ -1,4 +1,4 @@
-name: BEN AI Viral Engine
+name: BEN AI Growth Engine
 
 on:
  workflow_dispatch:
@@ -15,6 +15,7 @@ on:
   - cron: "0 17 * * *"
   - cron: "0 19 * * *"
   - cron: "0 21 * * *"
+  - cron: "0 23 * * *"
 
 permissions:
  contents: write
