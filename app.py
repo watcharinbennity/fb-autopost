@@ -648,20 +648,4 @@ def main():
         try:
             pid = p.itemid or p.link
             log(f"INFO: posting product id={pid} name={p.name[:60]}")
-            post_id = post_one(p, state)
-            posts_done += 1
-            log(f"INFO: posted fb_post_id={post_id}")
-        except Exception as e:
-            log(f"ERROR: post failed: {e}")
-
-    now_dt = now_bkk()
-    state["last_run_ts"] = now_dt.isoformat()
-    state["first_run_done"] = True
-    state["last_post_slot_key"] = nearest_slot_key(now_dt, parse_slots(SLOTS_BKK))
-    save_state(state)
-
-    log(f"INFO: Done. posts_done={posts_done}")
-
-
-if __name__ == "__main__":
-    main()
+            post_id = post_one(p, stat
