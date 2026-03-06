@@ -1,14 +1,10 @@
-name: Auto Post
+name: Auto Post V500
 
 on:
   workflow_dispatch:
 
   schedule:
-    - cron: "30 1 * * *"
-    - cron: "0 5 * * *"
-    - cron: "0 8 * * *"
-    - cron: "30 11 * * *"
-    - cron: "30 14 * * *"
+    - cron: "0 */2 * * *"
 
 jobs:
   autopost:
