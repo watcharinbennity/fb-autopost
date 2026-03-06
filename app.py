@@ -3,7 +3,7 @@ import csv
 import json
 import random
 import re
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 import requests
 from openai import OpenAI
@@ -303,7 +303,7 @@ def fetch_products_csv():
             "product_link", "link", "item_link", "url"
         ])
         sale_price = pick_first_nonempty(row, [
-            "sale_price", "item_price", "model_price", "model_prices"
+            "sale_price", "price", "item_price", "model_price", "model_prices"
         ])
         original_price = pick_first_nonempty(row, [
             "price", "original_price", "item_original_price"
@@ -312,12 +312,18 @@ def fetch_products_csv():
             "item_rating", "rating", "avg_rating", "shop_rating"
         ]), 0)
         sold = safe_int(pick_first_nonempty(row, [
-            "historical_sold", "sold", "sales"
+            "item_sold", "historical_sold", "sold", "sales"
         ]), 0)
 
-        img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url", "additional_image_link"])
-        img2 = pick_first_nonempty(row, ["image_link_2", "image_2", "image2", "image_link_3"])
-        img3 = pick_first_nonempty(row, ["image_link_4", "image_3", "image3", "image_link_5"])
+        img1 = pick_first_nonempty(row, [
+            "image_link", "image", "main_image", "image_url", "additional_image_link"
+        ])
+        img2 = pick_first_nonempty(row, [
+            "image_link_2", "image_2", "image2", "image_link_3"
+        ])
+        img3 = pick_first_nonempty(row, [
+            "image_link_4", "image_3", "image3", "image_link_5"
+        ])
 
         if not name or not product_link or not img1:
             continue
