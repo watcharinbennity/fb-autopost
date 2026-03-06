@@ -3,14 +3,27 @@ name: Auto Post (V39 ULTRA)
 on:
   workflow_dispatch: {}
   schedule:
-    # Bangkok 12:00 = UTC 05:00
+    # Bangkok (UTC+7) = เวลาไทย
+    # 09:00 BKK = 02:00 UTC
+    - cron: "0 2 * * *"
+    # 12:00 BKK = 05:00 UTC
     - cron: "0 5 * * *"
-    # Bangkok 18:30 = UTC 11:30
+    # 15:00 BKK = 08:00 UTC
+    - cron: "0 8 * * *"
+    # 18:30 BKK = 11:30 UTC
     - cron: "30 11 * * *"
+    # 21:30 BKK = 14:30 UTC
+    - cron: "30 14 * * *"
 
 jobs:
   autopost:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # กันรันซ้อนกัน (ถ้ามีคนกด Run ซ้ำ/หรือ schedule ชนกัน)
+    concurrency:
+      group: autopost-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
@@ -34,23 +47,25 @@ jobs:
 
       - name: Run V39 ULTRA
         env:
+          PYTHONUNBUFFERED: "1"
+
           GRAPH_VERSION: v25.0
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # เวลาโพสต์ (ไทย)
-          SLOTS_BKK: "12:00,18:30"
+          # 5 ช่วงต่อวัน (ไทย)
+          SLOTS_BKK: "09:00,12:00,15:00,18:30,21:30"
           POSTS_MAX_PER_RUN: "1"
 
-          # รันครั้งแรกโพสต์ 1
+          # รันครั้งแรกให้โพสต์ 1
           FIRST_RUN_POST_1: "1"
 
-          # ถ้ากด Run workflow เอง (workflow_dispatch) ให้ FORCE_POST=1 เพื่อโพสต์ทันที
+          # กด Run workflow เอง -> โพสต์ทันที
           FORCE_POST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
 
-          # ค่าคัดกรอง (ปรับได้)
+          # คัดกรองสินค้า
           MIN_RATING: "4.7"
           MIN_DISCOUNT_PCT: "15"
           MIN_SOLD: "50"
@@ -64,12 +79,17 @@ jobs:
           BRAND: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
 
-          # กรองให้ตรงเพจ (ปรับได้)
-          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|รางปลั๊ก|สายไฟ|เบรกเกอร์|ตู้ไฟ|หลอดไฟ|โคม|สวิตช์|มิเตอร์|UPS|แบตเตอรี่|LiFePO4|อินเวอร์เตอร์|โซล่า|solar|ชาร์จ|charger|หัวชาร์จ|adapter|อะแดปเตอร์|พาวเวอร์แบงก์|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|งานช่าง|บ้าน|ซ่อม|DIY|กาว|เทปพันสาย|ปลั๊กพ่วง|ปลั๊กกันไฟกระชาก)"
-          BLOCK_KEYWORDS: "(เสื้อผ้า|บรา|กางเกง|เดรส|รองเท้าแฟชั่น|เครื่องสำอาง|สกินแคร์|น้ำหอม|ของเล่นเด็ก|ตุ๊กตา|อาหารเสริม|บุหรี่|แอลกอฮอล์|ย้อมผม|วิกผม|แฟลชกล้อง|กล้องถ่ายรูป|เลนส์)"
+          # ล็อคให้ตรงเพจ (กันของหลุดแนว)
+          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|รางปลั๊ก|สายไฟ|เบรกเกอร์|ตู้ไฟ|หลอดไฟ|โคม|สวิตช์|UPS|แบตเตอรี่|อินเวอร์เตอร์|โซล่า|solar|ชาร์จ|charger|หัวชาร์จ|adapter|อะแดปเตอร์|พาวเวอร์แบงก์|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|DIY|เทปพันสาย|ปลั๊กพ่วง|กันไฟกระชาก)"
+          BLOCK_KEYWORDS: "(เสื้อผ้า|รองเท้าแฟชั่น|เครื่องสำอาง|สกินแคร์|น้ำหอม|ของเล่น|ตุ๊กตา|อาหาร|อาหารเสริม|ย้อมผม|วิกผม|แฟลชกล้อง|กล้อง|เลนส์)"
           ALLOW_CATEGORIES: "(Home\\s*&\\s*Living|Home Improvement|Tools|Hardware|Electrical|Lighting|Cables|Chargers|Converters|Power|Solar|Batteries|DIY)"
           BLOCK_CATEGORIES: "(Beauty|Fashion|Toys|Groceries|Food|Health|Baby|Women|Men|Camera|Photography)"
-        run: python app.py
+
+        # กัน app.py ค้าง: จำกัดเวลา 6 นาที + เปิด output real-time
+        run: |
+          echo "INFO: start $(date -u)"
+          timeout 360s python -u app.py
+          echo "INFO: end $(date -u)"
 
       - name: Save state cache
         uses: actions/cache@v4
