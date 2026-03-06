@@ -2,87 +2,45 @@ import os
 import csv
 import json
 import random
-import re
-import time
 from urllib.parse import quote, urlparse
 
 import requests
+from openai import OpenAI
 
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
 AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
 MAX_ROWS = 1000
-TOP_POOL = 40
+TOP_POOL = 20
 MAX_IMAGES_PER_POST = 3
-
-MIN_RATING = 0
-MIN_SOLD = 0
-
-HTTP_TIMEOUT = 25
-RETRY_COUNT = 2
-RETRY_SLEEP = 2
-
-PRIMARY_CATEGORIES = [
-    "ปลั๊กและสวิตช์",
-    "สายไฟและอุปกรณ์เดินสาย",
-    "หลอดไฟและโคมไฟ",
-    "เครื่องมือช่างไฟ"
-]
+HTTP_TIMEOUT = 30
 
 ALLOWED_KEYWORDS = [
-    "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
-    "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
-    "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "สปอตไลท์", "ไฟเส้น",
-    "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์",
-    "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "โซล่า", "อินเวอร์เตอร์", "แบตเตอรี่", "แบต",
-    "อะแดปเตอร์", "พัดลม", "ปลอกสาย", "เทอร์มินอล", "เครื่องมือ",
-    "plug", "socket", "power strip", "extension", "outlet",
-    "wire", "cable", "connector", "terminal", "dc jack",
-    "led", "lamp", "light", "bulb", "spotlight",
-    "screwdriver", "pliers", "drill", "multimeter", "tester", "tool",
-    "breaker", "relay", "switch", "ups", "inverter", "solar", "battery",
-    "adapter", "fan"
+    "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "สายไฟ", "หลอด", "โคม",
+    "led", "lamp", "light", "plug", "socket",
+    "breaker", "relay", "ups", "solar", "adapter",
+    "terminal", "connector", "dc", "jack",
+    "ไขควง", "คีม", "สว่าน", "multimeter", "tester"
 ]
 
 BLOCK_KEYWORDS = [
-    "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม", "เซรั่ม",
-    "ตุ๊กตา", "ของเล่น", "อาหาร", "ขนม", "น้ำหอม", "เครื่องสำอาง",
-    "เคสมือถือ", "ฟิล์ม", "สร้อย", "แหวน", "หมวก", "นาฬิกา",
-    "shirt", "pants", "shoes", "bag", "lipstick", "cream", "toy", "food", "snack",
-    "cosmetic", "perfume"
+    "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม",
+    "shirt", "pants", "shoes", "bag", "cosmetic"
 ]
 
 CATEGORY_RULES = {
-    "ปลั๊กและสวิตช์": [
-        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ", "บล็อกลอย",
-        "plug", "socket", "power strip", "extension", "outlet", "switch"
-    ],
-    "สายไฟและอุปกรณ์เดินสาย": [
-        "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
-        "ปลอกสาย", "เทอร์มินอล", "dc jack",
-        "wire", "cable", "connector", "terminal"
-    ],
-    "หลอดไฟและโคมไฟ": [
-        "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "ไฟเส้น", "สปอตไลท์",
-        "led", "lamp", "light", "bulb", "spotlight"
-    ],
-    "เครื่องมือช่างไฟ": [
-        "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์", "เครื่องมือ",
-        "screwdriver", "pliers", "drill", "multimeter", "tester", "tool"
-    ],
-    "โซล่าและพลังงานสำรอง": [
-        "โซล่า", "solar", "ups", "อินเวอร์เตอร์", "inverter", "แบตเตอรี่", "battery", "แบต"
-    ],
-    "อุปกรณ์ไฟฟ้าในบ้าน": [
-        "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "อุปกรณ์ไฟฟ้า", "พัดลม", "อะแดปเตอร์",
-        "breaker", "relay", "adapter", "fan"
-    ]
+    "ปลั๊กและสวิตช์": ["ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "plug", "socket", "switch"],
+    "สายไฟและอุปกรณ์เดินสาย": ["สายไฟ", "คอนเนคเตอร์", "เทอร์มินอล", "wire", "cable", "connector", "terminal", "dc jack"],
+    "หลอดไฟและโคมไฟ": ["หลอด", "โคม", "led", "lamp", "light", "bulb"],
+    "เครื่องมือช่างไฟ": ["ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool"],
+    "อุปกรณ์ไฟฟ้าในบ้าน": ["breaker", "relay", "adapter", "ups", "solar"]
 }
 
 CATEGORY_HASHTAGS = {
@@ -90,92 +48,56 @@ CATEGORY_HASHTAGS = {
     "สายไฟและอุปกรณ์เดินสาย": "#สายไฟ #อุปกรณ์เดินสาย #งานไฟ",
     "หลอดไฟและโคมไฟ": "#หลอดไฟ #โคมไฟ #ไฟLED",
     "เครื่องมือช่างไฟ": "#เครื่องมือช่าง #ช่างไฟ #งานซ่อมบ้าน",
-    "โซล่าและพลังงานสำรอง": "#โซล่า #UPS #พลังงานสำรอง",
     "อุปกรณ์ไฟฟ้าในบ้าน": "#อุปกรณ์ไฟฟ้าในบ้าน #ของใช้ไฟฟ้า #ติดบ้านไว้",
     "ทั่วไป": "#อุปกรณ์ไฟฟ้า #ของใช้ในบ้าน #BENHomeElectrical"
 }
 
-STYLE_OPENERS = {
-    "problem": [
-        "⚡ บ้านไหนกำลังหาอุปกรณ์แนวนี้ ลองดูตัวนี้",
-        "🏠 ของใช้งานจริงที่ควรมีติดบ้าน",
-        "🛠️ ถ้ากำลังซ่อมหรือแต่งระบบไฟ ลองดูตัวนี้"
-    ],
-    "selling": [
-        "🔥 ตัวนี้ขายดีใน Shopee",
-        "⭐ รีวิวดี คนซื้อเยอะ",
-        "💥 ของใช้แนว Home & Electrical ที่น่าสนใจ"
-    ],
-    "review": [
-        "✨ ดูจากรีวิวและยอดขายแล้ว น่าใช้มาก",
-        "📌 ตัวนี้น่าสนใจสำหรับคนหาของใช้แนวไฟฟ้า",
-        "⚡ ของดีที่อยากเอามาแนะนำ"
-    ],
-    "pro": [
-        "🧰 สายช่างน่าจะชอบตัวนี้",
-        "🔧 ของแนวงานไฟที่ใช้งานได้จริง",
-        "⚙️ อุปกรณ์ที่เหมาะกับงานติดตั้งและซ่อม"
-    ]
-}
 
-SUPPORT_LINES = {
-    "problem": [
-        "เหมาะกับคนที่กำลังหาของไว้แก้ปัญหาในบ้าน",
-        "มีติดบ้านไว้ เวลาใช้งานจะสะดวกมาก",
-        "ของแนวนี้ใช้ได้จริงในชีวิตประจำวัน"
-    ],
-    "selling": [
-        "ยอดขายและรีวิวถือว่าน่าสนใจ",
-        "ตัวนี้ดูเป็นของขายง่ายและคนรู้จักกันเยอะ",
-        "ใครกำลังหาอยู่ ลองกดดูได้เลย"
-    ],
-    "review": [
-        "ดูจากภาพรวมแล้วเป็นตัวที่น่าลอง",
-        "คะแนนรีวิวโอเค เหมาะกับสาย Home & Electrical",
-        "เหมาะกับคนที่อยากได้ของใช้งานจริง"
-    ],
-    "pro": [
-        "เหมาะกับงานช่าง งานซ่อม และงานติดตั้ง",
-        "ของแนวนี้ใช้หน้างานได้จริง",
-        "น่าจะตอบโจทย์สายช่างไฟและสาย DIY"
-    ]
-}
-
-CTA_LINES = [
-    "🛒 สั่งซื้อสินค้า",
-    "🛒 กดดูรายละเอียด",
-    "🛒 เช็กราคาล่าสุด",
-    "🛒 ดูสินค้า"
-]
-
-
-def log(message):
-    print(message, flush=True)
+def log(msg):
+    print(msg, flush=True)
 
 
 def validate_env():
     missing = []
-    if not PAGE_ID:
-        missing.append("PAGE_ID")
-    if not TOKEN:
-        missing.append("PAGE_ACCESS_TOKEN")
-    if not CSV_URL:
-        missing.append("SHOPEE_CSV_URL")
+    for key, value in {
+        "PAGE_ID": PAGE_ID,
+        "PAGE_ACCESS_TOKEN": TOKEN,
+        "SHOPEE_CSV_URL": CSV_URL,
+        "SHOPEE_AFFILIATE_ID": AFF_ID,
+        "OPENAI_API_KEY": OPENAI_API_KEY,
+    }.items():
+        if not value:
+            missing.append(key)
     if missing:
         raise ValueError("Missing env vars: " + ", ".join(missing))
 
 
-def request_with_retry(method, url, **kwargs):
-    last_error = None
-    for attempt in range(1, RETRY_COUNT + 1):
-        try:
-            return requests.request(method, url, timeout=HTTP_TIMEOUT, **kwargs)
-        except Exception as e:
-            last_error = e
-            log(f"request failed attempt {attempt}/{RETRY_COUNT}: {e}")
-            if attempt < RETRY_COUNT:
-                time.sleep(RETRY_SLEEP)
-    raise last_error
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"posted_links": [], "history": []}
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data.setdefault("posted_links", [])
+        data.setdefault("history", [])
+        return data
+    except Exception:
+        return {"posted_links": [], "history": []}
+
+
+def save_state(state):
+    state["posted_links"] = state["posted_links"][-500:]
+    state["history"] = state["history"][-200:]
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def pick_first_nonempty(row, keys):
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def safe_float(value, default=0.0):
@@ -193,90 +115,26 @@ def safe_int(value, default=0):
 
 
 def normalize_name(name):
-    name = (name or "").strip().lower()
-    name = re.sub(r"\s+", " ", name)
-    return name
-
-
-def build_token_key(name):
-    name = normalize_name(name)
-    name = re.sub(r"[^0-9a-zA-Zก-๙\s]", " ", name)
-    parts = [x for x in name.split() if len(x) >= 2]
-    return "|".join(sorted(set(parts[:6])))
-
-
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {
-            "posted_links": [],
-            "posted_names": [],
-            "posted_tokens": [],
-            "posted_categories": [],
-            "history": []
-        }
-
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data.setdefault("posted_links", [])
-        data.setdefault("posted_names", [])
-        data.setdefault("posted_tokens", [])
-        data.setdefault("posted_categories", [])
-        data.setdefault("history", [])
-        return data
-    except Exception as e:
-        log(f"load_state error: {e}")
-        return {
-            "posted_links": [],
-            "posted_names": [],
-            "posted_tokens": [],
-            "posted_categories": [],
-            "history": []
-        }
-
-
-def save_state(state):
-    state["posted_links"] = state["posted_links"][-700:]
-    state["posted_names"] = state["posted_names"][-700:]
-    state["posted_tokens"] = state["posted_tokens"][-700:]
-    state["posted_categories"] = state["posted_categories"][-80:]
-    state["history"] = state["history"][-200:]
-
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    return " ".join((name or "").lower().split())
 
 
 def detect_category(name):
     n = normalize_name(name)
     best_category = "ทั่วไป"
     best_score = 0
-
     for category, keywords in CATEGORY_RULES.items():
-        score = 0
-        for kw in keywords:
-            if kw.lower() in n:
-                score += 1
+        score = sum(1 for kw in keywords if kw.lower() in n)
         if score > best_score:
             best_score = score
             best_category = category
-
-    return best_category, best_score
+    return best_category
 
 
 def allow_product(name):
     n = normalize_name(name)
-
-    for bad in BLOCK_KEYWORDS:
-        if bad.lower() in n:
-            return False, "ทั่วไป", 0
-
-    matched = any(k.lower() in n for k in ALLOWED_KEYWORDS)
-    category, category_score = detect_category(name)
-
-    if not matched:
-        return False, category, category_score
-
-    return True, category, category_score
+    if any(bad in n for bad in BLOCK_KEYWORDS):
+        return False
+    return any(kw in n for kw in ALLOWED_KEYWORDS)
 
 
 def is_affiliate_link(link: str) -> bool:
@@ -289,37 +147,19 @@ def is_affiliate_link(link: str) -> bool:
 def is_short_shopee_link(link: str) -> bool:
     if not link:
         return False
-    parsed = urlparse(str(link).strip())
-    host = parsed.netloc.lower()
+    host = urlparse(str(link).strip()).netloc.lower()
     return "shopee.ee" in host
 
 
-def choose_base_link(normal_link: str, short_link: str) -> str:
-    if normal_link and not is_affiliate_link(normal_link) and not is_short_shopee_link(normal_link):
-        return normal_link.strip()
-
-    if short_link and not is_affiliate_link(short_link) and not is_short_shopee_link(short_link):
-        return short_link.strip()
-
-    return (normal_link or short_link or "").strip()
-
-
-def make_aff_link(link):
-    if not link:
+def make_aff_link_from_product_link(product_link: str) -> str:
+    if not product_link:
         return ""
-
-    link = str(link).strip()
-
-    if is_affiliate_link(link):
-        return link
-
-    if is_short_shopee_link(link):
-        return link
-
-    if not AFF_ID:
-        return link
-
-    return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(link, safe='')}"
+    product_link = str(product_link).strip()
+    if is_affiliate_link(product_link):
+        return product_link
+    if is_short_shopee_link(product_link):
+        return product_link
+    return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(product_link, safe='')}"
 
 
 def get_monthly_promo():
@@ -328,90 +168,42 @@ def get_monthly_promo():
     return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / โค้ดส่วนลด / โปรส่งฟรีก่อนสั่งซื้อ"
 
 
-def choose_style(product):
-    if product["category"] in ["เครื่องมือช่างไฟ", "สายไฟและอุปกรณ์เดินสาย"]:
-        weighted = ["pro", "pro", "selling", "review", "problem"]
-    elif product["category"] in ["หลอดไฟและโคมไฟ", "ปลั๊กและสวิตช์"]:
-        weighted = ["selling", "problem", "review", "selling", "problem"]
-    else:
-        weighted = ["problem", "selling", "review", "pro"]
-
-    return random.choice(weighted)
-
-
-def pick_first_nonempty(row, keys):
-    for key in keys:
-        value = row.get(key)
-        if value is not None and str(value).strip() != "":
-            return str(value).strip()
-    return ""
-
-
 def read_products():
     log("STEP 1: download csv")
+    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
 
-    response = request_with_retry("GET", CSV_URL, stream=True)
-    response.raise_for_status()
-
-    lines = (
-        line.decode("utf-8-sig", errors="ignore")
-        for line in response.iter_lines()
-        if line
-    )
-    reader = csv.DictReader(lines)
+    rows = r.text.splitlines()
+    reader = csv.DictReader(rows)
 
     products = []
-
     for i, row in enumerate(reader):
-        if i == 0:
-            log(f"CSV fields: {list(row.keys())}")
-
         if i >= MAX_ROWS:
             break
 
         name = pick_first_nonempty(row, [
             "product_name", "name", "title", "item_name", "product title", "model_names"
         ])
+        product_link = pick_first_nonempty(row, [
+            "product_link", "link", "item_link", "url"
+        ])
         price = pick_first_nonempty(row, [
             "sale_price", "price", "item_price", "model_price", "model_prices"
         ])
-
-        short_link = pick_first_nonempty(row, [
-            "product_short_link", "product_short link"
-        ])
-        normal_link = pick_first_nonempty(row, [
-            "product_link", "link", "item_link", "url"
-        ])
-        base_link = choose_base_link(normal_link, short_link)
-
-        rating_raw = pick_first_nonempty(row, [
+        rating = safe_float(pick_first_nonempty(row, [
             "item_rating", "rating", "avg_rating", "shop_rating"
-        ])
-        sold_raw = pick_first_nonempty(row, [
+        ]), 0)
+        sold = safe_int(pick_first_nonempty(row, [
             "historical_sold", "sold", "sales"
-        ])
+        ]), 0)
 
-        img1 = pick_first_nonempty(row, [
-            "image_link", "image", "main_image", "image_url", "additional_image_link"
-        ])
-        img2 = pick_first_nonempty(row, [
-            "image_link_2", "image_2", "image2", "image_link_3", "image_link_4"
-        ])
-        img3 = pick_first_nonempty(row, [
-            "image_link_5", "image_3", "image3", "image_link_6", "image_link_7"
-        ])
+        img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url"])
+        img2 = pick_first_nonempty(row, ["image_link_2", "image_2", "image2", "image_link_3"])
+        img3 = pick_first_nonempty(row, ["image_link_4", "image_3", "image3", "image_link_5"])
 
-        rating = safe_float(rating_raw, 0)
-        sold = safe_int(sold_raw, 0)
-
-        if not name or not base_link or not img1:
+        if not name or not product_link or not img1:
             continue
-
-        is_allowed, category, category_score = allow_product(name)
-        if not is_allowed:
-            continue
-
-        if rating < MIN_RATING or sold < MIN_SOLD:
+        if not allow_product(name):
             continue
 
         price_num = safe_float(price, 0)
@@ -419,22 +211,16 @@ def read_products():
             continue
 
         images = [x for x in [img1, img2, img3] if x]
-        aff_link = make_aff_link(base_link)
 
         products.append({
-            "name": name[:110],
-            "name_key": normalize_name(name),
-            "token_key": build_token_key(name),
-            "category": category,
-            "category_score": category_score,
+            "name": name[:120],
+            "product_link": product_link,
+            "aff_link": make_aff_link_from_product_link(product_link),
             "price": str(price).strip(),
             "price_num": price_num,
-            "base_link": base_link,
-            "normal_link": normal_link,
-            "short_link": short_link,
-            "aff_link": aff_link,
             "rating": rating,
             "sold": sold,
+            "category": detect_category(name),
             "images": images[:MAX_IMAGES_PER_POST]
         })
 
@@ -442,104 +228,121 @@ def read_products():
     return products
 
 
-def recent_category_penalty(category, state):
-    recent = state.get("posted_categories", [])[-4:]
-    if not recent:
-        return 0
-
-    penalty = 0
-    if recent and recent[-1] == category:
-        penalty += 12
-
-    same_count = sum(1 for c in recent if c == category)
-    if same_count >= 2:
-        penalty += 12
-
-    return penalty
-
-
-def score_product(product, state):
-    score = 0.0
-
-    score += product["rating"] * 40
-    score += product["sold"] * 0.50
-    score += product["category_score"] * 10
-
-    if product["price_num"] <= 99:
-        score += 22
-    elif product["price_num"] <= 299:
-        score += 16
-    elif product["price_num"] <= 699:
-        score += 9
-    else:
-        score += 4
-
-    if product["category"] in PRIMARY_CATEGORIES:
-        score += 12
-
-    if len(product["name"]) <= 90:
-        score += 5
-
-    score -= recent_category_penalty(product["category"], state)
-    score += random.random() * 4
+def local_score(p):
+    score = p["rating"] * 40 + p["sold"] * 0.5
+    if p["price_num"] <= 99:
+        score += 20
+    elif p["price_num"] <= 299:
+        score += 14
+    elif p["price_num"] <= 699:
+        score += 8
+    score += random.random() * 3
     return score
 
 
-def choose_product(products, state):
-    if not products:
-        return None
+def ai_select_product(products):
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
-    posted_links = set(state.get("posted_links", []))
-    posted_names = set(state.get("posted_names", []))
-    posted_tokens = set(state.get("posted_tokens", []))
+    compact = []
+    for idx, p in enumerate(products):
+        compact.append({
+            "index": idx,
+            "name": p["name"],
+            "category": p["category"],
+            "price": p["price"],
+            "rating": p["rating"],
+            "sold": p["sold"],
+        })
 
-    fresh = [
-        p for p in products
-        if p["base_link"] not in posted_links
-        and p["name_key"] not in posted_names
-        and p["token_key"] not in posted_tokens
-    ]
+    prompt = f"""
+เลือกสินค้าเพียง 1 ชิ้นที่น่าโพสต์ขายบนเพจ Facebook ชื่อ BEN Home & Electrical
 
-    pool = fresh if fresh else products
-    ranked = sorted(pool, key=lambda x: score_product(x, state), reverse=True)[:TOP_POOL]
-    chosen = random.choice(ranked[:min(10, len(ranked))]) if ranked else None
+เกณฑ์:
+- เน้นของที่ดูขายง่าย
+- rating สูงดีกว่า
+- sold สูงดีกว่า
+- ราคาไม่แรงดีกว่า
+- ต้องเหมาะกับเพจแนวอุปกรณ์ไฟฟ้า/ช่างไฟ/ของใช้ในบ้าน
 
-    if chosen:
-        log(f"STEP 3: chosen = {chosen['name']} | category = {chosen['category']}")
-        log(f"STEP 3B: base_link = {chosen['base_link']}")
-        log(f"STEP 3C: aff_link = {chosen['aff_link']}")
+ตอบเป็น "เลข index" เพียงอย่างเดียว ห้ามมีคำอื่น
 
-    return chosen
+รายการสินค้า:
+{json.dumps(compact, ensure_ascii=False)}
+"""
+
+    try:
+        r = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+        )
+        text = (r.output_text or "").strip()
+        idx = int(re.sub(r"[^\d]", "", text) or "0")
+        if 0 <= idx < len(products):
+            return products[idx]
+    except Exception as e:
+        log(f"AI select failed, fallback local score: {e}")
+
+    return sorted(products, key=local_score, reverse=True)[0]
 
 
-def build_caption(product, style):
-    opener = random.choice(STYLE_OPENERS[style])
-    support = random.choice(SUPPORT_LINES[style])
-    hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
+def ai_generate_caption(product):
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
     promo = get_monthly_promo()
-    cta = random.choice(CTA_LINES)
+    hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
+
+    prompt = f"""
+เขียน caption Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
+
+สินค้า:
+ชื่อ: {product["name"]}
+หมวด: {product["category"]}
+ราคา: {product["price"]} บาท
+rating: {product["rating"]}
+sold: {product["sold"]}
+promo: {promo}
+hashtags: {hashtags}
+
+ข้อกำหนด:
+- โทนขายของจริง อ่านง่าย
+- มี emoji พอประมาณ
+- ไม่เกิน 10 บรรทัดก่อนลิงก์
+- ห้ามพูดเกินจริง
+- บรรทัดสุดท้ายก่อนแฮชแท็กให้เป็น "🛒 สั่งซื้อสินค้า"
+- ไม่ต้องใส่ลิงก์ในคำตอบ
+"""
+
+    try:
+        r = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+        )
+        text = (r.output_text or "").strip()
+        if text:
+            return f"{text}\n{product['aff_link']}\n\n#BENHomeElectrical #ShopeeAffiliate {hashtags}"
+    except Exception as e:
+        log(f"AI caption failed, fallback template: {e}")
 
     return (
-        f"{opener}\n\n"
+        f"⭐ รีวิวดี คนซื้อเยอะ\n\n"
         f"{product['name']}\n\n"
         f"หมวด: {product['category']}\n"
-        f"{support}\n"
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
         f"{promo}\n\n"
-        f"{cta}\n"
+        f"🛒 สั่งซื้อสินค้า\n"
         f"{product['aff_link']}\n\n"
         f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
     )
 
 
 def graph_post(endpoint, payload):
-    response = request_with_retry("POST", endpoint, data=payload)
+    r = requests.post(endpoint, data=payload, timeout=HTTP_TIMEOUT)
     try:
-        return response.json()
+        return r.json()
     except Exception:
-        return {"error": {"message": response.text[:300]}}
+        return {"error": {"message": r.text[:300]}}
 
 
 def upload_photo(url):
@@ -549,7 +352,6 @@ def upload_photo(url):
         "published": "false",
         "access_token": TOKEN
     }
-
     data = graph_post(endpoint, payload)
     if "id" not in data:
         raise RuntimeError(f"upload_photo failed: {data}")
@@ -558,8 +360,8 @@ def upload_photo(url):
 
 def post_product(product, caption_text):
     log("STEP 4: upload image")
-
     media_ids = []
+
     for image_url in product["images"]:
         try:
             media_id = upload_photo(image_url)
@@ -569,25 +371,23 @@ def post_product(product, caption_text):
             log(f"upload failed: {e}")
 
     if not media_ids:
-        log("no uploaded images")
         return None
 
     endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
     payload = {
         "message": caption_text,
+        "link": product["aff_link"],
         "access_token": TOKEN
     }
 
     for i, media_id in enumerate(media_ids):
-        payload[f"attached_media[{i}]"] = f'{{"media_fbid":"{media_id}"}}'
+        payload[f'attached_media[{i}]'] = f'{{"media_fbid":"{media_id}"}}'
 
     log("STEP 5: create post")
     data = graph_post(endpoint, payload)
-
     if "id" not in data:
         log(f"post failed: {data}")
         return None
-
     return data["id"]
 
 
@@ -597,27 +397,11 @@ def comment_link(post_id, product):
         "message": product["aff_link"],
         "access_token": TOKEN
     }
-
     try:
         data = graph_post(endpoint, payload)
         log(f"comment result: {data}")
     except Exception as e:
         log(f"comment failed: {e}")
-
-
-def update_state_after_post(state, product, post_id, style):
-    state["posted_links"].append(product["base_link"])
-    state["posted_names"].append(product["name_key"])
-    state["posted_tokens"].append(product["token_key"])
-    state["posted_categories"].append(product["category"])
-    state["history"].append({
-        "name": product["name"],
-        "category": product["category"],
-        "style": style,
-        "base_link": product["base_link"],
-        "aff_link": product["aff_link"],
-        "post_id": post_id
-    })
 
 
 def main():
@@ -626,26 +410,29 @@ def main():
 
     state = load_state()
     products = read_products()
-
     if not products:
         log("No products found")
         return
 
-    product = choose_product(products, state)
-    if not product:
-        log("No product selected")
-        return
+    fresh = [p for p in products if p["product_link"] not in state["posted_links"]]
+    candidate_pool = sorted(fresh or products, key=local_score, reverse=True)[:TOP_POOL]
 
-    style = choose_style(product)
-    log(f"STEP 3A: style = {style}")
+    product = ai_select_product(candidate_pool)
+    log(f"STEP 3: chosen = {product['name']}")
 
-    caption_text = build_caption(product, style)
+    caption_text = ai_generate_caption(product)
     post_id = post_product(product, caption_text)
 
     if post_id:
         log(f"post created: {post_id}")
         comment_link(post_id, product)
-        update_state_after_post(state, product, post_id, style)
+        state["posted_links"].append(product["product_link"])
+        state["history"].append({
+            "name": product["name"],
+            "product_link": product["product_link"],
+            "aff_link": product["aff_link"],
+            "post_id": post_id
+        })
         save_state(state)
     else:
         log("Post failed")
