@@ -17,7 +17,7 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-# ===== AI Affiliate Engine V5 Config =====
+# ===== AI Affiliate Engine V5 MAX =====
 MAX_ROWS = 1000
 TOP_POOL = 40
 MAX_IMAGES_PER_POST = 3
@@ -29,6 +29,9 @@ HTTP_TIMEOUT = 25
 RETRY_COUNT = 2
 RETRY_SLEEP = 2
 
+# 80% โพสต์รูป + 20% โพสต์ลิงก์
+POST_MODES = ["image", "image", "image", "image", "link"]
+
 PRIMARY_CATEGORIES = [
     "ปลั๊กและสวิตช์",
     "สายไฟและอุปกรณ์เดินสาย",
@@ -37,15 +40,12 @@ PRIMARY_CATEGORIES = [
 ]
 
 ALLOWED_KEYWORDS = [
-    # ไทย
     "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
     "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
     "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "สปอตไลท์", "ไฟเส้น",
     "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์",
     "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "โซล่า", "อินเวอร์เตอร์", "แบตเตอรี่", "แบต",
     "อะแดปเตอร์", "พัดลม", "ปลอกสาย", "เทอร์มินอล", "เครื่องมือ",
-
-    # อังกฤษ
     "plug", "socket", "power strip", "extension", "outlet",
     "wire", "cable", "connector", "terminal", "dc jack",
     "led", "lamp", "light", "bulb", "spotlight",
@@ -298,10 +298,6 @@ def make_aff_link(link):
     return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(link, safe='')}"
 
 
-def make_public_link(link):
-    return make_aff_link(link)
-
-
 def get_monthly_promo():
     if MONTHLY_PROMO_TEXT:
         return MONTHLY_PROMO_TEXT
@@ -309,16 +305,18 @@ def get_monthly_promo():
 
 
 def choose_style(product):
-    styles = ["problem", "selling", "review", "pro"]
-
     if product["category"] in ["เครื่องมือช่างไฟ", "สายไฟและอุปกรณ์เดินสาย"]:
         weighted = ["pro", "pro", "selling", "review", "problem"]
     elif product["category"] in ["หลอดไฟและโคมไฟ", "ปลั๊กและสวิตช์"]:
         weighted = ["selling", "problem", "review", "selling", "problem"]
     else:
-        weighted = styles
+        weighted = ["problem", "selling", "review", "pro"]
 
     return random.choice(weighted)
+
+
+def choose_post_mode():
+    return random.choice(POST_MODES)
 
 
 def pick_first_nonempty(row, keys):
@@ -357,14 +355,19 @@ def read_products():
         price = pick_first_nonempty(row, [
             "sale_price", "price", "item_price", "model_price", "model_prices"
         ])
-        link = pick_first_nonempty(row, [
-            "product_short_link", "product_link", "link", "item_link", "url"
+        short_link = pick_first_nonempty(row, [
+            "product_short_link", "product_short link"
         ])
+        normal_link = pick_first_nonempty(row, [
+            "product_link", "link", "item_link", "url"
+        ])
+        link = short_link or normal_link
+
         rating_raw = pick_first_nonempty(row, [
             "item_rating", "rating", "avg_rating", "shop_rating"
         ])
         sold_raw = pick_first_nonempty(row, [
-            "historical_sold", "sold", "sales", "stock"
+            "historical_sold", "sold", "sales"
         ])
 
         img1 = pick_first_nonempty(row, [
@@ -455,7 +458,6 @@ def score_product(product, state):
 
     score -= recent_category_penalty(product["category"], state)
     score += random.random() * 4
-
     return score
 
 
@@ -476,7 +478,7 @@ def choose_product(products, state):
 
     pool = fresh if fresh else products
     ranked = sorted(pool, key=lambda x: score_product(x, state), reverse=True)[:TOP_POOL]
-    chosen = random.choice(ranked[: min(10, len(ranked))]) if ranked else None
+    chosen = random.choice(ranked[:min(10, len(ranked))]) if ranked else None
 
     if chosen:
         log(f"STEP 3: chosen = {chosen['name']} | category = {chosen['category']}")
@@ -484,7 +486,27 @@ def choose_product(products, state):
     return chosen
 
 
-def build_caption(product, style):
+def build_image_caption(product, style):
+    opener = random.choice(STYLE_OPENERS[style])
+    support = random.choice(SUPPORT_LINES[style])
+    hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
+    promo = get_monthly_promo()
+
+    return (
+        f"{opener}\n\n"
+        f"{product['name']}\n\n"
+        f"หมวด: {product['category']}\n"
+        f"{support}\n"
+        f"💰 ราคา {product['price']} บาท\n"
+        f"⭐ รีวิว {product['rating']:.1f}/5\n"
+        f"📦 ขายแล้ว {product['sold']}\n"
+        f"{promo}\n\n"
+        f"🛒 ลิงก์นายหน้าอยู่คอมเมนต์แรก\n\n"
+        f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
+    )
+
+
+def build_link_caption(product, style):
     opener = random.choice(STYLE_OPENERS[style])
     support = random.choice(SUPPORT_LINES[style])
     hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
@@ -529,8 +551,8 @@ def upload_photo(url):
     return data["id"]
 
 
-def post_product(product, caption_text):
-    log("STEP 4: upload image")
+def post_image_product(product, caption_text):
+    log("STEP 5A: upload image mode")
 
     media_ids = []
     for image_url in product["images"]:
@@ -554,11 +576,31 @@ def post_product(product, caption_text):
     for i, media_id in enumerate(media_ids):
         payload[f"attached_media[{i}]"] = f'{{"media_fbid":"{media_id}"}}'
 
-    log("STEP 5: create post")
+    log("STEP 5B: create image post")
     data = graph_post(endpoint, payload)
 
     if "id" not in data:
-        log(f"post failed: {data}")
+        log(f"image post failed: {data}")
+        return None
+
+    return data["id"]
+
+
+def post_link_product(product, caption_text):
+    log("STEP 5A: link mode")
+
+    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
+    payload = {
+        "message": caption_text,
+        "link": product.get("aff_link") or make_aff_link(product["link"]),
+        "access_token": TOKEN
+    }
+
+    log("STEP 5B: create link post")
+    data = graph_post(endpoint, payload)
+
+    if "id" not in data:
+        log(f"link post failed: {data}")
         return None
 
     return data["id"]
@@ -571,10 +613,7 @@ def comment_link(post_id, product):
     payload = {
         "message": (
             f"🔗 ลิงก์นายหน้า\n"
-            f"{aff_url}\n\n"
-            f"✅ เช็กราคาล่าสุด\n"
-            f"✅ ดูรีวิวเพิ่ม\n"
-            f"✅ ดูโปรในร้าน"
+            f"{aff_url}"
         ),
         "access_token": TOKEN
     }
@@ -586,7 +625,7 @@ def comment_link(post_id, product):
         log(f"comment failed: {e}")
 
 
-def update_state_after_post(state, product, post_id, style):
+def update_state_after_post(state, product, post_id, style, post_mode):
     state["posted_links"].append(product["link"])
     state["posted_names"].append(product["name_key"])
     state["posted_tokens"].append(product["token_key"])
@@ -595,6 +634,7 @@ def update_state_after_post(state, product, post_id, style):
         "name": product["name"],
         "category": product["category"],
         "style": style,
+        "post_mode": post_mode,
         "link": product["link"],
         "post_id": post_id
     })
@@ -617,18 +657,30 @@ def main():
         return
 
     style = choose_style(product)
-    log(f"STEP 3A: style = {style}")
+    post_mode = choose_post_mode()
 
-    caption_text = build_caption(product, style)
-    post_id = post_product(product, caption_text)
+    log(f"STEP 4A: style = {style}")
+    log(f"STEP 4B: post_mode = {post_mode}")
 
-    if post_id:
-        log(f"post created: {post_id}")
-        comment_link(post_id, product)
-        update_state_after_post(state, product, post_id, style)
-        save_state(state)
+    if post_mode == "image":
+        caption_text = build_image_caption(product, style)
+        post_id = post_image_product(product, caption_text)
+        if post_id:
+            log(f"post created: {post_id}")
+            comment_link(post_id, product)
+            update_state_after_post(state, product, post_id, style, post_mode)
+            save_state(state)
+        else:
+            log("Post failed")
     else:
-        log("Post failed")
+        caption_text = build_link_caption(product, style)
+        post_id = post_link_product(product, caption_text)
+        if post_id:
+            log(f"post created: {post_id}")
+            update_state_after_post(state, product, post_id, style, post_mode)
+            save_state(state)
+        else:
+            log("Post failed")
 
 
 if __name__ == "__main__":
