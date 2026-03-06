@@ -1,4 +1,4 @@
-name: Auto Post (V41 ULTRA)
+name: Auto Post (V50 ULTRA)
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   autopost:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,26 +27,24 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run V41 ULTRA
+      - name: Run V50 ULTRA
         env:
           GRAPH_VERSION: v25.0
+
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # 5 โพส/วัน (แต่ละครั้งรัน 1 โพส)
-          POSTS_MAX_PER_RUN: "1"
           SLOTS_BKK: "08:30,12:00,15:00,18:30,21:30"
-
-          # บังคับโพสครั้งแรกให้เห็นผลทันที
+          POSTS_MAX_PER_RUN: "1"
           FIRST_RUN_POST_1: "1"
           FORCE_POST: "0"
 
-          # กรองของให้ตรงเพจ
-          STRICT_PAGE_MATCH: "1"
           MIN_RATING: "4.7"
           MIN_DISCOUNT_PCT: "15"
           MIN_SOLD: "50"
@@ -57,10 +55,25 @@ jobs:
 
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
+
           BRAND: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
 
+          STRICT_PAGE_MATCH: "1"
           SLOT_WINDOW_MINUTES: "12"
+          HTTP_TIMEOUT: "60"
+          STATE_FILE: "state.json"
+
         run: |
           echo "INFO: start $(date -u)"
           python app.py
+
+      - name: Commit state.json
+        run: |
+          if [ -f state.json ]; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git add state.json
+            git commit -m "Update state" || echo "No changes"
+            git push || echo "Push skipped"
+          fi
