@@ -10,7 +10,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
@@ -120,22 +120,6 @@ def safe_float(x, default: float = 0.0) -> float:
         return default
 
 
-def to_number(x) -> Optional[float]:
-    if x is None:
-        return None
-    s = str(x).strip()
-    if not s:
-        return None
-    s = s.replace(",", "").replace("฿", "").replace("บาท", "").strip()
-    m = re.search(r"-?\d+(\.\d+)?", s)
-    if not m:
-        return None
-    try:
-        return float(m.group(0))
-    except Exception:
-        return None
-
-
 def sha1(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
 
@@ -187,12 +171,22 @@ def nearest_slot_key(now_dt: datetime, slots: List[Tuple[int, int]]) -> str:
 # =========================
 def load_state() -> Dict:
     if not os.path.exists(STATE_FILE):
-        return {"posted": {}, "last_run_ts": None, "first_run_done": False, "last_post_slot_key": None}
+        return {
+            "posted": {},
+            "last_run_ts": None,
+            "first_run_done": False,
+            "last_post_slot_key": None
+        }
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"posted": {}, "last_run_ts": None, "first_run_done": False, "last_post_slot_key": None}
+        return {
+            "posted": {},
+            "last_run_ts": None,
+            "first_run_done": False,
+            "last_post_slot_key": None
+        }
 
 
 def save_state(state: Dict) -> None:
@@ -253,7 +247,6 @@ def stream_csv_rows(url: str) -> Tuple[List[str], List[Dict[str, str]]]:
         for line in lines_iter:
             if line is None:
                 continue
-
             if isinstance(line, bytes):
                 s = line.decode("utf-8", errors="replace").strip()
             else:
@@ -559,12 +552,14 @@ def ensure_required():
 
 
 def should_post_now(state: Dict) -> bool:
-    if FIRST_RUN_POST_1 and not state.get("first_run_done", False):
-        log("INFO: First run detected -> FORCE 1 post immediately")
-        return True
-
+    # manual run -> post now
     if FORCE_POST:
         log("INFO: FORCE_POST=1 -> posting now")
+        return True
+
+    # first-ever run -> post 1 now
+    if FIRST_RUN_POST_1 and not state.get("first_run_done", False):
+        log("INFO: First run detected -> FORCE 1 post immediately")
         return True
 
     slots = parse_slots(SLOTS_BKK)
@@ -581,15 +576,6 @@ def should_post_now(state: Dict) -> bool:
 
     log("INFO: within slot window -> posting")
     return True
-
-
-def keepalive(max_seconds: int = 60, interval: int = 20):
-    start = time.time()
-    tick = 0
-    while time.time() - start < max_seconds:
-        tick += 1
-        log(f"INFO: keepalive tick={tick} elapsed={int(time.time()-start)}s (runner alive)")
-        time.sleep(interval)
 
 
 def post_one(p: Product, state: Dict) -> str:
@@ -634,9 +620,7 @@ def main():
         log("INFO: Done (no due slot)")
         return
 
-    log("INFO: preparing to read Shopee CSV (streaming)")
-    keepalive(max_seconds=40, interval=20)
-
+    log("INFO: reading Shopee CSV (streaming)")
     headers, raw_rows = stream_csv_rows(SHOPEE_CSV_URL)
     log(f"INFO: headers={len(headers)} raw_rows={len(raw_rows)}")
 
@@ -647,4 +631,37 @@ def main():
         except Exception:
             continue
 
-    cands = pick_candida
+    cands = pick_candidates(products, state, k=40)
+    if not cands:
+        log("INFO: No candidates matched filters")
+        state["last_run_ts"] = now_bkk().isoformat()
+        state["first_run_done"] = True
+        save_state(state)
+        log("INFO: Done")
+        return
+
+    random.shuffle(cands)
+    to_post = cands[:max(1, POSTS_MAX_PER_RUN)]
+
+    posts_done = 0
+    for p in to_post:
+        try:
+            pid = p.itemid or p.link
+            log(f"INFO: posting product id={pid} name={p.name[:60]}")
+            post_id = post_one(p, state)
+            posts_done += 1
+            log(f"INFO: posted fb_post_id={post_id}")
+        except Exception as e:
+            log(f"ERROR: post failed: {e}")
+
+    now_dt = now_bkk()
+    state["last_run_ts"] = now_dt.isoformat()
+    state["first_run_done"] = True
+    state["last_post_slot_key"] = nearest_slot_key(now_dt, parse_slots(SLOTS_BKK))
+    save_state(state)
+
+    log(f"INFO: Done. posts_done={posts_done}")
+
+
+if __name__ == "__main__":
+    main()
