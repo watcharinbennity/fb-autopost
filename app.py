@@ -25,7 +25,6 @@ MAX_IMAGES_PER_POST = 1
 HTTP_TIMEOUT = 20
 OPENAI_TIMEOUT = 25
 
-# ผ่อนเงื่อนไขลง เพื่อไม่ให้ valid products = 0
 MIN_RATING = 4.0
 MIN_SOLD = 10
 
@@ -188,7 +187,7 @@ def get_monthly_promo():
     return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / ดูส่วนลด / เช็กโปรส่งฟรีก่อนสั่งซื้อ"
 
 
-def has_promo(row):
+def extract_promo_info(row):
     discount = safe_float(
         pick_first_nonempty(row, [
             "discount_percentage", "discount", "discount_percent"
@@ -210,13 +209,18 @@ def has_promo(row):
         0
     )
 
+    has_promo = False
     if discount > 0:
-        return True
+        has_promo = True
+    elif original_price > 0 and sale_price > 0 and sale_price < original_price:
+        has_promo = True
 
-    if original_price > 0 and sale_price > 0 and sale_price < original_price:
-        return True
-
-    return False
+    return {
+        "has_promo": has_promo,
+        "discount_percentage": discount,
+        "sale_price_num": sale_price,
+        "original_price_num": original_price,
+    }
 
 
 def read_products():
@@ -242,17 +246,10 @@ def read_products():
             log(f"CSV fields: {list(row.keys())}")
 
         name = pick_first_nonempty(row, [
-            "product_name", "name", "title", "item_name", "product title", "model_names", "shop_name"
+            "product_name", "name", "title", "item_name", "product title", "model_names"
         ])
         product_link = pick_first_nonempty(row, [
             "product_link", "link", "item_link", "url"
-        ])
-
-        original_price = pick_first_nonempty(row, [
-            "price", "original_price", "item_original_price"
-        ])
-        sale_price = pick_first_nonempty(row, [
-            "sale_price", "item_price", "model_price", "model_prices"
         ])
 
         rating = safe_float(pick_first_nonempty(row, [
@@ -263,9 +260,12 @@ def read_products():
             "historical_sold", "sold", "sales"
         ]), 0)
 
-        discount_percentage = safe_float(pick_first_nonempty(row, [
-            "discount_percentage", "discount", "discount_percent"
-        ]), 0)
+        original_price = pick_first_nonempty(row, [
+            "price", "original_price", "item_original_price"
+        ])
+        sale_price = pick_first_nonempty(row, [
+            "sale_price", "item_price", "model_price", "model_prices"
+        ])
 
         img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url", "additional_image_link"])
         img2 = pick_first_nonempty(row, ["image_link_2", "image_2", "image2", "image_link_3"])
@@ -283,12 +283,12 @@ def read_products():
         if sold < MIN_SOLD:
             continue
 
+        promo_info = extract_promo_info(row)
         price_num = safe_float(sale_price or original_price, 0)
         if price_num <= 0:
             continue
 
         category, category_score = detect_category(name)
-        promo_flag = has_promo(row)
         images = [x for x in [img1, img2, img3] if x]
 
         products.append({
@@ -301,8 +301,8 @@ def read_products():
             "price_num": price_num,
             "rating": rating,
             "sold": sold,
-            "discount_percentage": discount_percentage,
-            "has_promo": promo_flag,
+            "has_promo": promo_info["has_promo"],
+            "discount_percentage": promo_info["discount_percentage"],
             "category": category,
             "category_score": category_score,
             "images": images[:MAX_IMAGES_PER_POST]
@@ -316,8 +316,8 @@ def local_score(p):
     score = 0
     score += p["rating"] * 45
     score += p["sold"] * 0.7
+    score += p["category_score"] * 12
     score += p.get("discount_percentage", 0) * 3
-    score += p.get("category_score", 0) * 12
 
     if p["has_promo"]:
         score += 20
@@ -331,6 +331,22 @@ def local_score(p):
 
     score += random.random() * 3
     return score
+
+
+def build_candidate_pool(products, posted_links):
+    fresh = [p for p in products if p["product_link"] not in posted_links]
+    base_pool = fresh or products
+
+    promo_pool = [p for p in base_pool if p["has_promo"]]
+
+    if promo_pool:
+        chosen_pool = sorted(promo_pool, key=local_score, reverse=True)[:TOP_POOL]
+        log(f"STEP 3: using promo pool = {len(chosen_pool)}")
+        return chosen_pool
+
+    chosen_pool = sorted(base_pool, key=local_score, reverse=True)[:TOP_POOL]
+    log(f"STEP 3: no promo items, fallback pool = {len(chosen_pool)}")
+    return chosen_pool
 
 
 def ai_select_product(products):
@@ -358,12 +374,13 @@ def ai_select_product(products):
 หน้าที่:
 เลือกสินค้าเพียง 1 ชิ้นจากรายการด้านล่าง เพื่อเอาไปโพสต์ขาย
 
-เกณฑ์สำคัญ:
+หลักการ:
 - ต้องตรงหมวดเพจที่สุด
-- เป็นแนวอุปกรณ์ไฟฟ้า ของใช้ไฟฟ้า งานช่างไฟ ของใช้ในบ้าน
+- ต้องเป็นแนวอุปกรณ์ไฟฟ้า ของใช้ไฟฟ้า งานช่างไฟ ของใช้ในบ้าน
 - rating สูงดีกว่า
 - sold สูงดีกว่า
-- ถ้ามีโปร / ลดราคา / sale price ให้คะแนนเพิ่ม
+- ถ้ามีโปร / ลดราคา / sale price ให้ความสำคัญเพิ่ม
+- ถ้าไม่มีสินค้าโปร ให้เลือกตัวที่ตรงเพจและขายง่ายที่สุด
 - เลือกตัวที่คนทั่วไปน่าจะซื้อได้ง่าย
 
 ตอบเป็นเลข index อย่างเดียว ห้ามมีคำอื่น
@@ -409,8 +426,9 @@ def ai_generate_caption(product):
 เงื่อนไข:
 - โทนขายของจริง อ่านง่าย
 - มี emoji พอประมาณ
-- บอกว่าสินค้าตรงหมวดเพจ
+- บอกว่าสินค้านี้ตรงหมวดกับเพจ
 - ถ้ามีโปรให้ชูจุดคุ้มค่า
+- ถ้าไม่มีโปร ให้เน้นรีวิวดีและยอดขายดี
 - ไม่เกิน 8 บรรทัดก่อนลิงก์
 - ห้ามพูดเกินจริง
 - บรรทัดสุดท้ายก่อนลิงก์ให้เป็น "🛒 สั่งซื้อสินค้า"
@@ -435,7 +453,6 @@ def ai_generate_caption(product):
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
-        f"🔥 สินค้าตรงหมวดเพจและคุ้มค่าน่าโพสต์\n"
         f"{get_monthly_promo()}\n"
         f"🛒 สั่งซื้อสินค้า\n"
         f"{product['aff_link']}\n\n"
@@ -520,11 +537,9 @@ def main():
         log("No products found")
         return
 
-    fresh = [p for p in products if p["product_link"] not in state["posted_links"]]
-    candidate_pool = sorted(fresh or products, key=local_score, reverse=True)[:TOP_POOL]
-    log(f"STEP 3: candidate_pool = {len(candidate_pool)}")
-
+    candidate_pool = build_candidate_pool(products, set(state["posted_links"]))
     product = ai_select_product(candidate_pool)
+
     log(f"STEP 3A: chosen = {product['name']}")
     log(f"STEP 3B: category = {product['category']}")
     log(f"STEP 3C: rating = {product['rating']}, sold = {product['sold']}, promo = {product['has_promo']}")
