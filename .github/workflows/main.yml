@@ -1,21 +1,15 @@
-name: Auto Post (V38 ULTRA)
+name: Auto Post (V39 ULTRA)
 
 on:
-  workflow_dispatch:
   schedule:
-    # BKK 12:00 -> UTC 05:00
+    # เวลาไทย 12:00 และ 18:30 = UTC 05:00 และ 11:30
     - cron: "0 5 * * *"
-    # BKK 18:30 -> UTC 11:30
     - cron: "30 11 * * *"
-
-concurrency:
-  group: fb-autopost-v38
-  cancel-in-progress: false
+  workflow_dispatch:
 
 jobs:
   autopost:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -27,14 +21,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: state.json
-          key: fb-autopost-state-v38
+          key: state-${{ github.repository }}-${{ github.ref_name }}
           restore-keys: |
-            fb-autopost-state-
+            state-${{ github.repository }}-
 
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Run V38 ULTRA
+      - name: Run V39 ULTRA
         env:
           GRAPH_VERSION: "v25.0"
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -42,27 +36,31 @@ jobs:
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # V38 settings (ปรับได้ใน Secrets/Variables)
-          BRAND: "BEN Home & Electrical"
+          # ตั้งเวลาไทย (แก้ได้)
           SLOTS_BKK: "12:00,18:30"
+
+          # โพสต์ 1 ครั้ง/รัน
           POSTS_MAX_PER_RUN: "1"
           FIRST_RUN_POST_1: "1"
           FORCE_POST: "0"
 
-          # คัดให้ตรงเพจเข้ม ๆ
-          STRICT_MODE: "1"
+          # ฟิลเตอร์ให้ตรงเพจ
           MIN_RATING: "4.7"
-          MIN_DISCOUNT_PCT: "10"
+          MIN_DISCOUNT_PCT: "15"
           MIN_SOLD: "50"
-
-          # โพสต์รูปเท่านั้น (ตามที่คุณต้องการ)
-          PREFER_VIDEO: "0"
+          PRICE_MIN: "59"
+          PRICE_MAX: "4999"
+          REPOST_AFTER_DAYS: "21"
           POST_IMAGES_COUNT: "3"
 
+          AFF_UTM_SOURCE: "facebook"
+          AFF_TAG: "BENHomeElectrical"
+          BRAND: "BEN Home & Electrical"
+          HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
         run: python app.py
 
       - name: Save state cache
         uses: actions/cache@v4
         with:
           path: state.json
-          key: fb-autopost-state-v38
+          key: state-${{ github.repository }}-${{ github.ref_name }}
