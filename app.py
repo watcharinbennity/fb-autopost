@@ -17,9 +17,10 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-MAX_ROWS = 800
-TOP_POOL = 30
-MAX_IMAGES_PER_POST = 1
+# ===== AI Affiliate Engine V5 Config =====
+MAX_ROWS = 1000
+TOP_POOL = 40
+MAX_IMAGES_PER_POST = 3
 
 MIN_RATING = 0
 MIN_SOLD = 0
@@ -28,36 +29,47 @@ HTTP_TIMEOUT = 25
 RETRY_COUNT = 2
 RETRY_SLEEP = 2
 
+PRIMARY_CATEGORIES = [
+    "ปลั๊กและสวิตช์",
+    "สายไฟและอุปกรณ์เดินสาย",
+    "หลอดไฟและโคมไฟ",
+    "เครื่องมือช่างไฟ"
+]
+
 ALLOWED_KEYWORDS = [
     # ไทย
     "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
-    "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์",
-    "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "สปอตไลท์",
+    "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
+    "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "สปอตไลท์", "ไฟเส้น",
     "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์",
     "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "โซล่า", "อินเวอร์เตอร์", "แบตเตอรี่", "แบต",
+    "อะแดปเตอร์", "พัดลม", "ปลอกสาย", "เทอร์มินอล", "เครื่องมือ",
 
     # อังกฤษ
     "plug", "socket", "power strip", "extension", "outlet",
-    "wire", "cable", "connector", "terminal",
+    "wire", "cable", "connector", "terminal", "dc jack",
     "led", "lamp", "light", "bulb", "spotlight",
-    "screwdriver", "pliers", "drill", "multimeter", "tester",
-    "breaker", "relay", "switch", "ups", "inverter", "solar", "battery"
+    "screwdriver", "pliers", "drill", "multimeter", "tester", "tool",
+    "breaker", "relay", "switch", "ups", "inverter", "solar", "battery",
+    "adapter", "fan"
 ]
 
 BLOCK_KEYWORDS = [
     "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม", "เซรั่ม",
     "ตุ๊กตา", "ของเล่น", "อาหาร", "ขนม", "น้ำหอม", "เครื่องสำอาง",
     "เคสมือถือ", "ฟิล์ม", "สร้อย", "แหวน", "หมวก", "นาฬิกา",
-    "shirt", "pants", "shoes", "bag", "lipstick", "cream", "toy", "food", "snack"
+    "shirt", "pants", "shoes", "bag", "lipstick", "cream", "toy", "food", "snack",
+    "cosmetic", "perfume"
 ]
 
 CATEGORY_RULES = {
     "ปลั๊กและสวิตช์": [
-        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
+        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ", "บล็อกลอย",
         "plug", "socket", "power strip", "extension", "outlet", "switch"
     ],
     "สายไฟและอุปกรณ์เดินสาย": [
         "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
+        "ปลอกสาย", "เทอร์มินอล", "dc jack",
         "wire", "cable", "connector", "terminal"
     ],
     "หลอดไฟและโคมไฟ": [
@@ -102,14 +114,42 @@ STYLE_OPENERS = {
         "✨ ดูจากรีวิวและยอดขายแล้ว น่าใช้มาก",
         "📌 ตัวนี้น่าสนใจสำหรับคนหาของใช้แนวไฟฟ้า",
         "⚡ ของดีที่อยากเอามาแนะนำ"
+    ],
+    "pro": [
+        "🧰 สายช่างน่าจะชอบตัวนี้",
+        "🔧 ของแนวงานไฟที่ใช้งานได้จริง",
+        "⚙️ อุปกรณ์ที่เหมาะกับงานติดตั้งและซ่อม"
+    ]
+}
+
+SUPPORT_LINES = {
+    "problem": [
+        "เหมาะกับคนที่กำลังหาของไว้แก้ปัญหาในบ้าน",
+        "มีติดบ้านไว้ เวลาใช้งานจะสะดวกมาก",
+        "ของแนวนี้ใช้ได้จริงในชีวิตประจำวัน"
+    ],
+    "selling": [
+        "ยอดขายและรีวิวถือว่าน่าสนใจ",
+        "ตัวนี้ดูเป็นของขายง่ายและคนรู้จักกันเยอะ",
+        "ใครกำลังหาอยู่ ลองกดดูได้เลย"
+    ],
+    "review": [
+        "ดูจากภาพรวมแล้วเป็นตัวที่น่าลอง",
+        "คะแนนรีวิวโอเค เหมาะกับสาย Home & Electrical",
+        "เหมาะกับคนที่อยากได้ของใช้งานจริง"
+    ],
+    "pro": [
+        "เหมาะกับงานช่าง งานซ่อม และงานติดตั้ง",
+        "ของแนวนี้ใช้หน้างานได้จริง",
+        "น่าจะตอบโจทย์สายช่างไฟและสาย DIY"
     ]
 }
 
 CTA_LINES = [
-    "กดดูรายละเอียด / เช็กราคาล่าสุด:",
-    "สนใจกดดูที่ลิงก์นี้:",
-    "เช็กราคา / โปรล่าสุดได้ที่:",
-    "กดดูสินค้าได้เลย:"
+    "🛒 สั่งซื้อสินค้า",
+    "🛒 กดดูรายละเอียด",
+    "🛒 เช็กราคาล่าสุด",
+    "🛒 ดูสินค้า"
 ]
 
 
@@ -166,7 +206,7 @@ def build_token_key(name):
     name = normalize_name(name)
     name = re.sub(r"[^0-9a-zA-Zก-๙\s]", " ", name)
     parts = [x for x in name.split() if len(x) >= 2]
-    return "|".join(sorted(set(parts[:5])))
+    return "|".join(sorted(set(parts[:6])))
 
 
 def load_state():
@@ -200,11 +240,11 @@ def load_state():
 
 
 def save_state(state):
-    state["posted_links"] = state["posted_links"][-500:]
-    state["posted_names"] = state["posted_names"][-500:]
-    state["posted_tokens"] = state["posted_tokens"][-500:]
-    state["posted_categories"] = state["posted_categories"][-50:]
-    state["history"] = state["history"][-100:]
+    state["posted_links"] = state["posted_links"][-700:]
+    state["posted_names"] = state["posted_names"][-700:]
+    state["posted_tokens"] = state["posted_tokens"][-700:]
+    state["posted_categories"] = state["posted_categories"][-80:]
+    state["history"] = state["history"][-200:]
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
@@ -212,7 +252,6 @@ def save_state(state):
 
 def detect_category(name):
     n = normalize_name(name)
-
     best_category = "ทั่วไป"
     best_score = 0
 
@@ -245,13 +284,22 @@ def allow_product(name):
 
 
 def make_aff_link(link):
+    if not link:
+        return ""
+
+    link = str(link).strip()
+
+    if "affiliate_id=" in link and "an_redir" in link:
+        return link
+
     if not AFF_ID:
         return link
+
     return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(link, safe='')}"
 
 
 def make_public_link(link):
-    return link
+    return make_aff_link(link)
 
 
 def get_monthly_promo():
@@ -260,8 +308,17 @@ def get_monthly_promo():
     return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / โค้ดส่วนลด / โปรส่งฟรีก่อนสั่งซื้อ"
 
 
-def choose_style():
-    return random.choice(["problem", "selling", "review"])
+def choose_style(product):
+    styles = ["problem", "selling", "review", "pro"]
+
+    if product["category"] in ["เครื่องมือช่างไฟ", "สายไฟและอุปกรณ์เดินสาย"]:
+        weighted = ["pro", "pro", "selling", "review", "problem"]
+    elif product["category"] in ["หลอดไฟและโคมไฟ", "ปลั๊กและสวิตช์"]:
+        weighted = ["selling", "problem", "review", "selling", "problem"]
+    else:
+        weighted = styles
+
+    return random.choice(weighted)
 
 
 def pick_first_nonempty(row, keys):
@@ -295,29 +352,29 @@ def read_products():
             break
 
         name = pick_first_nonempty(row, [
-            "product_name", "name", "title", "item_name", "product title"
+            "product_name", "name", "title", "item_name", "product title", "model_names"
         ])
         price = pick_first_nonempty(row, [
-            "sale_price", "price", "item_price", "model_price"
+            "sale_price", "price", "item_price", "model_price", "model_prices"
         ])
         link = pick_first_nonempty(row, [
             "product_short_link", "product_link", "link", "item_link", "url"
         ])
         rating_raw = pick_first_nonempty(row, [
-            "item_rating", "rating", "avg_rating"
+            "item_rating", "rating", "avg_rating", "shop_rating"
         ])
         sold_raw = pick_first_nonempty(row, [
-            "historical_sold", "sold", "sales"
+            "historical_sold", "sold", "sales", "stock"
         ])
 
         img1 = pick_first_nonempty(row, [
             "image_link", "image", "main_image", "image_url", "additional_image_link"
         ])
         img2 = pick_first_nonempty(row, [
-            "image_link_2", "image_2", "image2", "image_link_3"
+            "image_link_2", "image_2", "image2", "image_link_3", "image_link_4"
         ])
         img3 = pick_first_nonempty(row, [
-            "image_link_4", "image_3", "image3", "image_link_5"
+            "image_link_5", "image_3", "image3", "image_link_6", "image_link_7"
         ])
 
         rating = safe_float(rating_raw, 0)
@@ -348,6 +405,7 @@ def read_products():
             "price": str(price).strip(),
             "price_num": price_num,
             "link": link,
+            "aff_link": make_aff_link(link),
             "rating": rating,
             "sold": sold,
             "images": images[:MAX_IMAGES_PER_POST]
@@ -358,46 +416,46 @@ def read_products():
 
 
 def recent_category_penalty(category, state):
-    recent = state.get("posted_categories", [])[-3:]
+    recent = state.get("posted_categories", [])[-4:]
     if not recent:
         return 0
 
     penalty = 0
     if recent and recent[-1] == category:
-        penalty += 10
+        penalty += 12
 
     same_count = sum(1 for c in recent if c == category)
     if same_count >= 2:
-        penalty += 10
+        penalty += 12
 
     return penalty
 
 
 def score_product(product, state):
     score = 0.0
+
     score += product["rating"] * 40
-    score += product["sold"] * 0.45
+    score += product["sold"] * 0.50
     score += product["category_score"] * 10
 
     if product["price_num"] <= 99:
-        score += 20
+        score += 22
     elif product["price_num"] <= 299:
-        score += 15
+        score += 16
     elif product["price_num"] <= 699:
-        score += 8
+        score += 9
     else:
-        score += 3
+        score += 4
 
-    if product["category"] in [
-        "ปลั๊กและสวิตช์",
-        "สายไฟและอุปกรณ์เดินสาย",
-        "หลอดไฟและโคมไฟ",
-        "เครื่องมือช่างไฟ"
-    ]:
-        score += 10
+    if product["category"] in PRIMARY_CATEGORIES:
+        score += 12
+
+    if len(product["name"]) <= 90:
+        score += 5
 
     score -= recent_category_penalty(product["category"], state)
-    score += random.random() * 3
+    score += random.random() * 4
+
     return score
 
 
@@ -418,7 +476,7 @@ def choose_product(products, state):
 
     pool = fresh if fresh else products
     ranked = sorted(pool, key=lambda x: score_product(x, state), reverse=True)[:TOP_POOL]
-    chosen = ranked[0] if ranked else None
+    chosen = random.choice(ranked[: min(10, len(ranked))]) if ranked else None
 
     if chosen:
         log(f"STEP 3: chosen = {chosen['name']} | category = {chosen['category']}")
@@ -428,19 +486,23 @@ def choose_product(products, state):
 
 def build_caption(product, style):
     opener = random.choice(STYLE_OPENERS[style])
+    support = random.choice(SUPPORT_LINES[style])
     hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
     promo = get_monthly_promo()
+    cta = random.choice(CTA_LINES)
+    aff_url = product.get("aff_link") or make_aff_link(product["link"])
 
     return (
         f"{opener}\n\n"
         f"{product['name']}\n\n"
         f"หมวด: {product['category']}\n"
+        f"{support}\n"
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
         f"{promo}\n\n"
-        f"🛒 ดูสินค้า\n"
-        f"{make_public_link(product['link'])}\n\n"
+        f"{cta}\n"
+        f"{aff_url}\n\n"
         f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
     )
 
@@ -504,10 +566,12 @@ def post_product(product, caption_text):
 
 def comment_link(post_id, product):
     endpoint = f"https://graph.facebook.com/v25.0/{post_id}/comments"
+    aff_url = product.get("aff_link") or make_aff_link(product["link"])
+
     payload = {
         "message": (
-            f"🔗 ลิงก์สั่งซื้อ\n"
-            f"{make_aff_link(product['link'])}\n\n"
+            f"🔗 ลิงก์นายหน้า\n"
+            f"{aff_url}\n\n"
             f"✅ เช็กราคาล่าสุด\n"
             f"✅ ดูรีวิวเพิ่ม\n"
             f"✅ ดูโปรในร้าน"
@@ -552,7 +616,7 @@ def main():
         log("No product selected")
         return
 
-    style = choose_style()
+    style = choose_style(product)
     log(f"STEP 3A: style = {style}")
 
     caption_text = build_caption(product, style)
