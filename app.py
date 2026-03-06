@@ -12,12 +12,13 @@ CSV_URL=os.getenv("SHOPEE_CSV_URL")
 AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
 STATE_FILE="state.json"
-MAX_ROWS=2500
+MAX_ROWS=3000
 
 ALLOW_KEYWORDS=[
 "ไฟ","ปลั๊ก","สายไฟ","หลอดไฟ","สวิตช์",
 "เครื่องมือ","สว่าน","ไขควง","คีม",
-"DIY","บ้าน","โคม","อินเวอร์เตอร์","โซล่า"
+"DIY","บ้าน","โคม","โซล่า","อินเวอร์เตอร์",
+"แบตเตอรี่","UPS"
 ]
 
 CAPTIONS=[
@@ -47,7 +48,7 @@ CAPTIONS=[
 
 #ของใช้ในบ้าน #เครื่องมือช่าง""",
 
-"""🏠 อุปกรณ์ช่างที่ควรมีติดบ้าน
+"""🏠 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน
 
 {name}
 
@@ -64,22 +65,33 @@ def log(x):
 
 
 def load_state():
+
     if not os.path.exists(STATE_FILE):
+
         return {"posted":[]}
+
     with open(STATE_FILE) as f:
+
         return json.load(f)
 
 
 def save_state(state):
+
     with open(STATE_FILE,"w") as f:
+
         json.dump(state,f)
 
 
 def allow_product(name):
+
     name=name.lower()
+
     for k in ALLOW_KEYWORDS:
+
         if k in name:
+
             return True
+
     return False
 
 
@@ -96,31 +108,47 @@ def read_products():
     for i,row in enumerate(reader):
 
         if i>MAX_ROWS:
+
             break
 
         name=row.get("product_name") or row.get("name")
+
         price=row.get("price")
+
         link=row.get("product_link")
+
         rating=row.get("item_rating") or "0"
+
         sold=row.get("historical_sold") or "0"
 
         img1=row.get("image_link")
+
         img2=row.get("image_link_2")
+
         img3=row.get("image_link_3")
 
         if not name or not link or not img1:
+
             continue
 
         if not allow_product(name):
+
             continue
 
         products.append({
+
             "name":name,
+
             "price":price,
+
             "link":link,
+
             "rating":float(rating),
+
             "sold":int(float(sold)),
+
             "images":[img1,img2,img3]
+
         })
 
     log("products "+str(len(products)))
@@ -131,8 +159,11 @@ def read_products():
 def score(p):
 
     s=0
+
     s+=p["sold"]/20
+
     s+=p["rating"]*10
+
     s+=random.random()*3
 
     return s
@@ -142,7 +173,7 @@ def choose_product(products,state):
 
     products.sort(key=score,reverse=True)
 
-    for p in products[:60]:
+    for p in products[:80]:
 
         if p["link"] not in state["posted"]:
 
@@ -161,11 +192,17 @@ def caption(p):
     temp=random.choice(CAPTIONS)
 
     return temp.format(
+
         name=p["name"],
+
         price=p["price"],
+
         rating=p["rating"],
+
         sold=p["sold"],
+
         link=aff_link(p["link"])
+
     )
 
 
@@ -174,9 +211,13 @@ def upload_photo(url):
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     payload={
+
         "url":url,
+
         "published":"false",
+
         "access_token":TOKEN
+
     }
 
     r=requests.post(endpoint,data=payload)
@@ -191,22 +232,31 @@ def post_images(p):
     for img in p["images"]:
 
         if not img:
+
             continue
 
         try:
+
             mid=upload_photo(img)
+
             media.append(mid)
+
         except:
+
             pass
 
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
     payload={
+
         "message":caption(p),
+
         "access_token":TOKEN
+
     }
 
     for i,m in enumerate(media):
+
         payload[f"attached_media[{i}]"]=f'{{"media_fbid":"{m}"}}'
 
     r=requests.post(endpoint,data=payload)
@@ -223,8 +273,11 @@ def comment_link(post_id,p):
     endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
     payload={
+
         "message":f"🔗 ลิงก์สั่งซื้อ\n{aff_link(p['link'])}",
+
         "access_token":TOKEN
+
     }
 
     requests.post(endpoint,data=payload)
@@ -235,6 +288,7 @@ def download(url,file):
     r=requests.get(url)
 
     with open(file,"wb") as f:
+
         f.write(r.content)
 
 
@@ -268,8 +322,11 @@ def post_reel(p):
     files={"file":open(video,"rb")}
 
     data={
+
         "description":caption(p),
+
         "access_token":TOKEN
+
     }
 
     r=requests.post(url,files=files,data=data)
@@ -290,6 +347,7 @@ def main():
         post_id=post_images(p)
 
         if post_id:
+
             comment_link(post_id,p)
 
     else:
@@ -302,4 +360,5 @@ def main():
 
 
 if __name__=="__main__":
+
     main()
