@@ -1,4 +1,4 @@
-name: Auto Post (V40 ULTRA)
+name: Auto Post (V41 ULTRA)
 
 on:
   workflow_dispatch:
@@ -9,11 +9,14 @@ on:
     - cron: "30 11 * * *"  # 18:30 BKK
     - cron: "30 14 * * *"  # 21:30 BKK
 
+concurrency:
+  group: autopost
+  cancel-in-progress: false
+
 jobs:
   autopost:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,66 +26,41 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Restore state cache
-        uses: actions/cache@v4
-        with:
-          path: state.json
-          key: fb-autopost-state-v1
-          restore-keys: |
-            fb-autopost-state-
-
       - name: Install deps
-        run: |
-          python -V
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Run V40 ULTRA
+      - name: Run V41 ULTRA
         env:
           GRAPH_VERSION: v25.0
-
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # posting
+          # 5 โพส/วัน (แต่ละครั้งรัน 1 โพส)
           POSTS_MAX_PER_RUN: "1"
+          SLOTS_BKK: "08:30,12:00,15:00,18:30,21:30"
+
+          # บังคับโพสครั้งแรกให้เห็นผลทันที
           FIRST_RUN_POST_1: "1"
           FORCE_POST: "0"
-          REPOST_AFTER_DAYS: "21"
 
-          # filters
+          # กรองของให้ตรงเพจ
+          STRICT_PAGE_MATCH: "1"
           MIN_RATING: "4.7"
           MIN_DISCOUNT_PCT: "15"
           MIN_SOLD: "50"
           PRICE_MIN: "59"
           PRICE_MAX: "4999"
-
+          REPOST_AFTER_DAYS: "21"
           POST_IMAGES_COUNT: "3"
 
-          # affiliate tracking
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
-
-          # brand / hashtags
           BRAND: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
 
-          # anti-cancel
-          HTTP_TIMEOUT: "60"
-          KEEPALIVE_SEC: "20"
-
-          # slots (for log only)
-          SLOTS_BKK: "08:30,12:00,15:00,18:30,21:30"
-
+          SLOT_WINDOW_MINUTES: "12"
         run: |
           echo "INFO: start $(date -u)"
-          python -u app.py
-          echo "INFO: end $(date -u)"
-
-      - name: Save state cache
-        uses: actions/cache@v4
-        with:
-          path: state.json
-          key: fb-autopost-state-v1
+          python app.py
