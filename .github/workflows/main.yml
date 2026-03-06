@@ -1,71 +1,78 @@
 name: Auto Post (V39 ULTRA)
 
 on:
+  workflow_dispatch: {}
   schedule:
-    # เวลาไทย 12:00 และ 18:30  (GitHub Actions ใช้ UTC)
-    # 12:00 BKK = 05:00 UTC
-    # 18:30 BKK = 11:30 UTC
+    # Bangkok 12:00 = UTC 05:00
     - cron: "0 5 * * *"
+    # Bangkok 18:30 = UTC 11:30
     - cron: "30 11 * * *"
-  workflow_dispatch:
 
 jobs:
   autopost:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # (แนะนำ) cache เพื่อลดเวลารัน / เก็บ state.json ข้ามรัน
       - name: Restore state cache
         uses: actions/cache@v4
         with:
           path: state.json
-          key: state-${{ github.repository }}-${{ github.ref_name }}
+          key: state-${{ github.ref_name }}
           restore-keys: |
-            state-${{ github.repository }}-
+            state-
 
       - name: Install deps
         run: pip install -r requirements.txt
 
       - name: Run V39 ULTRA
         env:
-          GRAPH_VERSION: "v25.0"
+          GRAPH_VERSION: v25.0
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
 
-          # เวลาโพสต์ตามเพจ (ไทย)
+          # เวลาโพสต์ (ไทย)
           SLOTS_BKK: "12:00,18:30"
           POSTS_MAX_PER_RUN: "1"
+
+          # รันครั้งแรกโพสต์ 1
           FIRST_RUN_POST_1: "1"
 
-          # ✅ แบบ B: ถ้ากด Run เอง (workflow_dispatch) = FORCE_POST=1
-          # ถ้ารันตาม schedule = FORCE_POST=0
+          # ถ้ากด Run workflow เอง (workflow_dispatch) ให้ FORCE_POST=1 เพื่อโพสต์ทันที
           FORCE_POST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
 
-          # คัดของให้ตรงเพจ BEN Home & Electrical
+          # ค่าคัดกรอง (ปรับได้)
           MIN_RATING: "4.7"
           MIN_DISCOUNT_PCT: "15"
           MIN_SOLD: "50"
           PRICE_MIN: "59"
           PRICE_MAX: "4999"
           REPOST_AFTER_DAYS: "21"
-          POST_IMAGES_COUNT: "3"
 
+          POST_IMAGES_COUNT: "3"
           AFF_UTM_SOURCE: "facebook"
           AFF_TAG: "BENHomeElectrical"
           BRAND: "BEN Home & Electrical"
           HASHTAGS: "#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #งานช่าง #ซ่อมบ้าน #ShopeeAffiliate"
+
+          # กรองให้ตรงเพจ (ปรับได้)
+          ALLOW_KEYWORDS: "(ไฟฟ้า|ปลั๊ก|รางปลั๊ก|สายไฟ|เบรกเกอร์|ตู้ไฟ|หลอดไฟ|โคม|สวิตช์|มิเตอร์|UPS|แบตเตอรี่|LiFePO4|อินเวอร์เตอร์|โซล่า|solar|ชาร์จ|charger|หัวชาร์จ|adapter|อะแดปเตอร์|พาวเวอร์แบงก์|เครื่องมือ|สว่าน|ค้อน|ประแจ|คีม|ไขควง|งานช่าง|บ้าน|ซ่อม|DIY|กาว|เทปพันสาย|ปลั๊กพ่วง|ปลั๊กกันไฟกระชาก)"
+          BLOCK_KEYWORDS: "(เสื้อผ้า|บรา|กางเกง|เดรส|รองเท้าแฟชั่น|เครื่องสำอาง|สกินแคร์|น้ำหอม|ของเล่นเด็ก|ตุ๊กตา|อาหารเสริม|บุหรี่|แอลกอฮอล์|ย้อมผม|วิกผม|แฟลชกล้อง|กล้องถ่ายรูป|เลนส์)"
+          ALLOW_CATEGORIES: "(Home\\s*&\\s*Living|Home Improvement|Tools|Hardware|Electrical|Lighting|Cables|Chargers|Converters|Power|Solar|Batteries|DIY)"
+          BLOCK_CATEGORIES: "(Beauty|Fashion|Toys|Groceries|Food|Health|Baby|Women|Men|Camera|Photography)"
         run: python app.py
 
       - name: Save state cache
-        if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache@v4
         with:
           path: state.json
-          key: state-${{ github.repository }}-${{ github.ref_name }}
+          key: state-${{ github.ref_name }}
