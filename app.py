@@ -18,15 +18,16 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-MAX_ROWS = 500
-TOP_POOL = 10
+MAX_ROWS = 800
+TOP_POOL = 15
 MAX_IMAGES_PER_POST = 1
 
 HTTP_TIMEOUT = 20
 OPENAI_TIMEOUT = 25
 
-MIN_RATING = 4.5
-MIN_SOLD = 100
+# ผ่อนเงื่อนไขลง เพื่อไม่ให้ valid products = 0
+MIN_RATING = 4.0
+MIN_SOLD = 10
 
 ALLOWED_KEYWORDS = [
     "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "รางปลั๊ก",
@@ -34,20 +35,21 @@ ALLOWED_KEYWORDS = [
     "หลอดไฟ", "โคมไฟ", "ไฟ led", "led", "lamp", "light", "bulb",
     "breaker", "relay", "adapter", "ups", "solar", "inverter",
     "plug", "socket", "switch", "wire", "cable", "connector", "terminal",
-    "ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool"
+    "ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool",
+    "พัดลม", "หม้อแปลง", "อะแดปเตอร์", "สปอตไลท์", "ไฟเส้น", "ไฟโซล่า"
 ]
 
 BLOCK_KEYWORDS = [
-    "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม",
-    "shirt", "pants", "shoes", "bag", "cosmetic"
+    "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม", "เซรั่ม",
+    "shirt", "pants", "shoes", "bag", "cosmetic", "toy", "food", "snack"
 ]
 
 CATEGORY_RULES = {
     "ปลั๊กและสวิตช์": ["ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "รางปลั๊ก", "plug", "socket", "switch"],
     "สายไฟและอุปกรณ์เดินสาย": ["สายไฟ", "คอนเนคเตอร์", "เทอร์มินอล", "wire", "cable", "connector", "terminal", "dc jack"],
-    "หลอดไฟและโคมไฟ": ["หลอด", "โคม", "led", "lamp", "light", "bulb"],
+    "หลอดไฟและโคมไฟ": ["หลอด", "โคม", "led", "lamp", "light", "bulb", "สปอตไลท์", "ไฟเส้น"],
     "เครื่องมือช่างไฟ": ["ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool"],
-    "อุปกรณ์ไฟฟ้าในบ้าน": ["breaker", "relay", "adapter", "ups", "solar", "inverter"]
+    "อุปกรณ์ไฟฟ้าในบ้าน": ["breaker", "relay", "adapter", "ups", "solar", "inverter", "พัดลม", "หม้อแปลง"]
 }
 
 CATEGORY_HASHTAGS = {
@@ -139,7 +141,7 @@ def detect_category(name):
             best_score = score
             best_category = category
 
-    return best_category
+    return best_category, best_score
 
 
 def allow_product(name):
@@ -183,7 +185,7 @@ def make_aff_link_from_product_link(product_link: str) -> str:
 def get_monthly_promo():
     if MONTHLY_PROMO_TEXT:
         return MONTHLY_PROMO_TEXT
-    return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / โค้ดส่วนลด / โปรส่งฟรีก่อนสั่งซื้อ"
+    return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / ดูส่วนลด / เช็กโปรส่งฟรีก่อนสั่งซื้อ"
 
 
 def has_promo(row):
@@ -240,7 +242,7 @@ def read_products():
             log(f"CSV fields: {list(row.keys())}")
 
         name = pick_first_nonempty(row, [
-            "product_name", "name", "title", "item_name", "product title", "model_names"
+            "product_name", "name", "title", "item_name", "product title", "model_names", "shop_name"
         ])
         product_link = pick_first_nonempty(row, [
             "product_link", "link", "item_link", "url"
@@ -281,13 +283,12 @@ def read_products():
         if sold < MIN_SOLD:
             continue
 
-        if not has_promo(row):
-            continue
-
         price_num = safe_float(sale_price or original_price, 0)
         if price_num <= 0:
             continue
 
+        category, category_score = detect_category(name)
+        promo_flag = has_promo(row)
         images = [x for x in [img1, img2, img3] if x]
 
         products.append({
@@ -301,7 +302,9 @@ def read_products():
             "rating": rating,
             "sold": sold,
             "discount_percentage": discount_percentage,
-            "category": detect_category(name),
+            "has_promo": promo_flag,
+            "category": category,
+            "category_score": category_score,
             "images": images[:MAX_IMAGES_PER_POST]
         })
 
@@ -311,18 +314,19 @@ def read_products():
 
 def local_score(p):
     score = 0
-    score += p["rating"] * 40
-    score += p["sold"] * 0.6
+    score += p["rating"] * 45
+    score += p["sold"] * 0.7
     score += p.get("discount_percentage", 0) * 3
+    score += p.get("category_score", 0) * 12
+
+    if p["has_promo"]:
+        score += 20
 
     if p["price_num"] <= 99:
         score += 20
     elif p["price_num"] <= 299:
-        score += 14
+        score += 16
     elif p["price_num"] <= 699:
-        score += 8
-
-    if p["category"] in ["ปลั๊กและสวิตช์", "สายไฟและอุปกรณ์เดินสาย", "หลอดไฟและโคมไฟ"]:
         score += 10
 
     score += random.random() * 3
@@ -338,25 +342,31 @@ def ai_select_product(products):
             "index": idx,
             "name": p["name"],
             "category": p["category"],
+            "category_score": p["category_score"],
             "price": p["price"],
             "original_price": p.get("original_price", ""),
             "sale_price": p.get("sale_price", ""),
+            "has_promo": p.get("has_promo", False),
             "discount_percentage": p.get("discount_percentage", 0),
             "rating": p["rating"],
             "sold": p["sold"],
         })
 
     prompt = f"""
-เลือกสินค้าเพียง 1 ชิ้นที่เหมาะที่สุดสำหรับโพสต์บนเพจ Facebook ชื่อ BEN Home & Electrical
+คุณเป็น AI ผู้ช่วยคัดสินค้าสำหรับเพจ Facebook ชื่อ BEN Home & Electrical
 
-กติกา:
-- ต้องตรงหมวดอุปกรณ์ไฟฟ้า ของใช้ไฟฟ้า งานช่างไฟ ของใช้ในบ้าน
-- rating ต้องดี
-- sold มากกว่า 100
-- ให้ความสำคัญกับสินค้าที่มีโปรลดราคา หรือมี sale price
-- เลือกตัวที่ดูขายง่ายและเหมาะกับคนทั่วไป
+หน้าที่:
+เลือกสินค้าเพียง 1 ชิ้นจากรายการด้านล่าง เพื่อเอาไปโพสต์ขาย
 
-ตอบเป็นเลข index อย่างเดียว
+เกณฑ์สำคัญ:
+- ต้องตรงหมวดเพจที่สุด
+- เป็นแนวอุปกรณ์ไฟฟ้า ของใช้ไฟฟ้า งานช่างไฟ ของใช้ในบ้าน
+- rating สูงดีกว่า
+- sold สูงดีกว่า
+- ถ้ามีโปร / ลดราคา / sale price ให้คะแนนเพิ่ม
+- เลือกตัวที่คนทั่วไปน่าจะซื้อได้ง่าย
+
+ตอบเป็นเลข index อย่างเดียว ห้ามมีคำอื่น
 
 รายการสินค้า:
 {json.dumps(compact, ensure_ascii=False)}
@@ -393,13 +403,14 @@ def ai_generate_caption(product):
 ราคาเดิม: {product.get("original_price", "")}
 เรตติ้ง: {product["rating"]}
 ยอดขาย: {product["sold"]}
+มีโปร: {product.get("has_promo", False)}
 ส่วนลด: {product.get("discount_percentage", 0)}%
 
 เงื่อนไข:
 - โทนขายของจริง อ่านง่าย
 - มี emoji พอประมาณ
-- เน้นว่าสินค้านี้ตรงหมวดกับเพจ
-- เน้นว่ามีโปร/ลดราคา/คุ้มค่า
+- บอกว่าสินค้าตรงหมวดเพจ
+- ถ้ามีโปรให้ชูจุดคุ้มค่า
 - ไม่เกิน 8 บรรทัดก่อนลิงก์
 - ห้ามพูดเกินจริง
 - บรรทัดสุดท้ายก่อนลิงก์ให้เป็น "🛒 สั่งซื้อสินค้า"
@@ -424,7 +435,7 @@ def ai_generate_caption(product):
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
-        f"🔥 มีโปร/ลดราคา คุ้มก่อนสั่งซื้อ\n"
+        f"🔥 สินค้าตรงหมวดเพจและคุ้มค่าน่าโพสต์\n"
         f"{get_monthly_promo()}\n"
         f"🛒 สั่งซื้อสินค้า\n"
         f"{product['aff_link']}\n\n"
@@ -515,6 +526,8 @@ def main():
 
     product = ai_select_product(candidate_pool)
     log(f"STEP 3A: chosen = {product['name']}")
+    log(f"STEP 3B: category = {product['category']}")
+    log(f"STEP 3C: rating = {product['rating']}, sold = {product['sold']}, promo = {product['has_promo']}")
 
     caption_text = ai_generate_caption(product)
     post_id = post_product(product, caption_text)
