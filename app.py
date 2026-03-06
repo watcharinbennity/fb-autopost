@@ -44,16 +44,30 @@ CAPTION_STYLE=[
 📦 ขายแล้ว {sold}
 💰 {price} บาท
 
+👉 {link}
+
+#BENHomeElectrical #ShopeeAffiliate""",
+
+"""🏠 ของมันต้องมีติดบ้าน
+
+{title}
+
+⭐ รีวิว {rating}
+🔥 ยอดขาย {sold}
+
+💰 ราคา {price} บาท
+
+🛒 ซื้อสินค้า
 {link}
 
 #BENHomeElectrical""",
 
-"""🏠 ของมันต้องมี
+"""⚡ ของดีราคาประหยัด
 
 {title}
 
-⭐ {rating}
-🔥 {sold} คนซื้อ
+⭐ {rating} คะแนน
+📦 {sold} คนซื้อแล้ว
 
 💰 {price} บาท
 
@@ -123,7 +137,7 @@ def score(p):
     rating=float(p.get("item_rating",0))
     sold=int(p.get("item_sold",0))
 
-    s=rating*40+sold*0.6
+    s=rating*40 + sold*0.6
 
     name=p.get("title","").lower()
 
@@ -131,7 +145,7 @@ def score(p):
         if k in name:
             s+=20
 
-    s+=random.random()*10
+    s+=random.random()*15
 
     return s
 
@@ -157,7 +171,7 @@ def pick(products,state):
 
     ranked=sorted(pool,key=score,reverse=True)
 
-    top=ranked[:30]
+    top=ranked[:50]
 
     return random.choice(top)
 
