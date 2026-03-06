@@ -17,50 +17,64 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-# ลดโหลดให้รันผ่านก่อน
-MAX_ROWS = 500
-TOP_POOL = 25
+MAX_ROWS = 800
+TOP_POOL = 30
 MAX_IMAGES_PER_POST = 1
 
-MIN_RATING = 4.2
-MIN_SOLD = 15
+# ผ่อนเงื่อนไขก่อน เพื่อให้มีสินค้าผ่าน
+MIN_RATING = 0
+MIN_SOLD = 0
 
 HTTP_TIMEOUT = 25
 RETRY_COUNT = 2
 RETRY_SLEEP = 2
 
 ALLOWED_KEYWORDS = [
+    # ไทย
     "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
     "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์",
     "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "สปอตไลท์",
     "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์",
-    "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "ups", "อินเวอร์เตอร์", "โซล่า", "แบตเตอรี่"
+    "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "โซล่า", "อินเวอร์เตอร์", "แบตเตอรี่", "แบต",
+
+    # อังกฤษ
+    "plug", "socket", "power strip", "extension", "outlet",
+    "wire", "cable", "connector", "terminal",
+    "led", "lamp", "light", "bulb", "spotlight",
+    "screwdriver", "pliers", "drill", "multimeter", "tester",
+    "breaker", "relay", "switch", "ups", "inverter", "solar", "battery"
 ]
 
 BLOCK_KEYWORDS = [
     "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม", "เซรั่ม",
     "ตุ๊กตา", "ของเล่น", "อาหาร", "ขนม", "น้ำหอม", "เครื่องสำอาง",
-    "เคสมือถือ", "ฟิล์ม", "สร้อย", "แหวน", "หมวก", "นาฬิกา"
+    "เคสมือถือ", "ฟิล์ม", "สร้อย", "แหวน", "หมวก", "นาฬิกา",
+    "shirt", "pants", "shoes", "bag", "lipstick", "cream", "toy", "food", "snack"
 ]
 
 CATEGORY_RULES = {
     "ปลั๊กและสวิตช์": [
-        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ", "บล็อกลอย"
+        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "เต้ารับ", "สวิตช์", "สวิตช์ไฟ",
+        "plug", "socket", "power strip", "extension", "outlet", "switch"
     ],
     "สายไฟและอุปกรณ์เดินสาย": [
-        "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท"
+        "สายไฟ", "สายไฟฟ้า", "เทปพันสายไฟ", "หางปลา", "คอนเนคเตอร์", "วายนัท",
+        "wire", "cable", "connector", "terminal"
     ],
     "หลอดไฟและโคมไฟ": [
-        "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "ไฟเส้น", "สปอตไลท์"
+        "หลอดไฟ", "หลอด led", "โคมไฟ", "ไฟ led", "ไฟเส้น", "สปอตไลท์",
+        "led", "lamp", "light", "bulb", "spotlight"
     ],
     "เครื่องมือช่างไฟ": [
-        "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์", "เครื่องมือ"
+        "ไขควง", "ไขควงเช็คไฟ", "คีม", "สว่าน", "มัลติมิเตอร์", "มิเตอร์", "เครื่องมือ",
+        "screwdriver", "pliers", "drill", "multimeter", "tester", "tool"
     ],
     "โซล่าและพลังงานสำรอง": [
-        "โซล่า", "solar", "ups", "อินเวอร์เตอร์", "แบตเตอรี่", "แบต"
+        "โซล่า", "solar", "ups", "อินเวอร์เตอร์", "inverter", "แบตเตอรี่", "battery", "แบต"
     ],
     "อุปกรณ์ไฟฟ้าในบ้าน": [
-        "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "อุปกรณ์ไฟฟ้า", "พัดลม", "อะแดปเตอร์"
+        "เบรกเกอร์", "ตู้ไฟ", "รีเลย์", "อุปกรณ์ไฟฟ้า", "พัดลม", "อะแดปเตอร์",
+        "breaker", "relay", "adapter", "fan"
     ]
 }
 
@@ -112,14 +126,12 @@ def validate_env():
         missing.append("PAGE_ACCESS_TOKEN")
     if not CSV_URL:
         missing.append("SHOPEE_CSV_URL")
-
     if missing:
         raise ValueError("Missing env vars: " + ", ".join(missing))
 
 
 def request_with_retry(method, url, **kwargs):
     last_error = None
-
     for attempt in range(1, RETRY_COUNT + 1):
         try:
             return requests.request(method, url, timeout=HTTP_TIMEOUT, **kwargs)
@@ -128,7 +140,6 @@ def request_with_retry(method, url, **kwargs):
             log(f"request failed attempt {attempt}/{RETRY_COUNT}: {e}")
             if attempt < RETRY_COUNT:
                 time.sleep(RETRY_SLEEP)
-
     raise last_error
 
 
@@ -172,7 +183,6 @@ def load_state():
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         data.setdefault("posted_links", [])
         data.setdefault("posted_names", [])
         data.setdefault("posted_tokens", [])
@@ -251,6 +261,14 @@ def choose_style():
     return random.choice(["problem", "selling", "review"])
 
 
+def pick_first_nonempty(row, keys):
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return ""
+
+
 def read_products():
     log("STEP 1: download csv")
 
@@ -267,18 +285,40 @@ def read_products():
     products = []
 
     for i, row in enumerate(reader):
+        if i == 0:
+            log(f"CSV fields: {list(row.keys())}")
+
         if i >= MAX_ROWS:
             break
 
-        name = row.get("product_name") or row.get("name") or ""
-        price = row.get("price") or "0"
-        link = row.get("product_link") or ""
-        rating = safe_float(row.get("item_rating") or "0")
-        sold = safe_int(row.get("historical_sold") or "0")
+        name = pick_first_nonempty(row, [
+            "product_name", "name", "title", "item_name", "product title"
+        ])
+        price = pick_first_nonempty(row, [
+            "price", "sale_price", "item_price"
+        ])
+        link = pick_first_nonempty(row, [
+            "product_link", "link", "item_link", "url"
+        ])
+        rating_raw = pick_first_nonempty(row, [
+            "item_rating", "rating", "avg_rating"
+        ])
+        sold_raw = pick_first_nonempty(row, [
+            "historical_sold", "sold", "sales"
+        ])
 
-        img1 = row.get("image_link")
-        img2 = row.get("image_link_2")
-        img3 = row.get("image_link_3")
+        img1 = pick_first_nonempty(row, [
+            "image_link", "image", "main_image", "image_url"
+        ])
+        img2 = pick_first_nonempty(row, [
+            "image_link_2", "image_2", "image2"
+        ])
+        img3 = pick_first_nonempty(row, [
+            "image_link_3", "image_3", "image3"
+        ])
+
+        rating = safe_float(rating_raw, 0)
+        sold = safe_int(sold_raw, 0)
 
         if not name or not link or not img1:
             continue
@@ -297,14 +337,14 @@ def read_products():
         images = [x for x in [img1, img2, img3] if x]
 
         products.append({
-            "name": name.strip()[:110],
+            "name": name[:110],
             "name_key": normalize_name(name),
             "token_key": build_token_key(name),
             "category": category,
             "category_score": category_score,
             "price": str(price).strip(),
             "price_num": price_num,
-            "link": link.strip(),
+            "link": link,
             "rating": rating,
             "sold": sold,
             "images": images[:MAX_IMAGES_PER_POST]
@@ -332,7 +372,6 @@ def recent_category_penalty(category, state):
 
 def score_product(product, state):
     score = 0.0
-
     score += product["rating"] * 40
     score += product["sold"] * 0.45
     score += product["category_score"] * 10
@@ -356,7 +395,6 @@ def score_product(product, state):
 
     score -= recent_category_penalty(product["category"], state)
     score += random.random() * 3
-
     return score
 
 
@@ -376,7 +414,6 @@ def choose_product(products, state):
     ]
 
     pool = fresh if fresh else products
-
     ranked = sorted(pool, key=lambda x: score_product(x, state), reverse=True)[:TOP_POOL]
     chosen = ranked[0] if ranked else None
 
@@ -425,7 +462,6 @@ def upload_photo(url):
     data = graph_post(endpoint, payload)
     if "id" not in data:
         raise RuntimeError(f"upload_photo failed: {data}")
-
     return data["id"]
 
 
