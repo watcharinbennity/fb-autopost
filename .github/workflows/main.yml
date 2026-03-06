@@ -1,4 +1,4 @@
-name: Auto Post V120
+name: Auto Post
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
   autopost:
 
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 5
 
     steps:
 
@@ -24,13 +24,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # ติดตั้ง ffmpeg
-      - name: install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      # ติดตั้ง python packages
-      - name: install deps
-        run: pip install requests moviepy
+      - run: pip install requests
 
       - name: run bot
         env:
