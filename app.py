@@ -72,11 +72,16 @@ def aff(link):
 def read_feed():
     log("STEP1 read csv")
 
-    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT)
+    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
     r.raise_for_status()
 
-    lines = r.text.splitlines()
-    reader = csv.DictReader(lines)
+    line_iter = (
+        line.decode("utf-8-sig", errors="ignore")
+        for line in r.iter_lines()
+        if line
+    )
+
+    reader = csv.DictReader(line_iter)
 
     rows = []
     for i, row in enumerate(reader):
@@ -157,11 +162,15 @@ def caption(p):
 
 def upload(img):
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
-    r = requests.post(url, data={
-        "url": img,
-        "published": "false",
-        "access_token": TOKEN
-    }, timeout=HTTP_TIMEOUT).json()
+    r = requests.post(
+        url,
+        data={
+            "url": img,
+            "published": "false",
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    ).json()
 
     if "id" not in r:
         raise RuntimeError(r)
@@ -173,21 +182,29 @@ def post(p):
     media = upload(p["img"])
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-    r = requests.post(url, data={
-        "message": caption(p),
-        "attached_media[0]": json.dumps({"media_fbid": media}),
-        "access_token": TOKEN
-    }, timeout=HTTP_TIMEOUT).json()
+    r = requests.post(
+        url,
+        data={
+            "message": caption(p),
+            "attached_media[0]": json.dumps({"media_fbid": media}),
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    ).json()
 
     return r
 
 
 def comment(post_id, link):
     url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
-    r = requests.post(url, data={
-        "message": f"🛒 สั่งซื้อ\n{link}",
-        "access_token": TOKEN
-    }, timeout=HTTP_TIMEOUT).json()
+    r = requests.post(
+        url,
+        data={
+            "message": f"🛒 สั่งซื้อ\n{link}",
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    ).json()
 
     return r
 
