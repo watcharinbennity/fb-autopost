@@ -1,4 +1,4 @@
-name: Auto Post (V50 ULTRA)
+name: Auto Post (V50 ULTRA FIX)
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run V50 ULTRA
+      - name: Run V50 ULTRA FIX
         env:
           GRAPH_VERSION: v25.0
 
@@ -43,7 +43,9 @@ jobs:
           SLOTS_BKK: "08:30,12:00,15:00,18:30,21:30"
           POSTS_MAX_PER_RUN: "1"
           FIRST_RUN_POST_1: "1"
-          FORCE_POST: "0"
+
+          # กด Run เอง = โพสต์ทันที
+          FORCE_POST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
 
           MIN_RATING: "4.7"
           MIN_DISCOUNT_PCT: "15"
