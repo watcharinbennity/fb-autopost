@@ -1,32 +1,34 @@
 import os
 import csv
+import json
 import random
 import requests
 from datetime import datetime
 from moviepy.editor import ImageClip, concatenate_videoclips
 
-PAGE_ID=os.getenv("PAGE_ID")
-TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL=os.getenv("SHOPEE_CSV_URL")
-AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID = os.getenv("PAGE_ID")
+TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL = os.getenv("SHOPEE_CSV_URL")
+AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
 
-MAX_ROWS=2000
-STATE_FILE="state.json"
+MAX_ROWS = 1500
+STATE_FILE = "state.json"
 
 
-CAPTIONS=[
+CAPTIONS = [
+
 """🔥 ของมันต้องมีติดบ้าน
+
 🛒 {name}
 
 💰 ราคา {price} บาท
-⭐ {rating} / 5
+⭐ {rating}/5
 📦 ขายแล้ว {sold}
 
 👉 ดูสินค้า
 {link}
 
-#BENHomeElectrical #ShopeeAffiliate
-""",
+#BENHomeElectrical #ShopeeAffiliate""",
 
 """⚡ สินค้าขายดีใน Shopee
 
@@ -38,8 +40,7 @@ CAPTIONS=[
 
 {link}
 
-#ของใช้ในบ้าน #เครื่องมือช่าง
-""",
+#ของใช้ในบ้าน #เครื่องมือช่าง""",
 
 """🏠 BEN Home & Electrical
 
@@ -47,26 +48,25 @@ CAPTIONS=[
 
 💰 ราคา {price} บาท
 
-⭐ {rating} /5
+⭐ {rating}/5
 📦 ขายแล้ว {sold}
 
 👉 สั่งซื้อ
 {link}
-"""
+
+#ShopeeAffiliate"""
 ]
 
 
-def log(x):
-    print(datetime.utcnow(),x,flush=True)
+def log(msg):
+    print(datetime.utcnow(), msg, flush=True)
 
 
 def load_state():
 
     if not os.path.exists(STATE_FILE):
 
-        return {"posted":[]}
-
-    import json
+        return {"posted": []}
 
     with open(STATE_FILE) as f:
 
@@ -75,8 +75,6 @@ def load_state():
 
 def save_state(state):
 
-    import json
-
     with open(STATE_FILE,"w") as f:
 
         json.dump(state,f)
@@ -84,57 +82,56 @@ def save_state(state):
 
 def read_products():
 
-    r=requests.get(CSV_URL,timeout=60)
+    log("download csv")
 
-    lines=r.text.splitlines()
+    r = requests.get(CSV_URL,timeout=60)
+    r.raise_for_status()
 
-    reader=csv.DictReader(lines)
+    lines = r.text.splitlines()
 
-    products=[]
+    reader = csv.DictReader(lines)
+
+    products = []
 
     for i,row in enumerate(reader):
 
-        if i>MAX_ROWS:
+        if i > MAX_ROWS:
             break
 
-        name=row.get("product_name") or row.get("name")
+        name = row.get("product_name") or row.get("name")
+        price = row.get("price")
+        link = row.get("product_link")
+        rating = row.get("item_rating") or "0"
+        sold = row.get("historical_sold") or "0"
 
-        price=row.get("price")
-
-        link=row.get("product_link")
-
-        rating=row.get("item_rating")
-
-        sold=row.get("historical_sold")
-
-        img1=row.get("image_link")
-
-        img2=row.get("image_link_2")
-
-        img3=row.get("image_link_3")
+        img1 = row.get("image_link")
+        img2 = row.get("image_link_2")
+        img3 = row.get("image_link_3")
 
         if not name or not link or not img1:
             continue
 
         products.append({
-        "name":name,
-        "price":price,
-        "link":link,
-        "rating":float(rating or 0),
-        "sold":int(float(sold or 0)),
-        "images":[img1,img2,img3]
+            "name": name,
+            "price": price,
+            "link": link,
+            "rating": float(rating),
+            "sold": int(float(sold)),
+            "images": [img1,img2,img3]
         })
+
+    log(f"products loaded {len(products)}")
 
     return products
 
 
 def score_product(p):
 
-    score=0
+    score = 0
 
-    score+=p["sold"]/20
-    score+=p["rating"]*10
-    score+=random.random()*5
+    score += p["sold"]/20
+    score += p["rating"]*10
+    score += random.random()*5
 
     return score
 
@@ -159,14 +156,14 @@ def build_affiliate(link):
 
 def make_caption(p):
 
-    template=random.choice(CAPTIONS)
+    template = random.choice(CAPTIONS)
 
     return template.format(
-    name=p["name"],
-    price=p["price"],
-    rating=p["rating"],
-    sold=p["sold"],
-    link=build_affiliate(p["link"])
+        name=p["name"],
+        price=p["price"],
+        rating=p["rating"],
+        sold=p["sold"],
+        link=build_affiliate(p["link"])
     )
 
 
@@ -175,9 +172,9 @@ def upload_photo(url):
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     payload={
-    "url":url,
-    "published":"false",
-    "access_token":TOKEN
+        "url":url,
+        "published":"false",
+        "access_token":TOKEN
     }
 
     r=requests.post(endpoint,data=payload)
@@ -207,8 +204,8 @@ def post_images(p):
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
     payload={
-    "message":make_caption(p),
-    "access_token":TOKEN
+        "message":make_caption(p),
+        "access_token":TOKEN
     }
 
     for i,m in enumerate(media):
@@ -224,7 +221,9 @@ def download(url,file):
 
     r=requests.get(url)
 
-    open(file,"wb").write(r.content)
+    with open(file,"wb") as f:
+
+        f.write(r.content)
 
 
 def make_reel(images):
@@ -246,19 +245,19 @@ def make_reel(images):
 
 def post_reel(p):
 
-    imgfile="img1.jpg"
+    img="img1.jpg"
 
-    download(p["images"][0],imgfile)
+    download(p["images"][0],img)
 
-    video=make_reel([imgfile])
+    video=make_reel([img])
 
     url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/videos"
 
     files={"file":open(video,"rb")}
 
     data={
-    "description":make_caption(p),
-    "access_token":TOKEN
+        "description":make_caption(p),
+        "access_token":TOKEN
     }
 
     r=requests.post(url,files=files,data=data)
@@ -268,13 +267,13 @@ def post_reel(p):
 
 def main():
 
-    state=load_state()
+    state = load_state()
 
-    products=read_products()
+    products = read_products()
 
-    p=choose_product(products,state)
+    p = choose_product(products,state)
 
-    if random.random()>0.5:
+    if random.random() > 0.5:
 
         post_images(p)
 
@@ -287,6 +286,6 @@ def main():
     save_state(state)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
 
     main()
