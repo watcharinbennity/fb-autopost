@@ -13,6 +13,12 @@ AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 STATE_FILE="state.json"
 MAX_ROWS=3000
 
+ALLOW_KEYWORDS=[
+"ไฟ","ปลั๊ก","สายไฟ","หลอดไฟ","สวิตช์",
+"เครื่องมือ","สว่าน","ไขควง","คีม",
+"DIY","บ้าน","โคม","โซล่า","อินเวอร์เตอร์",
+"UPS","แบตเตอรี่"
+]
 
 CAPTIONS=[
 
@@ -39,12 +45,18 @@ CAPTIONS=[
 
 {link}
 
-#ของใช้ในบ้าน #เครื่องมือช่าง"""
+#ของใช้ในบ้าน #เครื่องมือช่าง""",
+
+"""🏠 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน
+
+{name}
+
+💰 ราคา {price} บาท
+⭐ {rating}/5
+
+👉 สั่งซื้อ
+{link}"""
 ]
-
-
-def log(x):
-    print(datetime.utcnow(),x,flush=True)
 
 
 def load_state():
@@ -65,6 +77,19 @@ def save_state(state):
         json.dump(state,f)
 
 
+def allow_product(name):
+
+    name=name.lower()
+
+    for k in ALLOW_KEYWORDS:
+
+        if k in name:
+
+            return True
+
+    return False
+
+
 def read_products():
 
     r=requests.get(CSV_URL,timeout=60)
@@ -78,19 +103,31 @@ def read_products():
     for i,row in enumerate(reader):
 
         if i>MAX_ROWS:
+
             break
 
         name=row.get("product_name") or row.get("name")
+
         price=row.get("price")
+
         link=row.get("product_link")
+
         rating=row.get("item_rating") or "0"
+
         sold=row.get("historical_sold") or "0"
 
         img1=row.get("image_link")
+
         img2=row.get("image_link_2")
+
         img3=row.get("image_link_3")
 
         if not name or not link or not img1:
+
+            continue
+
+        if not allow_product(name):
+
             continue
 
         products.append({
@@ -110,9 +147,10 @@ def read_products():
 def score(p):
 
     s=0
-    s+=p["sold"]/20
-    s+=p["rating"]*10
-    s+=random.random()*3
+
+    s+=p["sold"]/10
+    s+=p["rating"]*15
+    s+=random.random()*5
 
     return s
 
@@ -121,7 +159,7 @@ def choose_product(products,state):
 
     products.sort(key=score,reverse=True)
 
-    for p in products[:80]:
+    for p in products[:150]:
 
         if p["link"] not in state["posted"]:
 
@@ -174,14 +212,17 @@ def post_images(p):
     for img in p["images"]:
 
         if not img:
+
             continue
 
         try:
 
             mid=upload_photo(img)
+
             media.append(mid)
 
         except:
+
             pass
 
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
@@ -199,7 +240,23 @@ def post_images(p):
 
     r=requests.post(endpoint,data=payload)
 
-    log(r.text)
+    post_id=r.json().get("id")
+
+    return post_id
+
+
+def comment_link(post_id,p):
+
+    endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
+
+    payload={
+
+        "message":f"🔗 ลิงก์สั่งซื้อ\n{aff_link(p['link'])}",
+        "access_token":TOKEN
+
+    }
+
+    requests.post(endpoint,data=payload)
 
 
 def main():
@@ -210,7 +267,11 @@ def main():
 
     p=choose_product(products,state)
 
-    post_images(p)
+    post_id=post_images(p)
+
+    if post_id:
+
+        comment_link(post_id,p)
 
     state["posted"].append(p["link"])
 
