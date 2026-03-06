@@ -3,7 +3,6 @@ import csv
 import json
 import random
 import re
-import time
 from urllib.parse import quote, urlparse
 
 import requests
@@ -19,19 +18,23 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-MAX_ROWS = 300
-TOP_POOL = 8
+MAX_ROWS = 500
+TOP_POOL = 10
 MAX_IMAGES_PER_POST = 1
 
 HTTP_TIMEOUT = 20
 OPENAI_TIMEOUT = 25
 
+MIN_RATING = 4.5
+MIN_SOLD = 100
+
 ALLOWED_KEYWORDS = [
-    "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "สายไฟ", "หลอด", "โคม",
-    "led", "lamp", "light", "plug", "socket",
-    "breaker", "relay", "ups", "solar", "adapter",
-    "terminal", "connector", "dc", "jack",
-    "ไขควง", "คีม", "สว่าน", "multimeter", "tester"
+    "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "รางปลั๊ก",
+    "สายไฟ", "สายไฟฟ้า", "คอนเนคเตอร์", "เทอร์มินอล", "dc jack",
+    "หลอดไฟ", "โคมไฟ", "ไฟ led", "led", "lamp", "light", "bulb",
+    "breaker", "relay", "adapter", "ups", "solar", "inverter",
+    "plug", "socket", "switch", "wire", "cable", "connector", "terminal",
+    "ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool"
 ]
 
 BLOCK_KEYWORDS = [
@@ -40,11 +43,11 @@ BLOCK_KEYWORDS = [
 ]
 
 CATEGORY_RULES = {
-    "ปลั๊กและสวิตช์": ["ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "plug", "socket", "switch"],
+    "ปลั๊กและสวิตช์": ["ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "รางปลั๊ก", "plug", "socket", "switch"],
     "สายไฟและอุปกรณ์เดินสาย": ["สายไฟ", "คอนเนคเตอร์", "เทอร์มินอล", "wire", "cable", "connector", "terminal", "dc jack"],
     "หลอดไฟและโคมไฟ": ["หลอด", "โคม", "led", "lamp", "light", "bulb"],
     "เครื่องมือช่างไฟ": ["ไขควง", "คีม", "สว่าน", "multimeter", "tester", "tool"],
-    "อุปกรณ์ไฟฟ้าในบ้าน": ["breaker", "relay", "adapter", "ups", "solar"]
+    "อุปกรณ์ไฟฟ้าในบ้าน": ["breaker", "relay", "adapter", "ups", "solar", "inverter"]
 }
 
 CATEGORY_HASHTAGS = {
@@ -72,6 +75,7 @@ def validate_env():
     }.items():
         if not value:
             missing.append(key)
+
     if missing:
         raise ValueError("Missing env vars: " + ", ".join(missing))
 
@@ -79,6 +83,7 @@ def validate_env():
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {"posted_links": [], "history": []}
+
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -90,8 +95,9 @@ def load_state():
 
 
 def save_state(state):
-    state["posted_links"] = state["posted_links"][-300:]
-    state["history"] = state["history"][-100:]
+    state["posted_links"] = state["posted_links"][-500:]
+    state["history"] = state["history"][-200:]
+
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -126,18 +132,22 @@ def detect_category(name):
     n = normalize_name(name)
     best_category = "ทั่วไป"
     best_score = 0
+
     for category, keywords in CATEGORY_RULES.items():
         score = sum(1 for kw in keywords if kw.lower() in n)
         if score > best_score:
             best_score = score
             best_category = category
+
     return best_category
 
 
 def allow_product(name):
     n = normalize_name(name)
+
     if any(bad in n for bad in BLOCK_KEYWORDS):
         return False
+
     return any(kw in n for kw in ALLOWED_KEYWORDS)
 
 
@@ -158,11 +168,15 @@ def is_short_shopee_link(link: str) -> bool:
 def make_aff_link_from_product_link(product_link: str) -> str:
     if not product_link:
         return ""
+
     product_link = str(product_link).strip()
+
     if is_affiliate_link(product_link):
         return product_link
+
     if is_short_shopee_link(product_link):
         return product_link
+
     return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(product_link, safe='')}"
 
 
@@ -170,6 +184,37 @@ def get_monthly_promo():
     if MONTHLY_PROMO_TEXT:
         return MONTHLY_PROMO_TEXT
     return "🔥 โปรประจำเดือน: กดเช็กราคาล่าสุด / โค้ดส่วนลด / โปรส่งฟรีก่อนสั่งซื้อ"
+
+
+def has_promo(row):
+    discount = safe_float(
+        pick_first_nonempty(row, [
+            "discount_percentage", "discount", "discount_percent"
+        ]),
+        0
+    )
+
+    sale_price = safe_float(
+        pick_first_nonempty(row, [
+            "sale_price", "item_price", "model_price", "model_prices"
+        ]),
+        0
+    )
+
+    original_price = safe_float(
+        pick_first_nonempty(row, [
+            "price", "original_price", "item_original_price"
+        ]),
+        0
+    )
+
+    if discount > 0:
+        return True
+
+    if original_price > 0 and sale_price > 0 and sale_price < original_price:
+        return True
+
+    return False
 
 
 def read_products():
@@ -186,6 +231,7 @@ def read_products():
     reader = csv.DictReader(lines)
 
     products = []
+
     for i, row in enumerate(reader):
         if i >= MAX_ROWS:
             break
@@ -199,26 +245,46 @@ def read_products():
         product_link = pick_first_nonempty(row, [
             "product_link", "link", "item_link", "url"
         ])
-        price = pick_first_nonempty(row, [
-            "sale_price", "price", "item_price", "model_price", "model_prices"
+
+        original_price = pick_first_nonempty(row, [
+            "price", "original_price", "item_original_price"
         ])
+        sale_price = pick_first_nonempty(row, [
+            "sale_price", "item_price", "model_price", "model_prices"
+        ])
+
         rating = safe_float(pick_first_nonempty(row, [
             "item_rating", "rating", "avg_rating", "shop_rating"
         ]), 0)
+
         sold = safe_int(pick_first_nonempty(row, [
             "historical_sold", "sold", "sales"
         ]), 0)
 
-        img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url"])
+        discount_percentage = safe_float(pick_first_nonempty(row, [
+            "discount_percentage", "discount", "discount_percent"
+        ]), 0)
+
+        img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url", "additional_image_link"])
         img2 = pick_first_nonempty(row, ["image_link_2", "image_2", "image2", "image_link_3"])
         img3 = pick_first_nonempty(row, ["image_link_4", "image_3", "image3", "image_link_5"])
 
         if not name or not product_link or not img1:
             continue
+
         if not allow_product(name):
             continue
 
-        price_num = safe_float(price, 0)
+        if rating < MIN_RATING:
+            continue
+
+        if sold < MIN_SOLD:
+            continue
+
+        if not has_promo(row):
+            continue
+
+        price_num = safe_float(sale_price or original_price, 0)
         if price_num <= 0:
             continue
 
@@ -228,10 +294,13 @@ def read_products():
             "name": name[:120],
             "product_link": product_link,
             "aff_link": make_aff_link_from_product_link(product_link),
-            "price": str(price).strip(),
+            "price": str(sale_price or original_price).strip(),
+            "original_price": str(original_price).strip(),
+            "sale_price": str(sale_price).strip(),
             "price_num": price_num,
             "rating": rating,
             "sold": sold,
+            "discount_percentage": discount_percentage,
             "category": detect_category(name),
             "images": images[:MAX_IMAGES_PER_POST]
         })
@@ -241,13 +310,21 @@ def read_products():
 
 
 def local_score(p):
-    score = p["rating"] * 40 + p["sold"] * 0.5
+    score = 0
+    score += p["rating"] * 40
+    score += p["sold"] * 0.6
+    score += p.get("discount_percentage", 0) * 3
+
     if p["price_num"] <= 99:
         score += 20
     elif p["price_num"] <= 299:
         score += 14
     elif p["price_num"] <= 699:
         score += 8
+
+    if p["category"] in ["ปลั๊กและสวิตช์", "สายไฟและอุปกรณ์เดินสาย", "หลอดไฟและโคมไฟ"]:
+        score += 10
+
     score += random.random() * 3
     return score
 
@@ -262,22 +339,26 @@ def ai_select_product(products):
             "name": p["name"],
             "category": p["category"],
             "price": p["price"],
+            "original_price": p.get("original_price", ""),
+            "sale_price": p.get("sale_price", ""),
+            "discount_percentage": p.get("discount_percentage", 0),
             "rating": p["rating"],
             "sold": p["sold"],
         })
 
     prompt = f"""
-เลือกสินค้าเพียง 1 ชิ้นที่น่าโพสต์ขายบนเพจ Facebook ชื่อ BEN Home & Electrical
+เลือกสินค้าเพียง 1 ชิ้นที่เหมาะที่สุดสำหรับโพสต์บนเพจ Facebook ชื่อ BEN Home & Electrical
 
-เกณฑ์:
-- เหมาะกับเพจสายไฟฟ้า/ช่างไฟ/ของใช้ในบ้าน
-- rating สูงดีกว่า
-- sold สูงดีกว่า
-- ราคาไม่แรงดีกว่า
+กติกา:
+- ต้องตรงหมวดอุปกรณ์ไฟฟ้า ของใช้ไฟฟ้า งานช่างไฟ ของใช้ในบ้าน
+- rating ต้องดี
+- sold มากกว่า 100
+- ให้ความสำคัญกับสินค้าที่มีโปรลดราคา หรือมี sale price
+- เลือกตัวที่ดูขายง่ายและเหมาะกับคนทั่วไป
 
 ตอบเป็นเลข index อย่างเดียว
 
-รายการ:
+รายการสินค้า:
 {json.dumps(compact, ensure_ascii=False)}
 """
 
@@ -299,8 +380,8 @@ def ai_select_product(products):
 def ai_generate_caption(product):
     client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT)
 
-    promo = get_monthly_promo()
     hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
+    promo = get_monthly_promo()
 
     prompt = f"""
 เขียน caption Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
@@ -308,18 +389,22 @@ def ai_generate_caption(product):
 สินค้า:
 ชื่อ: {product["name"]}
 หมวด: {product["category"]}
-ราคา: {product["price"]} บาท
-rating: {product["rating"]}
-sold: {product["sold"]}
+ราคาปัจจุบัน: {product["price"]} บาท
+ราคาเดิม: {product.get("original_price", "")}
+เรตติ้ง: {product["rating"]}
+ยอดขาย: {product["sold"]}
+ส่วนลด: {product.get("discount_percentage", 0)}%
 
-ข้อกำหนด:
+เงื่อนไข:
 - โทนขายของจริง อ่านง่าย
 - มี emoji พอประมาณ
-- ไม่เกิน 7 บรรทัดก่อนลิงก์
+- เน้นว่าสินค้านี้ตรงหมวดกับเพจ
+- เน้นว่ามีโปร/ลดราคา/คุ้มค่า
+- ไม่เกิน 8 บรรทัดก่อนลิงก์
 - ห้ามพูดเกินจริง
 - บรรทัดสุดท้ายก่อนลิงก์ให้เป็น "🛒 สั่งซื้อสินค้า"
 - ไม่ต้องใส่ลิงก์ในคำตอบ
-- ใส่โปรนี้: {promo}
+- ใส่ข้อความโปรนี้แบบเนียน ๆ: {promo}
 """
 
     try:
@@ -339,7 +424,8 @@ sold: {product["sold"]}
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
-        f"{promo}\n"
+        f"🔥 มีโปร/ลดราคา คุ้มก่อนสั่งซื้อ\n"
+        f"{get_monthly_promo()}\n"
         f"🛒 สั่งซื้อสินค้า\n"
         f"{product['aff_link']}\n\n"
         f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
@@ -436,6 +522,7 @@ def main():
     if post_id:
         log(f"post created: {post_id}")
         comment_link(post_id, product)
+
         state["posted_links"].append(product["product_link"])
         state["history"].append({
             "name": product["name"],
