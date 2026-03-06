@@ -24,7 +24,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      # ติดตั้ง ffmpeg
+      - name: install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      # ติดตั้ง python packages
+      - name: install deps
+        run: pip install requests moviepy
 
       - name: run bot
         env:
