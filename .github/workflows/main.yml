@@ -1,4 +1,4 @@
-name: Auto Post V100
+name: Auto Post V120
 
 on:
   workflow_dispatch:
