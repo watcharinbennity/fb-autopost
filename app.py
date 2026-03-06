@@ -1,13 +1,17 @@
 import os
+import csv
 import json
 import random
+import re
+from urllib.parse import quote, urlparse
+
 import requests
-from urllib.parse import quote
 from openai import OpenAI
 
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL = os.getenv("SHOPEE_CSV_URL")
 AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
@@ -18,13 +22,13 @@ HTTP_TIMEOUT = 20
 OPENAI_TIMEOUT = 25
 
 LIMIT_API = 60
+MAX_ROWS = 5000
 TOP_POOL = 12
 MAX_IMAGES_PER_POST = 1
 
 MIN_RATING = 4.5
 MIN_SOLD = 100
 
-# หมวดเพจ BEN Home & Electrical
 ALLOWED_KEYWORDS = [
     "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "รางปลั๊ก",
     "สายไฟ", "สายไฟฟ้า", "คอนเนคเตอร์", "เทอร์มินอล",
@@ -70,6 +74,7 @@ def validate_env():
         "PAGE_ACCESS_TOKEN": TOKEN,
         "SHOPEE_AFFILIATE_ID": AFF_ID,
         "OPENAI_API_KEY": OPENAI_API_KEY,
+        "SHOPEE_CSV_URL": CSV_URL,
     }.items():
         if not value:
             missing.append(key)
@@ -103,16 +108,24 @@ def normalize_name(name):
 
 def safe_float(value, default=0.0):
     try:
-        return float(value)
+        return float(str(value).replace(",", "").strip())
     except Exception:
         return default
 
 
 def safe_int(value, default=0):
     try:
-        return int(value)
+        return int(float(str(value).replace(",", "").strip()))
     except Exception:
         return default
+
+
+def pick_first_nonempty(row, keys):
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def detect_category(name):
@@ -167,11 +180,9 @@ def local_score(p):
     return score
 
 
-def fetch_shopee_products():
-    log("STEP 1: fetch shopee api")
+def fetch_shopee_products_api():
+    log("STEP 1A: fetch shopee api")
 
-    # match_id อาจเปลี่ยนตามหมวด/ประเทศ ถ้า endpoint นี้ใช้ไม่ได้ในบางเวลา
-    # จะ fallback ด้วยการจบแบบชัดเจนใน log
     url = "https://shopee.co.th/api/v4/search/search_items"
     params = {
         "by": "sales",
@@ -180,7 +191,6 @@ def fetch_shopee_products():
         "order": "desc",
         "page_type": "search"
     }
-
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json"
@@ -191,7 +201,7 @@ def fetch_shopee_products():
     data = r.json()
 
     items = data.get("items", [])
-    log(f"STEP 2: raw items = {len(items)}")
+    log(f"STEP 1B: api raw items = {len(items)}")
 
     keyword_products = []
     fallback_products = []
@@ -212,14 +222,12 @@ def fetch_shopee_products():
         itemid = item.get("itemid")
         shopid = item.get("shopid")
         image = item.get("image")
-
         if not itemid or not shopid or not image:
             continue
 
         product_link = f"https://shopee.co.th/product/{shopid}/{itemid}"
         image_url = f"https://cf.shopee.co.th/file/{image}"
 
-        # Shopee price มักเป็นหน่วยย่อย
         price_raw = item.get("price_min") or item.get("price") or 0
         price_num = safe_float(price_raw, 0) / 100000 if price_raw else 0
         if price_num <= 0:
@@ -233,7 +241,6 @@ def fetch_shopee_products():
             discount_percentage = round(((original_price_num - price_num) / original_price_num) * 100, 2)
 
         has_promo = discount_percentage > 0
-
         category, category_score = detect_category(name)
 
         product = {
@@ -254,14 +261,121 @@ def fetch_shopee_products():
         }
 
         fallback_products.append(product)
-
         if allow_product(name):
             keyword_products.append(product)
 
-    # ถ้ามีของตรงหมวดเพจ ใช้กองนี้ก่อน
     base = keyword_products if keyword_products else fallback_products
-    log(f"STEP 3: valid products = {len(base)}")
+    log(f"STEP 1C: api valid products = {len(base)}")
     return base
+
+
+def fetch_products_csv():
+    log("STEP 2A: fallback to csv")
+
+    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
+    r.raise_for_status()
+
+    lines = (
+        line.decode("utf-8-sig", errors="ignore")
+        for line in r.iter_lines()
+        if line
+    )
+    reader = csv.DictReader(lines)
+
+    raw_rows = []
+    for i, row in enumerate(reader):
+        if i >= MAX_ROWS:
+            break
+        if i == 0:
+            log(f"STEP 2B: csv fields = {list(row.keys())}")
+        raw_rows.append(row)
+
+    random.shuffle(raw_rows)
+
+    keyword_products = []
+    fallback_products = []
+
+    for row in raw_rows:
+        name = pick_first_nonempty(row, [
+            "title", "product_name", "name", "item_name", "product title", "model_names"
+        ])
+        product_link = pick_first_nonempty(row, [
+            "product_link", "link", "item_link", "url"
+        ])
+        sale_price = pick_first_nonempty(row, [
+            "sale_price", "item_price", "model_price", "model_prices"
+        ])
+        original_price = pick_first_nonempty(row, [
+            "price", "original_price", "item_original_price"
+        ])
+        rating = safe_float(pick_first_nonempty(row, [
+            "item_rating", "rating", "avg_rating", "shop_rating"
+        ]), 0)
+        sold = safe_int(pick_first_nonempty(row, [
+            "historical_sold", "sold", "sales"
+        ]), 0)
+
+        img1 = pick_first_nonempty(row, ["image_link", "image", "main_image", "image_url", "additional_image_link"])
+        img2 = pick_first_nonempty(row, ["image_link_2", "image_2", "image2", "image_link_3"])
+        img3 = pick_first_nonempty(row, ["image_link_4", "image_3", "image3", "image_link_5"])
+
+        if not name or not product_link or not img1:
+            continue
+        if rating < MIN_RATING or sold < MIN_SOLD:
+            continue
+
+        price_num = safe_float(sale_price or original_price, 0)
+        if price_num <= 0:
+            continue
+
+        has_promo = False
+        discount = safe_float(pick_first_nonempty(row, [
+            "discount_percentage", "discount", "discount_percent"
+        ]), 0)
+        if discount > 0:
+            has_promo = True
+
+        original_num = safe_float(original_price, 0)
+        sale_num = safe_float(sale_price, 0)
+        if original_num > 0 and sale_num > 0 and original_num > sale_num:
+            has_promo = True
+            if discount <= 0:
+                discount = round(((original_num - sale_num) / original_num) * 100, 2)
+
+        category, category_score = detect_category(name)
+
+        product = {
+            "name": name[:120],
+            "product_link": product_link,
+            "aff_link": make_aff_link(product_link),
+            "price": str(sale_price or original_price).strip(),
+            "original_price": str(original_price).strip(),
+            "sale_price": str(sale_price).strip(),
+            "price_num": price_num,
+            "rating": rating,
+            "sold": sold,
+            "has_promo": has_promo,
+            "discount_percentage": discount,
+            "category": category,
+            "category_score": category_score,
+            "images": [img1][:MAX_IMAGES_PER_POST]
+        }
+
+        fallback_products.append(product)
+        if allow_product(name):
+            keyword_products.append(product)
+
+    base = keyword_products if keyword_products else fallback_products
+    log(f"STEP 2C: csv valid products = {len(base)}")
+    return base
+
+
+def get_products():
+    try:
+        return fetch_shopee_products_api()
+    except Exception as e:
+        log(f"STEP 1X: api failed = {e}")
+        return fetch_products_csv()
 
 
 def build_candidate_pool(products, posted_links):
@@ -271,11 +385,11 @@ def build_candidate_pool(products, posted_links):
     promo_pool = [p for p in base_pool if p["has_promo"]]
     if promo_pool:
         pool = sorted(promo_pool, key=local_score, reverse=True)[:TOP_POOL]
-        log(f"STEP 4: using promo pool = {len(pool)}")
+        log(f"STEP 3: using promo pool = {len(pool)}")
         return pool
 
     pool = sorted(base_pool, key=local_score, reverse=True)[:TOP_POOL]
-    log(f"STEP 4: no promo items, fallback pool = {len(pool)}")
+    log(f"STEP 3: no promo items, fallback pool = {len(pool)}")
     return pool
 
 
@@ -315,7 +429,6 @@ def ai_select_product(products):
 รายการ:
 {json.dumps(compact, ensure_ascii=False)}
 """
-
     try:
         r = client.responses.create(
             model="gpt-4.1-mini",
@@ -362,7 +475,6 @@ def ai_generate_caption(product):
 - ไม่ต้องใส่ลิงก์ในคำตอบ
 - ใส่ข้อความนี้แบบเนียน ๆ: {promo}
 """
-
     try:
         r = client.responses.create(
             model="gpt-4.1-mini",
@@ -455,12 +567,12 @@ def comment_link(post_id, product):
 
 
 def main():
-    log("START V35")
+    log("START V35 HYBRID")
     validate_env()
 
     state = load_state()
 
-    products = fetch_shopee_products()
+    products = get_products()
     if not products:
         log("No products found")
         return
