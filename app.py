@@ -56,11 +56,26 @@ def log(t):
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {"posted": []}
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {"posted": []}
+
+    # รองรับทั้ง state เก่าและใหม่
+    if "posted" not in data:
+        if "posted_links" in data and isinstance(data["posted_links"], list):
+            data["posted"] = data["posted_links"]
+        else:
+            data["posted"] = []
+
+    return data
 
 
 def save_state(s):
+    s["posted"] = s.get("posted", [])[-1000:]
+
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, ensure_ascii=False, indent=2)
 
@@ -103,6 +118,7 @@ def allow(name):
 
 def build_pool(rows, state):
     pool = []
+    posted = set(state.get("posted", []))
 
     for r in rows:
         title = r.get("title", "")
@@ -124,7 +140,7 @@ def build_pool(rows, state):
         if not title or not link or not img:
             continue
 
-        if link in state["posted"]:
+        if link in posted:
             continue
 
         if not allow(title):
