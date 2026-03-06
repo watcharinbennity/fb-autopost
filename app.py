@@ -2,15 +2,14 @@ import os
 import csv
 import json
 import random
-from urllib.parse import quote
 import requests
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
-AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
 
 STATE_FILE = "state.json"
+SAFE_LINKS_FILE = "safe_links.json"
 
 MAX_SCAN_ROWS = 5000
 MAX_ROWS = 2500
@@ -63,7 +62,6 @@ def load_state():
     except Exception:
         return {"posted": []}
 
-    # รองรับทั้ง state เก่าและใหม่
     if "posted" not in data:
         if "posted_links" in data and isinstance(data["posted_links"], list):
             data["posted"] = data["posted_links"]
@@ -75,13 +73,23 @@ def load_state():
 
 def save_state(s):
     s["posted"] = s.get("posted", [])[-1000:]
-
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, ensure_ascii=False, indent=2)
 
 
-def aff(link):
-    return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={quote(link, safe='')}"
+def load_safe_links():
+    if not os.path.exists(SAFE_LINKS_FILE):
+        return {}
+
+    try:
+        with open(SAFE_LINKS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    return {}
 
 
 def read_feed():
@@ -116,13 +124,13 @@ def allow(name):
     return any(k in n for k in KEYWORDS)
 
 
-def build_pool(rows, state):
+def build_pool(rows, state, safe_links):
     pool = []
     posted = set(state.get("posted", []))
 
     for r in rows:
         title = r.get("title", "")
-        link = r.get("product_link", "")
+        product_link = r.get("product_link", "")
         img = r.get("image_link", "")
 
         try:
@@ -137,10 +145,10 @@ def build_pool(rows, state):
 
         price = r.get("sale_price", "")
 
-        if not title or not link or not img:
+        if not title or not product_link or not img:
             continue
 
-        if link in posted:
+        if product_link in posted:
             continue
 
         if not allow(title):
@@ -152,9 +160,15 @@ def build_pool(rows, state):
         if sold < 10:
             continue
 
+        # ใช้เฉพาะลิงก์ที่แปลงจาก Shopee ทางการแล้ว
+        safe_link = safe_links.get(product_link, "").strip()
+        if not safe_link:
+            continue
+
         pool.append({
             "title": title,
-            "link": link,
+            "product_link": product_link,
+            "safe_link": safe_link,
             "img": img,
             "rating": rating,
             "sold": sold,
@@ -172,7 +186,7 @@ def caption(p):
         rating=p["rating"],
         sold=p["sold"],
         price=p["price"],
-        link=aff(p["link"])
+        link=p["safe_link"]
     )
 
 
@@ -227,8 +241,9 @@ def comment(post_id, link):
 
 def main():
     state = load_state()
+    safe_links = load_safe_links()
     rows = read_feed()
-    pool = build_pool(rows, state)
+    pool = build_pool(rows, state, safe_links)
 
     if not pool:
         log("no product")
@@ -240,12 +255,9 @@ def main():
     log(res)
 
     if "id" in res:
-        link = aff(p["link"])
-        comment(res["id"], link)
-
-        state["posted"].append(p["link"])
+        comment(res["id"], p["safe_link"])
+        state["posted"].append(p["product_link"])
         save_state(state)
-
         log("done")
 
 
