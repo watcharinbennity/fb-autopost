@@ -1,16 +1,16 @@
-name: Auto Post V500
+name: AI Affiliate Dominator
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 1 * * *"
+    - cron: "0 5 * * *"
+    - cron: "30 11 * * *"
 
 jobs:
   autopost:
 
     runs-on: ubuntu-latest
-    timeout-minutes: 5
 
     steps:
 
@@ -20,12 +20,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install requests
+      - run: pip install -r requirements.txt
 
-      - name: run bot
+      - run: python app.py
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-        run: python app.py
