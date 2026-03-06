@@ -6,26 +6,31 @@ import requests
 from datetime import datetime
 from moviepy.editor import ImageClip, concatenate_videoclips
 
-PAGE_ID = os.getenv("PAGE_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
-AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID=os.getenv("PAGE_ID")
+TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL=os.getenv("SHOPEE_CSV_URL")
+AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
-MAX_ROWS = 1500
-STATE_FILE = "state.json"
+STATE_FILE="state.json"
+MAX_ROWS=2000
 
+ALLOW_KEYWORDS=[
+"ไฟ","ปลั๊ก","สายไฟ","หลอดไฟ","สวิตช์",
+"เครื่องมือ","สว่าน","ไขควง","คีม",
+"DIY","บ้าน"
+]
 
-CAPTIONS = [
+CAPTIONS=[
 
 """🔥 ของมันต้องมีติดบ้าน
 
-🛒 {name}
+{name}
 
 💰 ราคา {price} บาท
 ⭐ {rating}/5
-📦 ขายแล้ว {sold}
+📦 {sold} คนซื้อแล้ว
 
-👉 ดูสินค้า
+👇 ดูสินค้า
 {link}
 
 #BENHomeElectrical #ShopeeAffiliate""",
@@ -36,109 +41,106 @@ CAPTIONS = [
 
 💰 {price} บาท
 ⭐ รีวิว {rating}/5
-📦 {sold} คนซื้อแล้ว
+📦 ขายแล้ว {sold}
 
 {link}
 
 #ของใช้ในบ้าน #เครื่องมือช่าง""",
 
-"""🏠 BEN Home & Electrical
+"""🏠 อุปกรณ์ช่างที่ควรมีติดบ้าน
 
 {name}
 
 💰 ราคา {price} บาท
-
 ⭐ {rating}/5
-📦 ขายแล้ว {sold}
 
 👉 สั่งซื้อ
-{link}
-
-#ShopeeAffiliate"""
+{link}"""
 ]
 
 
-def log(msg):
-    print(datetime.utcnow(), msg, flush=True)
+def log(x):
+    print(datetime.utcnow(),x,flush=True)
 
 
 def load_state():
-
     if not os.path.exists(STATE_FILE):
-
-        return {"posted": []}
-
+        return {"posted":[]}
     with open(STATE_FILE) as f:
-
         return json.load(f)
 
 
 def save_state(state):
-
     with open(STATE_FILE,"w") as f:
-
         json.dump(state,f)
+
+
+def allow_product(name):
+    name=name.lower()
+    for k in ALLOW_KEYWORDS:
+        if k in name:
+            return True
+    return False
 
 
 def read_products():
 
-    log("download csv")
+    r=requests.get(CSV_URL,timeout=60)
 
-    r = requests.get(CSV_URL,timeout=60)
-    r.raise_for_status()
+    rows=r.text.splitlines()
 
-    lines = r.text.splitlines()
+    reader=csv.DictReader(rows)
 
-    reader = csv.DictReader(lines)
-
-    products = []
+    products=[]
 
     for i,row in enumerate(reader):
 
-        if i > MAX_ROWS:
+        if i>MAX_ROWS:
             break
 
-        name = row.get("product_name") or row.get("name")
-        price = row.get("price")
-        link = row.get("product_link")
-        rating = row.get("item_rating") or "0"
-        sold = row.get("historical_sold") or "0"
+        name=row.get("product_name") or row.get("name")
+        price=row.get("price")
+        link=row.get("product_link")
+        rating=row.get("item_rating") or "0"
+        sold=row.get("historical_sold") or "0"
 
-        img1 = row.get("image_link")
-        img2 = row.get("image_link_2")
-        img3 = row.get("image_link_3")
+        img1=row.get("image_link")
+        img2=row.get("image_link_2")
+        img3=row.get("image_link_3")
 
         if not name or not link or not img1:
             continue
 
+        if not allow_product(name):
+            continue
+
         products.append({
-            "name": name,
-            "price": price,
-            "link": link,
-            "rating": float(rating),
-            "sold": int(float(sold)),
-            "images": [img1,img2,img3]
+            "name":name,
+            "price":price,
+            "link":link,
+            "rating":float(rating),
+            "sold":int(float(sold)),
+            "images":[img1,img2,img3]
         })
 
-    log(f"products loaded {len(products)}")
+    log("products "+str(len(products)))
 
     return products
 
 
-def score_product(p):
+def score(p):
 
-    score = 0
+    s=0
+    s+=p["sold"]/20
+    s+=p["rating"]*10
+    s+=random.random()*3
 
-    score += p["sold"]/20
-    score += p["rating"]*10
-    score += random.random()*5
-
-    return score
+    return s
 
 
 def choose_product(products,state):
 
-    products.sort(key=score_product,reverse=True)
+    products.sort(key=score,reverse=True)
 
     for p in products[:50]:
 
@@ -149,21 +151,21 @@ def choose_product(products,state):
     return random.choice(products)
 
 
-def build_affiliate(link):
+def aff_link(link):
 
     return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={link}"
 
 
-def make_caption(p):
+def caption(p):
 
-    template = random.choice(CAPTIONS)
+    temp=random.choice(CAPTIONS)
 
-    return template.format(
+    return temp.format(
         name=p["name"],
         price=p["price"],
         rating=p["rating"],
         sold=p["sold"],
-        link=build_affiliate(p["link"])
+        link=aff_link(p["link"])
     )
 
 
@@ -192,29 +194,40 @@ def post_images(p):
             continue
 
         try:
-
             mid=upload_photo(img)
-
             media.append(mid)
-
         except:
-
             pass
 
     endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
     payload={
-        "message":make_caption(p),
+        "message":caption(p),
         "access_token":TOKEN
     }
 
     for i,m in enumerate(media):
-
         payload[f"attached_media[{i}]"]=f'{{"media_fbid":"{m}"}}'
 
     r=requests.post(endpoint,data=payload)
 
+    post_id=r.json().get("id")
+
     log(r.text)
+
+    return post_id
+
+
+def comment_link(post_id,p):
+
+    endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
+
+    payload={
+        "message":f"🔗 ลิงก์สั่งซื้อ\n{aff_link(p['link'])}",
+        "access_token":TOKEN
+    }
+
+    requests.post(endpoint,data=payload)
 
 
 def download(url,file):
@@ -222,7 +235,6 @@ def download(url,file):
     r=requests.get(url)
 
     with open(file,"wb") as f:
-
         f.write(r.content)
 
 
@@ -245,7 +257,7 @@ def make_reel(images):
 
 def post_reel(p):
 
-    img="img1.jpg"
+    img="img.jpg"
 
     download(p["images"][0],img)
 
@@ -256,7 +268,7 @@ def post_reel(p):
     files={"file":open(video,"rb")}
 
     data={
-        "description":make_caption(p),
+        "description":caption(p),
         "access_token":TOKEN
     }
 
@@ -267,15 +279,18 @@ def post_reel(p):
 
 def main():
 
-    state = load_state()
+    state=load_state()
 
-    products = read_products()
+    products=read_products()
 
-    p = choose_product(products,state)
+    p=choose_product(products,state)
 
-    if random.random() > 0.5:
+    if random.random()>0.5:
 
-        post_images(p)
+        post_id=post_images(p)
+
+        if post_id:
+            comment_link(post_id,p)
 
     else:
 
@@ -286,6 +301,5 @@ def main():
     save_state(state)
 
 
-if __name__ == "__main__":
-
+if __name__=="__main__":
     main()
