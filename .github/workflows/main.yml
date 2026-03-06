@@ -1,4 +1,4 @@
-name: BEN Auto Post AI
+name: BEN Auto Post AI V5
 
 on:
   workflow_dispatch:
