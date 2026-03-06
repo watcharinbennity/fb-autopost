@@ -1,4 +1,4 @@
-name: BEN Auto Post V35
+name: BEN Auto Post V40
 
 on:
   workflow_dispatch:
@@ -11,39 +11,32 @@ permissions:
 
 jobs:
   autopost:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 8
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install requirements
-        run: |
-          python -m pip install --upgrade pip
+      - run: |
           pip install -r requirements.txt
 
-      - name: Run V35 Hybrid
+      - name: Run Bot
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MONTHLY_PROMO_TEXT: ${{ secrets.MONTHLY_PROMO_TEXT }}
-        run: python -u app.py
+        run: python app.py
 
-      - name: Commit state update
+      - name: Save State
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name github-actions
+          git config user.email actions@github.com
           git add state.json
-          git diff --cached --quiet || git commit -m "update state"
+          git commit -m "update state" || echo "no change"
           git push
