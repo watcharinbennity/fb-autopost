@@ -1,46 +1,49 @@
-name: BEN Auto Post AI
+name: BEN AI Viral Post
 
 on:
-  workflow_dispatch:
+ workflow_dispatch:
 
-  schedule:
-    - cron: "0 1 * * *"
-    - cron: "0 3 * * *"
-    - cron: "0 5 * * *"
-    - cron: "0 8 * * *"
-    - cron: "0 11 * * *"
-    - cron: "0 14 * * *"
+ schedule:
+  - cron: "0 1 * * *"
+  - cron: "0 3 * * *"
+  - cron: "0 5 * * *"
+  - cron: "0 8 * * *"
+  - cron: "0 11 * * *"
+  - cron: "0 14 * * *"
+  - cron: "0 16 * * *"
+  - cron: "0 18 * * *"
 
 permissions:
-  contents: write
+ contents: write
 
 jobs:
-  autopost:
+ autopost:
 
-    runs-on: ubuntu-latest
+  runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+  steps:
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+   - uses: actions/checkout@v4
 
-      - run: pip install -r requirements.txt
+   - uses: actions/setup-python@v5
+     with:
+      python-version: "3.11"
 
-      - name: run bot
-        env:
-          PAGE_ID: ${{ secrets.PAGE_ID }}
-          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+   - run: pip install -r requirements.txt
 
-        run: python app.py
+   - name: run bot
+     env:
+      PAGE_ID: ${{ secrets.PAGE_ID }}
+      PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+      SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+      SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
 
-      - name: save state
-        run: |
-          git config user.name github-actions
-          git config user.email actions@github.com
-          git add state.json
-          git commit -m "update state" || echo "no change"
-          git push
+     run: python app.py
+
+   - name: save state
+     run: |
+      git config user.name github-actions
+      git config user.email actions@github.com
+      git add state.json
+      git commit -m "update state" || echo "no change"
+      git push
