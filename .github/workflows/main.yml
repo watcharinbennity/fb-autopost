@@ -1,4 +1,4 @@
-name: BEN V71 Safe Link Engine
+name: BEN V73 AUTO AFFILIATE
 
 on:
   workflow_dispatch:
@@ -28,6 +28,7 @@ jobs:
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
         run: python -u app.py
 
@@ -35,6 +36,6 @@ jobs:
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
-          git add state.json safe_links.json
+          git add state.json
           git commit -m "update state" || echo "no change"
           git push
