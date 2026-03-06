@@ -2,6 +2,8 @@ import os
 import csv
 import json
 import random
+import re
+import time
 from urllib.parse import quote, urlparse
 
 import requests
@@ -17,10 +19,12 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-MAX_ROWS = 1000
-TOP_POOL = 20
-MAX_IMAGES_PER_POST = 3
-HTTP_TIMEOUT = 30
+MAX_ROWS = 300
+TOP_POOL = 8
+MAX_IMAGES_PER_POST = 1
+
+HTTP_TIMEOUT = 20
+OPENAI_TIMEOUT = 25
 
 ALLOWED_KEYWORDS = [
     "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "สายไฟ", "หลอด", "โคม",
@@ -86,8 +90,8 @@ def load_state():
 
 
 def save_state(state):
-    state["posted_links"] = state["posted_links"][-500:]
-    state["history"] = state["history"][-200:]
+    state["posted_links"] = state["posted_links"][-300:]
+    state["history"] = state["history"][-100:]
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -170,16 +174,24 @@ def get_monthly_promo():
 
 def read_products():
     log("STEP 1: download csv")
-    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT)
+
+    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
     r.raise_for_status()
 
-    rows = r.text.splitlines()
-    reader = csv.DictReader(rows)
+    lines = (
+        line.decode("utf-8-sig", errors="ignore")
+        for line in r.iter_lines()
+        if line
+    )
+    reader = csv.DictReader(lines)
 
     products = []
     for i, row in enumerate(reader):
         if i >= MAX_ROWS:
             break
+
+        if i == 0:
+            log(f"CSV fields: {list(row.keys())}")
 
         name = pick_first_nonempty(row, [
             "product_name", "name", "title", "item_name", "product title", "model_names"
@@ -241,7 +253,7 @@ def local_score(p):
 
 
 def ai_select_product(products):
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT)
 
     compact = []
     for idx, p in enumerate(products):
@@ -258,15 +270,14 @@ def ai_select_product(products):
 เลือกสินค้าเพียง 1 ชิ้นที่น่าโพสต์ขายบนเพจ Facebook ชื่อ BEN Home & Electrical
 
 เกณฑ์:
-- เน้นของที่ดูขายง่าย
+- เหมาะกับเพจสายไฟฟ้า/ช่างไฟ/ของใช้ในบ้าน
 - rating สูงดีกว่า
 - sold สูงดีกว่า
 - ราคาไม่แรงดีกว่า
-- ต้องเหมาะกับเพจแนวอุปกรณ์ไฟฟ้า/ช่างไฟ/ของใช้ในบ้าน
 
-ตอบเป็น "เลข index" เพียงอย่างเดียว ห้ามมีคำอื่น
+ตอบเป็นเลข index อย่างเดียว
 
-รายการสินค้า:
+รายการ:
 {json.dumps(compact, ensure_ascii=False)}
 """
 
@@ -280,13 +291,13 @@ def ai_select_product(products):
         if 0 <= idx < len(products):
             return products[idx]
     except Exception as e:
-        log(f"AI select failed, fallback local score: {e}")
+        log(f"AI select failed: {e}")
 
     return sorted(products, key=local_score, reverse=True)[0]
 
 
 def ai_generate_caption(product):
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT)
 
     promo = get_monthly_promo()
     hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
@@ -300,16 +311,15 @@ def ai_generate_caption(product):
 ราคา: {product["price"]} บาท
 rating: {product["rating"]}
 sold: {product["sold"]}
-promo: {promo}
-hashtags: {hashtags}
 
 ข้อกำหนด:
 - โทนขายของจริง อ่านง่าย
 - มี emoji พอประมาณ
-- ไม่เกิน 10 บรรทัดก่อนลิงก์
+- ไม่เกิน 7 บรรทัดก่อนลิงก์
 - ห้ามพูดเกินจริง
-- บรรทัดสุดท้ายก่อนแฮชแท็กให้เป็น "🛒 สั่งซื้อสินค้า"
+- บรรทัดสุดท้ายก่อนลิงก์ให้เป็น "🛒 สั่งซื้อสินค้า"
 - ไม่ต้องใส่ลิงก์ในคำตอบ
+- ใส่โปรนี้: {promo}
 """
 
     try:
@@ -321,16 +331,15 @@ hashtags: {hashtags}
         if text:
             return f"{text}\n{product['aff_link']}\n\n#BENHomeElectrical #ShopeeAffiliate {hashtags}"
     except Exception as e:
-        log(f"AI caption failed, fallback template: {e}")
+        log(f"AI caption failed: {e}")
 
     return (
         f"⭐ รีวิวดี คนซื้อเยอะ\n\n"
-        f"{product['name']}\n\n"
-        f"หมวด: {product['category']}\n"
+        f"{product['name']}\n"
         f"💰 ราคา {product['price']} บาท\n"
         f"⭐ รีวิว {product['rating']:.1f}/5\n"
         f"📦 ขายแล้ว {product['sold']}\n"
-        f"{promo}\n\n"
+        f"{promo}\n"
         f"🛒 สั่งซื้อสินค้า\n"
         f"{product['aff_link']}\n\n"
         f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
@@ -416,9 +425,10 @@ def main():
 
     fresh = [p for p in products if p["product_link"] not in state["posted_links"]]
     candidate_pool = sorted(fresh or products, key=local_score, reverse=True)[:TOP_POOL]
+    log(f"STEP 3: candidate_pool = {len(candidate_pool)}")
 
     product = ai_select_product(candidate_pool)
-    log(f"STEP 3: chosen = {product['name']}")
+    log(f"STEP 3A: chosen = {product['name']}")
 
     caption_text = ai_generate_caption(product)
     post_id = post_product(product, caption_text)
