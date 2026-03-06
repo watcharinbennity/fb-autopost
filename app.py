@@ -4,7 +4,7 @@ import json
 import random
 import re
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -17,7 +17,6 @@ MONTHLY_PROMO_TEXT = os.getenv("MONTHLY_PROMO_TEXT", "").strip()
 
 STATE_FILE = "state.json"
 
-# ===== AI Affiliate Engine V5 MAX =====
 MAX_ROWS = 1000
 TOP_POOL = 40
 MAX_IMAGES_PER_POST = 3
@@ -28,9 +27,6 @@ MIN_SOLD = 0
 HTTP_TIMEOUT = 25
 RETRY_COUNT = 2
 RETRY_SLEEP = 2
-
-# 80% โพสต์รูป + 20% โพสต์ลิงก์
-POST_MODES = ["image", "image", "image", "image", "link"]
 
 PRIMARY_CATEGORIES = [
     "ปลั๊กและสวิตช์",
@@ -283,13 +279,41 @@ def allow_product(name):
     return True, category, category_score
 
 
+def is_affiliate_link(link: str) -> bool:
+    if not link:
+        return False
+    link = str(link).strip().lower()
+    return "affiliate_id=" in link and "an_redir" in link
+
+
+def is_short_shopee_link(link: str) -> bool:
+    if not link:
+        return False
+    parsed = urlparse(str(link).strip())
+    host = parsed.netloc.lower()
+    return "shopee.ee" in host
+
+
+def choose_base_link(normal_link: str, short_link: str) -> str:
+    if normal_link and not is_affiliate_link(normal_link) and not is_short_shopee_link(normal_link):
+        return normal_link.strip()
+
+    if short_link and not is_affiliate_link(short_link) and not is_short_shopee_link(short_link):
+        return short_link.strip()
+
+    return (normal_link or short_link or "").strip()
+
+
 def make_aff_link(link):
     if not link:
         return ""
 
     link = str(link).strip()
 
-    if "affiliate_id=" in link and "an_redir" in link:
+    if is_affiliate_link(link):
+        return link
+
+    if is_short_shopee_link(link):
         return link
 
     if not AFF_ID:
@@ -313,10 +337,6 @@ def choose_style(product):
         weighted = ["problem", "selling", "review", "pro"]
 
     return random.choice(weighted)
-
-
-def choose_post_mode():
-    return random.choice(POST_MODES)
 
 
 def pick_first_nonempty(row, keys):
@@ -355,13 +375,14 @@ def read_products():
         price = pick_first_nonempty(row, [
             "sale_price", "price", "item_price", "model_price", "model_prices"
         ])
+
         short_link = pick_first_nonempty(row, [
             "product_short_link", "product_short link"
         ])
         normal_link = pick_first_nonempty(row, [
             "product_link", "link", "item_link", "url"
         ])
-        link = short_link or normal_link
+        base_link = choose_base_link(normal_link, short_link)
 
         rating_raw = pick_first_nonempty(row, [
             "item_rating", "rating", "avg_rating", "shop_rating"
@@ -383,7 +404,7 @@ def read_products():
         rating = safe_float(rating_raw, 0)
         sold = safe_int(sold_raw, 0)
 
-        if not name or not link or not img1:
+        if not name or not base_link or not img1:
             continue
 
         is_allowed, category, category_score = allow_product(name)
@@ -398,6 +419,7 @@ def read_products():
             continue
 
         images = [x for x in [img1, img2, img3] if x]
+        aff_link = make_aff_link(base_link)
 
         products.append({
             "name": name[:110],
@@ -407,8 +429,10 @@ def read_products():
             "category_score": category_score,
             "price": str(price).strip(),
             "price_num": price_num,
-            "link": link,
-            "aff_link": make_aff_link(link),
+            "base_link": base_link,
+            "normal_link": normal_link,
+            "short_link": short_link,
+            "aff_link": aff_link,
             "rating": rating,
             "sold": sold,
             "images": images[:MAX_IMAGES_PER_POST]
@@ -471,7 +495,7 @@ def choose_product(products, state):
 
     fresh = [
         p for p in products
-        if p["link"] not in posted_links
+        if p["base_link"] not in posted_links
         and p["name_key"] not in posted_names
         and p["token_key"] not in posted_tokens
     ]
@@ -482,37 +506,18 @@ def choose_product(products, state):
 
     if chosen:
         log(f"STEP 3: chosen = {chosen['name']} | category = {chosen['category']}")
+        log(f"STEP 3B: base_link = {chosen['base_link']}")
+        log(f"STEP 3C: aff_link = {chosen['aff_link']}")
 
     return chosen
 
 
-def build_image_caption(product, style):
-    opener = random.choice(STYLE_OPENERS[style])
-    support = random.choice(SUPPORT_LINES[style])
-    hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
-    promo = get_monthly_promo()
-
-    return (
-        f"{opener}\n\n"
-        f"{product['name']}\n\n"
-        f"หมวด: {product['category']}\n"
-        f"{support}\n"
-        f"💰 ราคา {product['price']} บาท\n"
-        f"⭐ รีวิว {product['rating']:.1f}/5\n"
-        f"📦 ขายแล้ว {product['sold']}\n"
-        f"{promo}\n\n"
-        f"🛒 ลิงก์นายหน้าอยู่คอมเมนต์แรก\n\n"
-        f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
-    )
-
-
-def build_link_caption(product, style):
+def build_caption(product, style):
     opener = random.choice(STYLE_OPENERS[style])
     support = random.choice(SUPPORT_LINES[style])
     hashtags = CATEGORY_HASHTAGS.get(product["category"], CATEGORY_HASHTAGS["ทั่วไป"])
     promo = get_monthly_promo()
     cta = random.choice(CTA_LINES)
-    aff_url = product.get("aff_link") or make_aff_link(product["link"])
 
     return (
         f"{opener}\n\n"
@@ -524,7 +529,7 @@ def build_link_caption(product, style):
         f"📦 ขายแล้ว {product['sold']}\n"
         f"{promo}\n\n"
         f"{cta}\n"
-        f"{aff_url}\n\n"
+        f"{product['aff_link']}\n\n"
         f"#BENHomeElectrical #ShopeeAffiliate {hashtags}"
     )
 
@@ -551,8 +556,8 @@ def upload_photo(url):
     return data["id"]
 
 
-def post_image_product(product, caption_text):
-    log("STEP 5A: upload image mode")
+def post_product(product, caption_text):
+    log("STEP 4: upload image")
 
     media_ids = []
     for image_url in product["images"]:
@@ -576,31 +581,11 @@ def post_image_product(product, caption_text):
     for i, media_id in enumerate(media_ids):
         payload[f"attached_media[{i}]"] = f'{{"media_fbid":"{media_id}"}}'
 
-    log("STEP 5B: create image post")
+    log("STEP 5: create post")
     data = graph_post(endpoint, payload)
 
     if "id" not in data:
-        log(f"image post failed: {data}")
-        return None
-
-    return data["id"]
-
-
-def post_link_product(product, caption_text):
-    log("STEP 5A: link mode")
-
-    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-    payload = {
-        "message": caption_text,
-        "link": product.get("aff_link") or make_aff_link(product["link"]),
-        "access_token": TOKEN
-    }
-
-    log("STEP 5B: create link post")
-    data = graph_post(endpoint, payload)
-
-    if "id" not in data:
-        log(f"link post failed: {data}")
+        log(f"post failed: {data}")
         return None
 
     return data["id"]
@@ -608,13 +593,8 @@ def post_link_product(product, caption_text):
 
 def comment_link(post_id, product):
     endpoint = f"https://graph.facebook.com/v25.0/{post_id}/comments"
-    aff_url = product.get("aff_link") or make_aff_link(product["link"])
-
     payload = {
-        "message": (
-            f"🔗 ลิงก์นายหน้า\n"
-            f"{aff_url}"
-        ),
+        "message": product["aff_link"],
         "access_token": TOKEN
     }
 
@@ -625,8 +605,8 @@ def comment_link(post_id, product):
         log(f"comment failed: {e}")
 
 
-def update_state_after_post(state, product, post_id, style, post_mode):
-    state["posted_links"].append(product["link"])
+def update_state_after_post(state, product, post_id, style):
+    state["posted_links"].append(product["base_link"])
     state["posted_names"].append(product["name_key"])
     state["posted_tokens"].append(product["token_key"])
     state["posted_categories"].append(product["category"])
@@ -634,8 +614,8 @@ def update_state_after_post(state, product, post_id, style, post_mode):
         "name": product["name"],
         "category": product["category"],
         "style": style,
-        "post_mode": post_mode,
-        "link": product["link"],
+        "base_link": product["base_link"],
+        "aff_link": product["aff_link"],
         "post_id": post_id
     })
 
@@ -657,30 +637,18 @@ def main():
         return
 
     style = choose_style(product)
-    post_mode = choose_post_mode()
+    log(f"STEP 3A: style = {style}")
 
-    log(f"STEP 4A: style = {style}")
-    log(f"STEP 4B: post_mode = {post_mode}")
+    caption_text = build_caption(product, style)
+    post_id = post_product(product, caption_text)
 
-    if post_mode == "image":
-        caption_text = build_image_caption(product, style)
-        post_id = post_image_product(product, caption_text)
-        if post_id:
-            log(f"post created: {post_id}")
-            comment_link(post_id, product)
-            update_state_after_post(state, product, post_id, style, post_mode)
-            save_state(state)
-        else:
-            log("Post failed")
+    if post_id:
+        log(f"post created: {post_id}")
+        comment_link(post_id, product)
+        update_state_after_post(state, product, post_id, style)
+        save_state(state)
     else:
-        caption_text = build_link_caption(product, style)
-        post_id = post_link_product(product, caption_text)
-        if post_id:
-            log(f"post created: {post_id}")
-            update_state_after_post(state, product, post_id, style, post_mode)
-            save_state(state)
-        else:
-            log("Post failed")
+        log("Post failed")
 
 
 if __name__ == "__main__":
