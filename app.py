@@ -12,12 +12,12 @@ CSV_URL=os.getenv("SHOPEE_CSV_URL")
 AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
 STATE_FILE="state.json"
-MAX_ROWS=2000
+MAX_ROWS=2500
 
 ALLOW_KEYWORDS=[
 "ไฟ","ปลั๊ก","สายไฟ","หลอดไฟ","สวิตช์",
 "เครื่องมือ","สว่าน","ไขควง","คีม",
-"DIY","บ้าน"
+"DIY","บ้าน","โคม","อินเวอร์เตอร์","โซล่า"
 ]
 
 CAPTIONS=[
@@ -142,7 +142,7 @@ def choose_product(products,state):
 
     products.sort(key=score,reverse=True)
 
-    for p in products[:50]:
+    for p in products[:60]:
 
         if p["link"] not in state["posted"]:
 
