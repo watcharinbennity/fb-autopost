@@ -1,4 +1,4 @@
-name: BEN AUTO POST
+name: BEN AUTO POST CSV
 
 on:
   workflow_dispatch:
@@ -27,6 +27,7 @@ jobs:
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
         run: python -u app.py
 
       - name: save state
