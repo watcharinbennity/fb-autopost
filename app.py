@@ -63,25 +63,30 @@ def analyze_posts():
     return stats
 
 
+def is_first_run():
+    posted = load_json(POSTED_FILE)
+    return len(posted) == 0
+
+
 def get_mode_by_time():
     now = datetime.now(TH_TZ)
     h = now.hour
     m = now.minute
     minute_of_day = h * 60 + m
 
-    # 09:00
+    # 09:00 - 09:59
     if 9 * 60 <= minute_of_day < 10 * 60:
         return "viral"
 
-    # 12:00
+    # 12:00 - 12:59
     if 12 * 60 <= minute_of_day < 13 * 60:
         return "product"
 
-    # 18:30
+    # 18:30 - 19:29
     if 18 * 60 + 30 <= minute_of_day < 19 * 60 + 30:
         return "product"
 
-    # 21:00
+    # 21:00 - 21:59
     if 21 * 60 <= minute_of_day < 22 * 60:
         return "engage"
 
@@ -276,7 +281,12 @@ def run():
     if os.path.isdir(ASSET_DIR):
         print("ASSETS:", os.listdir(ASSET_DIR), flush=True)
 
-    mode = get_mode_by_time()
+    if is_first_run():
+        mode = "product"
+        print("FIRST RUN -> FORCE PRODUCT", flush=True)
+    else:
+        mode = get_mode_by_time()
+
     print("MODE:", mode, flush=True)
 
     if not mode:
@@ -320,6 +330,7 @@ def run():
         print("POST STATS:", analyze_posts(), flush=True)
         return
 
+    # เผื่อใช้ภายหลัง
     if mode == "reels":
         idea = reels_idea()
         save_reels_script(idea)
