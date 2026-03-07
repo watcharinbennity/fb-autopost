@@ -81,7 +81,6 @@ f"""🔥 สินค้าขายดี
 
 #ShopeeAffiliate
 """
-
 ]
 
     return random.choice(captions)
