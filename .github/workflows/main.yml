@@ -44,9 +44,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
-          git add posted_products.json || true
-          git add post_log.json || true
-          git add reels_script.txt || true
+          git add posted.json || true
 
           git diff --cached --quiet || git commit -m "update bot logs"
           git push || echo "no change"
