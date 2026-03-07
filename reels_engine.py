@@ -1,15 +1,5 @@
-from ai_engine import ask_ai
+from ai_engine import reels_script
 
-def reels_script(product):
+def generate_reels(product):
 
-    prompt=f"""
-เขียน script video reel 15 วินาที
-
-สินค้า {product['name']}
-
-Hook
-โชว์สินค้า
-ปิดการขาย
-"""
-
-    return ask_ai(prompt)
+    return reels_script(product)
