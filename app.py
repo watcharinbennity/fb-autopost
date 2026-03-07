@@ -55,6 +55,22 @@ CAPTIONS = [
 #BENHomeElectrical"""
 ]
 
+REELS_HOOKS = [
+    "ของมันต้องมีติดบ้าน",
+    "ตัวนี้ขายดีมาก",
+    "สายไฟฟ้าต้องดูตัวนี้",
+    "ของใช้งานจริง ราคาคุ้ม",
+    "รีวิวดี ยอดขายแรง"
+]
+
+REELS_CTAS = [
+    "กดดูสินค้าได้ที่ลิงก์",
+    "สนใจดูรายละเอียดในลิงก์ได้เลย",
+    "ดูราคาและรายละเอียดเพิ่มเติมได้เลย",
+    "กดเข้าไปดูสินค้าได้เลย",
+    "เช็กราคาล่าสุดที่ลิงก์ได้เลย"
+]
+
 
 def log(msg):
     print(msg, flush=True)
@@ -113,34 +129,135 @@ def append_posted_product(p):
     save_json(POSTED_PRODUCTS_FILE, data)
 
 
+def safe_float(v):
+    try:
+        return float(str(v).replace(",", "").strip())
+    except Exception:
+        return 0.0
+
+
+def reels_score_reason(p):
+    score = 0.0
+    reasons = []
+
+    rating = safe_float(p.get("rating"))
+    sold = safe_float(p.get("sold"))
+    price = safe_float(p.get("price"))
+    base_score = safe_float(p.get("score"))
+
+    score += base_score * 0.6
+
+    if rating >= 4.9:
+        score += 40
+        reasons.append("รีวิวสูงมาก")
+    elif rating >= 4.8:
+        score += 25
+        reasons.append("รีวิวสูง")
+    elif rating >= 4.5:
+        score += 10
+        reasons.append("รีวิวดี")
+
+    if sold >= 2000:
+        score += 50
+        reasons.append("ยอดขายแรงมาก")
+    elif sold >= 1000:
+        score += 35
+        reasons.append("ยอดขายแรง")
+    elif sold >= 300:
+        score += 15
+        reasons.append("ขายดี")
+
+    if 20 <= price <= 99:
+        score += 30
+        reasons.append("ราคาคุ้มมาก")
+    elif 100 <= price <= 299:
+        score += 35
+        reasons.append("ราคาเข้าถึงง่าย")
+    elif 300 <= price <= 699:
+        score += 10
+        reasons.append("ราคากลาง")
+
+    if p.get("image_link"):
+        score += 20
+        reasons.append("มีรูปพร้อมทำคลิป")
+
+    if not reasons:
+        reasons.append("เหมาะทำรีล")
+
+    return round(score, 2), ", ".join(reasons)
+
+
+def make_reels_text(p):
+    hook = random.choice(REELS_HOOKS)
+    cta = random.choice(REELS_CTAS)
+
+    reels_caption = (
+        f"{hook}\n\n"
+        f"{p.get('title', '')}\n"
+        f"⭐ รีวิว {p.get('rating', '')}\n"
+        f"🔥 ขายแล้ว {p.get('sold', '')}\n"
+        f"💰 ราคา {p.get('price', '')} บาท\n\n"
+        f"{cta}\n"
+        f"{p.get('product_link', '')}\n\n"
+        f"#BENHomeElectrical #Shopee #อุปกรณ์ไฟฟ้า"
+    )
+
+    return {
+        "short_hook": hook,
+        "cta": cta,
+        "reels_caption": reels_caption
+    }
+
+
 def refresh_reels_candidates(products, state):
     posted = set(state["posted"])
 
-    ranked = sorted(
-        [
-            p for p in products
-            if (p.get("product_link") or "").strip()
-            and (p.get("image_link") or "").strip()
-            and (p.get("product_link") not in posted)
-        ],
-        key=lambda x: float(x.get("score", 0) or 0),
-        reverse=True
-    )
+    candidates = []
+    for p in products:
+        link = (p.get("product_link") or "").strip()
+        img = (p.get("image_link") or "").strip()
+        title = (p.get("title") or "").strip()
 
-    reels = []
-    for p in ranked[:REELS_POOL]:
-        reels.append({
+        if not link or not img or not title:
+            continue
+
+        if link in posted:
+            continue
+
+        r_score, r_reason = reels_score_reason(p)
+        reels_text = make_reels_text(p)
+
+        candidates.append({
             "title": p.get("title"),
-            "product_link": p.get("product_link"),
-            "image_link": p.get("image_link"),
+            "product_link": link,
+            "image_link": img,
             "rating": p.get("rating"),
             "sold": p.get("sold"),
             "price": p.get("price"),
-            "score": p.get("score")
+            "score": p.get("score"),
+            "reels_score": r_score,
+            "reels_reason": r_reason,
+            "short_hook": reels_text["short_hook"],
+            "cta": reels_text["cta"],
+            "reels_caption": reels_text["reels_caption"]
         })
 
+    ranked = sorted(
+        candidates,
+        key=lambda x: float(x.get("reels_score", 0) or 0),
+        reverse=True
+    )
+
+    reels = ranked[:REELS_POOL]
     save_json(REELS_CANDIDATES_FILE, reels)
     log(f"reels candidates = {len(reels)}")
+
+    for i, p in enumerate(reels[:5], start=1):
+        log(
+            f"REELS {i}. reels_score={p.get('reels_score')} "
+            f"rating={p.get('rating')} sold={p.get('sold')} "
+            f"price={p.get('price')} reason={p.get('reels_reason')}"
+        )
 
 
 def build_pool(products, state):
