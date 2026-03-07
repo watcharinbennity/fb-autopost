@@ -3,279 +3,188 @@ import csv
 import json
 import random
 import requests
-from datetime import datetime, timezone, timedelta
 
-from ai_engine import choose_product, generate_best_caption
-from product_filter import filter_products, score_title
+from ai_engine import ai_caption
+from product_filter import score_product
+from viral_engine import viral_post
 
-PAGE_ID = os.getenv("PAGE_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
-AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID=os.getenv("PAGE_ID")
+TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL=os.getenv("SHOPEE_CSV_URL")
+AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
-STATE_FILE = "state.json"
-POSTED_LOG_FILE = "posted_log.json"
-HTTP_TIMEOUT = 20
-MAX_ROWS = 500
-TH_TZ = timezone(timedelta(hours=7))
-
-
-def log(msg):
-    print(msg, flush=True)
-
-
-def load_json_file(path, default):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-
-def save_json_file(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+STATE_FILE="state.json"
 
 def load_state():
-    data = load_json_file(STATE_FILE, {"posted": []})
-    if "posted" not in data or not isinstance(data["posted"], list):
-        data["posted"] = []
-    return data
+
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+
+    except:
+        return {"posted":[]}
 
 
 def save_state(state):
-    save_json_file(STATE_FILE, state)
+
+    with open(STATE_FILE,"w") as f:
+        json.dump(state,f)
 
 
-def load_posted_log():
-    data = load_json_file(POSTED_LOG_FILE, [])
-    return data if isinstance(data, list) else []
+def aff_link(link):
 
+    base=link.split("?")[0]
 
-def save_posted_log(data):
-    save_json_file(POSTED_LOG_FILE, data[-1000:])
-
-
-def append_posted_log(product, mode, post_id, used_fallback):
-    logs = load_posted_log()
-    logs.append({
-        "time_th": datetime.now(TH_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        "mode": mode,
-        "used_fallback": used_fallback,
-        "post_id": post_id,
-        "name": product.get("name", ""),
-        "link": product.get("link", ""),
-        "price": product.get("price", ""),
-        "rating": product.get("rating", ""),
-        "sold": product.get("sold", ""),
-        "final_score": product.get("final_score", ""),
-    })
-    save_posted_log(logs)
-
-
-def clean_link(url):
-    if not url:
-        return ""
-    return url.split("?")[0].strip()
-
-
-def aff_link(url):
-    base = clean_link(url)
-    return f"{base}?affiliate_id={AFF_ID}" if AFF_ID else base
+    return f"{base}?affiliate_id={AFF_ID}"
 
 
 def read_csv():
-    log("STEP 1: download csv")
-    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
-    r.raise_for_status()
 
-    lines = (
-        line.decode("utf-8-sig", errors="ignore")
-        for line in r.iter_lines()
-        if line
-    )
+    r=requests.get(CSV_URL,timeout=20)
 
-    reader = csv.DictReader(lines)
-    rows = []
-
-    for i, row in enumerate(reader):
-        rows.append(row)
-        if i >= MAX_ROWS:
-            break
+    rows=list(csv.DictReader(r.text.splitlines()))
 
     random.shuffle(rows)
-    log(f"STEP 2: csv rows loaded = {len(rows)}")
-    return rows
+
+    return rows[:500]
 
 
-def build_fallback_product(rows, state):
-    posted = set(state.get("posted", []))
-    candidates = []
+def choose_product(rows,state):
+
+    posted=set(state["posted"])
+
+    best=None
+    best_score=0
 
     for r in rows:
-        title = (r.get("title") or "").strip()
-        link = (r.get("product_link") or "").strip()
-        image = (r.get("image_link") or "").strip()
 
-        if not title or not link or not image:
+        name=r.get("title")
+
+        link=r.get("product_link")
+
+        image=r.get("image_link")
+
+        if not name or not link or not image:
+
             continue
+
         if link in posted:
+
             continue
 
-        candidates.append((score_title(title), {
-            "name": title,
-            "link": link,
-            "image": image,
-            "price": r.get("sale_price") or r.get("price") or "",
-            "rating": r.get("item_rating") or "0",
-            "sold": r.get("item_sold") or "0",
-            "final_score": 0,
-        }))
+        rating=float(r.get("item_rating") or 0)
 
-    if not candidates:
-        return None
+        sold=int(float(r.get("item_sold") or 0))
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+        price=r.get("price")
 
+        score=score_product(name,rating,sold)
 
-def fallback_caption(product, link):
-    return f"""⚡ แนะนำจาก BEN Home & Electrical
+        if score>best_score:
 
-{product['name']}
+            best_score=score
 
-⭐ รีวิว {product['rating']}
-🔥 ขายแล้ว {product['sold']}
-💰 ราคา {product['price']} บาท
+            best={
+            "name":name,
+            "link":link,
+            "image":image,
+            "price":price,
+            "rating":rating,
+            "sold":sold
+            }
 
-🛒 สั่งซื้อ
-{link}
-
-#BENHomeElectrical #ShopeeAffiliate"""
-
-
-def build_caption(product):
-    link = aff_link(product["link"])
-
-    log("STEP 5: generate ai best caption")
-    caption = generate_best_caption(product)
-
-    if caption:
-        if link not in caption:
-            caption = f"{caption}\n\n🛒 สั่งซื้อ\n{link}"
-        return caption
-
-    log("STEP 6: fallback caption")
-    return fallback_caption(product, link)
+    return best
 
 
 def upload_photo(url):
-    log("STEP 7: upload photo")
-    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    r = requests.post(
-        endpoint,
-        data={
-            "url": url,
-            "published": "false",
-            "access_token": TOKEN,
-        },
-        timeout=HTTP_TIMEOUT,
-    )
+    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    data = r.json()
-    log(f"upload response: {data}")
+    r=requests.post(
+    endpoint,
+    data={
+    "url":url,
+    "published":"false",
+    "access_token":TOKEN
+    })
 
-    if "id" not in data:
-        raise RuntimeError(data)
-
-    return data["id"]
+    return r.json()["id"]
 
 
-def post_image(media, text):
-    log("STEP 8: create post")
-    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
+def post_image(media,text):
 
-    r = requests.post(
-        endpoint,
-        data={
-            "message": text,
-            "attached_media[0]": json.dumps({"media_fbid": media}),
-            "access_token": TOKEN,
-        },
-        timeout=HTTP_TIMEOUT,
-    )
+    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
-    data = r.json()
-    log(f"post response: {data}")
-    return data
+    r=requests.post(
+    endpoint,
+    data={
+    "message":text,
+    "attached_media[0]":json.dumps({"media_fbid":media}),
+    "access_token":TOKEN
+    })
+
+    return r.json()
 
 
-def comment_link(post_id, link):
-    log("STEP 9: comment link")
-    endpoint = f"https://graph.facebook.com/v25.0/{post_id}/comments"
+def comment_link(post_id,link):
 
-    r = requests.post(
-        endpoint,
-        data={
-            "message": f"🛒 ลิงก์สั่งซื้อ\n{link}",
-            "access_token": TOKEN,
-        },
-        timeout=HTTP_TIMEOUT,
-    )
+    endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
-    log(f"comment response: {r.json()}")
+    requests.post(
+    endpoint,
+    data={
+    "message":f"🛒 สั่งซื้อ\n{link}",
+    "access_token":TOKEN
+    })
 
 
 def main():
-    if not PAGE_ID:
-        raise ValueError("Missing PAGE_ID")
-    if not TOKEN:
-        raise ValueError("Missing PAGE_ACCESS_TOKEN")
-    if not CSV_URL:
-        raise ValueError("Missing SHOPEE_CSV_URL")
 
-    state = load_state()
-    rows = read_csv()
+    state=load_state()
 
-    log("STEP 3: filter products")
-    products = filter_products(rows, state)
-    log(f"STEP 4: valid products = {len(products)}")
+    mode=random.randint(1,4)
 
-    used_fallback = False
+    if mode==1:
 
-    if products:
-        product = choose_product(products)
-        log(f"CHOSEN BY AI: {product['name']}")
-    else:
-        log("NO PRODUCT - fallback nearest category")
-        product = build_fallback_product(rows, state)
-        if not product:
-            log("FALLBACK FAILED")
-            return
-        used_fallback = True
-        log(f"CHOSEN BY FALLBACK: {product['name']}")
+        text=viral_post()
 
-    caption = build_caption(product)
+        media=upload_photo("https://i.imgur.com/8Km9tLL.jpg")
 
-    media = upload_photo(product["image"])
-    res = post_image(media, caption)
+        post_image(media,text)
+
+        return
+
+    rows=read_csv()
+
+    product=choose_product(rows,state)
+
+    if not product:
+
+        return
+
+    caption=ai_caption(product)
+
+    link=aff_link(product["link"])
+
+    text=f"""{caption}
+
+🛒 สั่งซื้อ
+{link}
+"""
+
+    media=upload_photo(product["image"])
+
+    res=post_image(media,text)
 
     if "id" in res:
-        comment_link(res["id"], aff_link(product["link"]))
-        state["posted"].append(product["link"])
-        save_state(state)
-        append_posted_log(
-            product=product,
-            mode="product",
-            post_id=res["id"],
-            used_fallback=used_fallback
-        )
-        log("POST SUCCESS")
-    else:
-        log("POST FAILED")
+
+        comment_link(res["id"],link)
+
+    state["posted"].append(product["link"])
+
+    save_state(state)
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
+
     main()
