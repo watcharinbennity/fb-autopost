@@ -1,18 +1,45 @@
-KEYWORDS = [
-    "ไฟ", "led", "โคม", "solar",
-    "ปลั๊ก", "สวิตช์", "สายไฟ",
-    "เครื่องมือ", "ช่าง", "ไขควง",
-    "สว่าน", "diy", "hardware",
-    "พัดลม", "ปั๊ม", "โฮม", "home"
+KEYWORDS_STRONG = [
+    "ไฟ", "led", "โคม", "โคมไฟ", "หลอดไฟ", "ไฟฉาย", "ไฟฉุกเฉิน",
+    "solar", "โซล่า", "โซลาร์เซลล์",
+    "ปลั๊ก", "ปลั๊กไฟ", "สวิตช์", "เต้ารับ", "สายไฟ", "เบรกเกอร์",
+    "เครื่องมือ", "เครื่องมือช่าง", "ช่าง", "ไขควง", "สว่าน", "คีม", "ประแจ",
+    "diy", "hardware", "ฮาร์ดแวร์",
+    "พัดลม", "ปั๊ม", "ปั๊มน้ำ", "มิเตอร์", "มัลติมิเตอร์",
+    "adapter", "อะแดปเตอร์"
+]
+
+KEYWORDS_WEAK = [
+    "home", "บ้าน", "ซ่อม", "อุปกรณ์", "อเนกประสงค์", "ติดผนัง", "ติดบ้าน"
+]
+
+BAD_KEYWORDS = [
+    "สุนัข", "แมว", "สัตว์เลี้ยง", "ปลาร้า", "อาหาร", "ขนม", "เสื้อ", "กางเกง",
+    "รองเท้า", "เครื่องสำอาง", "ลิป", "ครีม", "น้ำหอม", "ตุ๊กตา", "ของเล่น",
+    "เคสมือถือ", "เสื้อผ้า", "แฟชั่น", "กระเป๋า"
 ]
 
 
-def match_category(title: str) -> bool:
+def score_title(title: str) -> int:
     t = (title or "").lower()
-    return any(k in t for k in KEYWORDS)
+
+    for bad in BAD_KEYWORDS:
+        if bad in t:
+            return -999
+
+    score = 0
+
+    for k in KEYWORDS_STRONG:
+        if k.lower() in t:
+            score += 3
+
+    for k in KEYWORDS_WEAK:
+        if k.lower() in t:
+            score += 1
+
+    return score
 
 
-def filter_products(rows, state):
+def filter_products(rows: list[dict], state: dict):
     products = []
     posted = set(state.get("posted", []))
 
@@ -28,19 +55,19 @@ def filter_products(rows, state):
             if link in posted:
                 continue
 
-            if not match_category(title):
+            title_score = score_title(title)
+            if title_score < 3:
                 continue
 
             rating = float(r.get("item_rating") or 0)
             sold = int(float(r.get("item_sold") or 0))
             price = float(r.get("sale_price") or r.get("price") or 0)
 
-            # ผ่อนเงื่อนไขลง
             if rating < 4.0:
                 continue
             if sold < 10:
                 continue
-            if price < 10 or price > 500:
+            if price < 10 or price > 800:
                 continue
 
             products.append({
@@ -49,9 +76,14 @@ def filter_products(rows, state):
                 "image": image,
                 "price": price,
                 "rating": rating,
-                "sold": sold
+                "sold": sold,
+                "title_score": title_score,
             })
         except Exception:
             continue
 
+    products.sort(
+        key=lambda x: (x["title_score"], x["rating"], x["sold"]),
+        reverse=True,
+    )
     return products
