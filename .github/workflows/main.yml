@@ -19,14 +19,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install requests openai
+      - run: pip install -r requirements.txt
 
       - run: python app.py
 
       - name: save state
         run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@bot.com"
+          git config --global user.name bot
+          git config --global user.email bot@bot.com
           git add state.json
-          git commit -m "update state" || exit 0
+          git commit -m update || exit 0
           git push
