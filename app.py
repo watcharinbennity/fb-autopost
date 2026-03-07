@@ -134,16 +134,30 @@ def detect_category(name, category=""):
 
 def parse_float(v, default=0.0):
     try:
-        return float(v)
+        if v is None or str(v).strip() == "":
+            return default
+        return float(str(v).replace(",", ""))
     except Exception:
         return default
 
 
 def parse_int(v, default=0):
     try:
-        return int(float(v))
+        if v is None or str(v).strip() == "":
+            return default
+        return int(float(str(v).replace(",", "")))
     except Exception:
         return default
+
+
+def format_price(price):
+    try:
+        p = float(price)
+        if p <= 0:
+            return ""
+        return f"{p:,.0f} บาท"
+    except Exception:
+        return ""
 
 
 def load_products_from_csv():
@@ -270,7 +284,6 @@ def pick_product():
         if not name:
             continue
 
-        # คัดสินค้า แต่ไม่เอายอดขายไปโชว์ในโพสต์
         if rating >= 4 and sold >= 10:
             if category in ["solar", "plug", "tools", "led", "other"]:
                 good.append(p)
@@ -282,7 +295,8 @@ def pick_product():
     good.sort(
         key=lambda x: (
             parse_float(x.get("rating", 0)),
-            parse_int(x.get("sold", 0))
+            parse_int(x.get("sold", 0)),
+            parse_float(x.get("price", 0))
         ),
         reverse=True
     )
@@ -296,32 +310,35 @@ def pick_product():
     return product
 
 
-def ai_caption(name, category=""):
+def ai_caption(name, category="other", price=0):
+    price_text = format_price(price)
+    price_line = f"\nราคา {price_text}" if price_text else ""
+
     fallback_map = {
         "solar": [
-            f"⚡ {name}\n\nเหมาะกับบ้านที่อยากเพิ่มความสว่างแบบประหยัดพลังงาน",
-            f"☀️ {name}\n\nตัวช่วยเพิ่มแสงสว่างรอบบ้าน ใช้งานสะดวก",
-            f"⚡ {name}\n\nของน่าใช้สำหรับมุมหน้าบ้านและรอบบ้าน"
+            f"⚡ {name}{price_line}\n\nเหมาะกับบ้านที่อยากเพิ่มความสว่างแบบประหยัดพลังงาน",
+            f"☀️ {name}{price_line}\n\nตัวช่วยเพิ่มแสงสว่างรอบบ้าน ใช้งานสะดวก",
+            f"⚡ {name}{price_line}\n\nของน่าใช้สำหรับมุมหน้าบ้านและรอบบ้าน"
         ],
         "plug": [
-            f"🔌 {name}\n\nของใช้จำเป็นที่ควรมีติดบ้านไว้",
-            f"⚡ {name}\n\nใช้งานสะดวก เหมาะกับบ้านที่มีเครื่องใช้ไฟฟ้าหลายจุด",
-            f"🔌 {name}\n\nตัวช่วยจัดการปลั๊กไฟให้ใช้งานง่ายขึ้น"
+            f"🔌 {name}{price_line}\n\nของใช้จำเป็นที่ควรมีติดบ้านไว้",
+            f"⚡ {name}{price_line}\n\nใช้งานสะดวก เหมาะกับบ้านที่มีเครื่องใช้ไฟฟ้าหลายจุด",
+            f"🔌 {name}{price_line}\n\nตัวช่วยจัดการปลั๊กไฟให้ใช้งานง่ายขึ้น"
         ],
         "tools": [
-            f"🛠 {name}\n\nเครื่องมือที่ควรมีติดบ้านไว้ใช้งาน",
-            f"🔧 {name}\n\nเหมาะสำหรับงานช่างเล็ก ๆ ภายในบ้าน",
-            f"🛠 {name}\n\nของน่าใช้สำหรับคนชอบทำงานเองที่บ้าน"
+            f"🛠 {name}{price_line}\n\nเครื่องมือที่ควรมีติดบ้านไว้ใช้งาน",
+            f"🔧 {name}{price_line}\n\nเหมาะสำหรับงานช่างเล็ก ๆ ภายในบ้าน",
+            f"🛠 {name}{price_line}\n\nของน่าใช้สำหรับคนชอบทำงานเองที่บ้าน"
         ],
         "led": [
-            f"💡 {name}\n\nตัวช่วยเพิ่มความสว่างในบ้านได้ดี",
-            f"💡 {name}\n\nเหมาะกับคนที่อยากเปลี่ยนบรรยากาศในบ้านให้น่าอยู่ขึ้น",
-            f"✨ {name}\n\nของใช้ไฟฟ้าที่ควรลองมีติดบ้าน"
+            f"💡 {name}{price_line}\n\nตัวช่วยเพิ่มความสว่างในบ้านได้ดี",
+            f"💡 {name}{price_line}\n\nเหมาะกับคนที่อยากเปลี่ยนบรรยากาศในบ้านให้น่าอยู่ขึ้น",
+            f"✨ {name}{price_line}\n\nของใช้ไฟฟ้าที่ควรลองมีติดบ้าน"
         ],
         "other": [
-            f"⚡ {name}\n\nของดีที่ควรมีติดบ้าน",
-            f"🔥 {name}\n\nน่าใช้มากสำหรับบ้านยุคนี้",
-            f"🏠 {name}\n\nตัวช่วยดี ๆ สำหรับใช้งานในบ้าน"
+            f"⚡ {name}{price_line}\n\nของดีที่ควรมีติดบ้าน",
+            f"🔥 {name}{price_line}\n\nน่าใช้มากสำหรับบ้านยุคนี้",
+            f"🏠 {name}{price_line}\n\nตัวช่วยดี ๆ สำหรับใช้งานในบ้าน"
         ]
     }
 
@@ -335,16 +352,17 @@ def ai_caption(name, category=""):
 
 สินค้า: {name}
 หมวดสินค้า: {category}
+ราคา: {price_text}
 
 เงื่อนไข:
 - สั้น
 - อ่านง่าย
 - น่าคลิก
-- ไม่ต้องพูดถึงยอดขาย
+- ไม่ต้องบอกยอดขาย
 - ไม่ต้องบอกว่าขายได้กี่ชิ้น
-- ไม่ต้องใส่ราคา
-- โทนเหมือนแนะนำของใช้ไฟฟ้า/ของใช้ในบ้าน
-- ปิดท้ายแบบชวนดูสินค้าหรือชวนคอมเมนต์เบา ๆ
+- ใส่ราคาได้
+- โทนเหมือนแนะนำของใช้ไฟฟ้าและของใช้ในบ้าน
+- ปิดท้ายชวนดูสินค้าแบบสั้น ๆ
 """.strip()
 
     try:
@@ -502,7 +520,11 @@ def run():
             print("NO PRODUCT", flush=True)
             return
 
-        cap = ai_caption(product["name"], product.get("category", "other"))
+        cap = ai_caption(
+            product["name"],
+            product.get("category", "other"),
+            product.get("price", 0)
+        )
         img = get_image(product.get("category", ""))
 
         post_id = post(cap, img)
@@ -513,6 +535,7 @@ def run():
         log_post("product", product["name"], {
             "category": product.get("category", ""),
             "rating": product.get("rating", 0),
+            "price": product.get("price", 0),
             "link": product.get("link", "")
         })
         print("POST STATS:", analyze_posts(), flush=True)
