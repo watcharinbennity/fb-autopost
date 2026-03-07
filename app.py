@@ -162,10 +162,11 @@ def load_products_from_csv():
 
     try:
         print("STEP: load csv", flush=True)
+
         r = requests.get(CSV_URL, timeout=20)
         r.raise_for_status()
 
-        text = r.content.decode("utf-8-sig", errors="ignore")
+        text = r.text
         reader = csv.DictReader(io.StringIO(text))
 
         products = []
@@ -229,11 +230,11 @@ def load_products_from_csv():
                 "link": link
             })
 
-        print(f"CSV PRODUCTS LOADED: {len(products)}", flush=True)
+        print(f"CSV PRODUCTS: {len(products)}", flush=True)
         return products
 
     except Exception as e:
-        print("CSV LOAD ERROR:", e, flush=True)
+        print("CSV ERROR:", e, flush=True)
         return []
 
 
@@ -251,6 +252,10 @@ def pick_product():
     else:
         products = load_products_fallback()
         print("USING PRODUCTS FROM products.json", flush=True)
+
+    if not products:
+        print("NO PRODUCTS IN CSV AND products.json", flush=True)
+        return None
 
     posted = set(normalize_posted_products(load_json(POSTED_FILE, [])))
     good = []
@@ -277,6 +282,7 @@ def pick_product():
             good.append(p)
 
     if not good:
+        print("NO GOOD PRODUCT AFTER FILTER", flush=True)
         return None
 
     good.sort(
@@ -316,10 +322,11 @@ def ai_caption(name):
 สินค้า: {name}
 
 เงื่อนไข:
+- ภาษาไทย
 - สั้น
 - อ่านง่าย
 - น่าคลิก
-- ภาษาไทย
+- ไม่ยาวเกินไป
 """.strip()
 
     try:
