@@ -1,38 +1,67 @@
-import random
+from ai_engine import ask_ai
 
-OPENERS=[
-"⚡ ของมันควรมีติดบ้าน",
-"🔥 ตัวนี้ขายดีใน Shopee",
-"🏠 ของใช้ไฟฟ้าที่น่าสนใจ",
-"🛠️ สายช่างต้องดู",
-"💡 ของดีสายไฟฟ้า"
-]
 
-CTA=[
-"กดดูรายละเอียด",
-"เช็กราคาได้ที่ลิงก์",
-"ดูโปรล่าสุด",
-"กดดูสินค้า"
-]
+def generate_product_caption(product: dict) -> str:
+    prompt = f"""
+เขียนโพสต์ Facebook ภาษาไทยสำหรับเพจ BEN Home & Electrical
 
-def build_caption(p):
+สินค้า: {product['name']}
+ราคา: {product['price']} บาท
+รีวิว: {product['rating']}
+ขายแล้ว: {product['sold']}
 
-    opener=random.choice(OPENERS)
-    cta=random.choice(CTA)
+กติกา:
+- ไม่เกิน 5 บรรทัด
+- มี emoji พอดี
+- กระตุ้นให้น่าซื้อ
+- ยังไม่ต้องใส่ลิงก์
+""".strip()
 
-    return f"""
-{opener}
+    text = ask_ai(prompt)
+    if text:
+        return text
 
-{p['name']}
+    return (
+        f"⚡ {product['name']}\n\n"
+        f"⭐ รีวิว {product['rating']}\n"
+        f"🔥 ขายแล้ว {product['sold']}\n"
+        f"💰 ราคา {product['price']} บาท"
+    )
 
-⭐ รีวิว {p['rating']}/5
-📦 ขายแล้ว {p['sold']}
 
-💰 ราคา {p['price']} บาท
+def generate_viral_caption(topic: str) -> str:
+    prompt = f"""
+เขียนโพสต์ Facebook ภาษาไทยแบบไวรัล
 
-{cta}
-{p['aff_link']}
+หัวข้อ: {topic}
 
-#BENHomeElectrical
-#ShopeeAffiliate
-"""
+กติกา:
+- ไม่เกิน 4 บรรทัด
+- มี emoji
+- ชวนคอมเมนต์
+- อ่านง่าย
+""".strip()
+
+    text = ask_ai(prompt)
+    if text:
+        return text
+
+    return f"⚡ {topic}\n\nบ้านคุณคิดว่ายังไง ?\n\nคอมเมนต์บอกหน่อย"
+
+
+def generate_engagement_caption() -> str:
+    prompt = """
+เขียนโพสต์ Facebook ภาษาไทยสำหรับถามคำถามเกี่ยวกับ
+ของใช้ในบ้าน อุปกรณ์ไฟฟ้า หรือเครื่องมือช่าง
+
+กติกา:
+- ไม่เกิน 3 บรรทัด
+- ชวนคอมเมนต์
+- มี emoji เล็กน้อย
+""".strip()
+
+    text = ask_ai(prompt)
+    if text:
+        return text
+
+    return "💬 บ้านคุณใช้ปลั๊กไฟกี่ตัว ?\n\nคอมเมนต์หน่อย"
