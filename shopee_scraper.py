@@ -2,35 +2,36 @@ import json
 import random
 import requests
 
-PRODUCT_FILE = "products.json"
+PRODUCT_FILE="products.json"
 
-KEYWORDS = [
-    ("ไฟโซล่า", "solar"),
-    ("ปลั๊กไฟ", "plug"),
-    ("เครื่องมือช่าง", "tools"),
-    ("หลอดไฟ LED", "led")
+KEYWORDS=[
+("ไฟโซล่า","solar"),
+("ปลั๊กไฟ","plug"),
+("เครื่องมือช่าง","tools"),
+("หลอดไฟ LED","led")
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json"
+HEADERS={
+"User-Agent":"Mozilla/5.0"
 }
 
 
 def load_products():
+
     try:
-        with open(PRODUCT_FILE, "r", encoding="utf-8") as f:
+        with open(PRODUCT_FILE,"r",encoding="utf-8") as f:
             return json.load(f)
     except:
         return []
 
 
 def save_products(data):
-    with open(PRODUCT_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    with open(PRODUCT_FILE,"w",encoding="utf-8") as f:
+        json.dump(data,f,indent=2,ensure_ascii=False)
 
 
-def search(keyword, category):
+def search(keyword,category):
 
     url=f"https://shopee.co.th/api/v4/search/search_items?keyword={keyword}&limit=10"
 
@@ -48,11 +49,11 @@ def search(keyword, category):
         i=item["item_basic"]
 
         products.append({
-            "name":i["name"],
-            "category":category,
-            "rating":4.5,
-            "sold":100,
-            "link":f"https://shopee.co.th/product/{i['shopid']}/{i['itemid']}"
+        "name":i["name"],
+        "category":category,
+        "rating":4.5,
+        "sold":100,
+        "link":f"https://shopee.co.th/product/{i['shopid']}/{i['itemid']}"
         })
 
     return products
@@ -67,13 +68,8 @@ def update_products():
     for keyword,cat in KEYWORDS:
 
         try:
-
-            items=search(keyword,cat)
-
-            results+=items
-
-        except Exception as e:
-
+            results+=search(keyword,cat)
+        except:
             print("SCRAPER BLOCKED:",keyword)
 
     if results:
@@ -88,16 +84,18 @@ def update_products():
 
     else:
 
-        print("SCRAPER FAILED → using old products")
+        print("SCRAPER FAILED → use old products")
 
         if not current:
 
             placeholder=[{
-                "name":"ไฟโซล่า LED ติดบ้าน",
-                "category":"solar",
-                "rating":4.8,
-                "sold":500,
-                "link":"https://shopee.co.th"
+
+            "name":"ไฟโซล่า LED ติดบ้าน",
+            "category":"solar",
+            "rating":4.8,
+            "sold":500,
+            "link":"https://shopee.co.th"
+
             }]
 
             save_products(placeholder)
