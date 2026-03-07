@@ -73,6 +73,32 @@ def read_csv():
     return rows
 
 
+def build_fallback_product(rows, state):
+    posted = set(state.get("posted", []))
+
+    for r in rows:
+        title = (r.get("title") or "").strip()
+        link = (r.get("product_link") or "").strip()
+        image = (r.get("image_link") or "").strip()
+
+        if not title or not link or not image:
+            continue
+
+        if link in posted:
+            continue
+
+        return {
+            "name": title,
+            "link": link,
+            "image": image,
+            "price": r.get("sale_price") or r.get("price") or "",
+            "rating": r.get("item_rating") or "0",
+            "sold": r.get("item_sold") or "0"
+        }
+
+    return None
+
+
 def fallback_caption(product, link):
     return f"""⚡ แนะนำจาก BEN Home & Electrical
 
@@ -170,19 +196,24 @@ def main():
         raise ValueError("Missing SHOPEE_CSV_URL")
 
     state = load_state()
-
     rows = read_csv()
 
     log("STEP 3: filter products")
     products = filter_products(rows, state)
     log(f"STEP 4: valid products = {len(products)}")
 
-    if not products:
-        print("NO PRODUCT", flush=True)
-        return
+    if products:
+        product = choose_product(products)
+        log(f"CHOSEN BY AI: {product['name']}")
+    else:
+        log("NO PRODUCT - fallback first item")
+        product = build_fallback_product(rows, state)
 
-    product = choose_product(products)
-    log(f"CHOSEN: {product['name']}")
+        if not product:
+            log("FALLBACK FAILED")
+            return
+
+        log(f"CHOSEN BY FALLBACK: {product['name']}")
 
     caption = build_caption(product)
 
