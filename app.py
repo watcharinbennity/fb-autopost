@@ -5,7 +5,7 @@ import random
 import requests
 
 from ai_engine import choose_product, generate_caption
-from product_filter import filter_products
+from product_filter import filter_products, score_title
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
@@ -50,7 +50,6 @@ def aff_link(url):
 
 def read_csv():
     log("STEP 1: download csv")
-
     r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
     r.raise_for_status()
 
@@ -61,8 +60,8 @@ def read_csv():
     )
 
     reader = csv.DictReader(lines)
-
     rows = []
+
     for i, row in enumerate(reader):
         rows.append(row)
         if i >= MAX_ROWS:
@@ -76,6 +75,9 @@ def read_csv():
 def build_fallback_product(rows, state):
     posted = set(state.get("posted", []))
 
+    # เลือกตัวที่ใกล้หมวดมากที่สุดก่อน
+    candidates = []
+
     for r in rows:
         title = (r.get("title") or "").strip()
         link = (r.get("product_link") or "").strip()
@@ -87,16 +89,20 @@ def build_fallback_product(rows, state):
         if link in posted:
             continue
 
-        return {
+        candidates.append((score_title(title), {
             "name": title,
             "link": link,
             "image": image,
             "price": r.get("sale_price") or r.get("price") or "",
             "rating": r.get("item_rating") or "0",
-            "sold": r.get("item_sold") or "0"
-        }
+            "sold": r.get("item_sold") or "0",
+        }))
 
-    return None
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def fallback_caption(product, link):
@@ -138,9 +144,9 @@ def upload_photo(url):
         data={
             "url": url,
             "published": "false",
-            "access_token": TOKEN
+            "access_token": TOKEN,
         },
-        timeout=HTTP_TIMEOUT
+        timeout=HTTP_TIMEOUT,
     )
 
     data = r.json()
@@ -161,9 +167,9 @@ def post_image(media, text):
         data={
             "message": text,
             "attached_media[0]": json.dumps({"media_fbid": media}),
-            "access_token": TOKEN
+            "access_token": TOKEN,
         },
-        timeout=HTTP_TIMEOUT
+        timeout=HTTP_TIMEOUT,
     )
 
     data = r.json()
@@ -179,9 +185,9 @@ def comment_link(post_id, link):
         endpoint,
         data={
             "message": f"🛒 ลิงก์สั่งซื้อ\n{link}",
-            "access_token": TOKEN
+            "access_token": TOKEN,
         },
-        timeout=HTTP_TIMEOUT
+        timeout=HTTP_TIMEOUT,
     )
 
     log(f"comment response: {r.json()}")
@@ -206,7 +212,7 @@ def main():
         product = choose_product(products)
         log(f"CHOSEN BY AI: {product['name']}")
     else:
-        log("NO PRODUCT - fallback first item")
+        log("NO PRODUCT - fallback nearest category")
         product = build_fallback_product(rows, state)
 
         if not product:
