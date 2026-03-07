@@ -5,7 +5,7 @@ import random
 import requests
 
 from ai_engine import generate_caption
-from viral_engine import viral_post, engagement_post
+from viral_engine import viral_post,engagement_post
 from product_filter import filter_products
 
 PAGE_ID=os.getenv("PAGE_ID")
@@ -85,19 +85,35 @@ def comment(post_id,link):
     })
 
 
+def fallback_product(rows):
+
+    for r in rows:
+
+        if r.get("product_link") and r.get("image_link"):
+
+            return {
+                "name":r.get("title"),
+                "link":r.get("product_link"),
+                "image":r.get("image_link"),
+                "price":r.get("price"),
+                "rating":0,
+                "sold":0
+            }
+
+
 def main():
 
     state=load_state()
 
     rows=read_csv()
 
-    mode=random.randint(1,4)
+    mode=random.randint(1,5)
 
     if mode==1:
 
         text=viral_post()
 
-        media=upload_photo("https://i.imgur.com/t1.png")
+        media=upload_photo("https://i.imgur.com/7yUVEJb.png")
 
         create_post(media,text)
 
@@ -107,7 +123,7 @@ def main():
 
         text=engagement_post()
 
-        media=upload_photo("https://i.imgur.com/t1.png")
+        media=upload_photo("https://i.imgur.com/7yUVEJb.png")
 
         create_post(media,text)
 
@@ -117,19 +133,21 @@ def main():
 
     if not products:
 
-        print("NO PRODUCT")
+        p=fallback_product(rows)
 
-        return
+    else:
 
-    p=random.choice(products)
+        p=products[0]
 
     link=aff_link(p["link"])
 
     caption=generate_caption(p)
 
-    if link not in caption:
+    if not caption:
 
-        caption=f"{caption}\n\n🛒 {link}"
+        caption=p["name"]
+
+    caption=f"{caption}\n\n🛒 {link}"
 
     media=upload_photo(p["image"])
 
@@ -145,5 +163,4 @@ def main():
 
 
 if __name__=="__main__":
-
     main()
