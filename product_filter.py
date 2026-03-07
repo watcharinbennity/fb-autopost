@@ -39,6 +39,23 @@ def score_title(title: str) -> int:
     return score
 
 
+def score_product(title_score: int, rating: float, sold: int, price: float) -> float:
+    score = 0.0
+
+    score += title_score * 10
+    score += rating * 20
+    score += min(sold, 5000) * 0.08
+
+    if 20 <= price <= 199:
+        score += 20
+    elif 200 <= price <= 399:
+        score += 10
+    elif 400 <= price <= 800:
+        score += 4
+
+    return round(score, 2)
+
+
 def filter_products(rows: list[dict], state: dict):
     products = []
     posted = set(state.get("posted", []))
@@ -70,6 +87,8 @@ def filter_products(rows: list[dict], state: dict):
             if price < 10 or price > 800:
                 continue
 
+            final_score = score_product(title_score, rating, sold, price)
+
             products.append({
                 "name": title,
                 "link": link,
@@ -78,12 +97,13 @@ def filter_products(rows: list[dict], state: dict):
                 "rating": rating,
                 "sold": sold,
                 "title_score": title_score,
+                "final_score": final_score,
             })
         except Exception:
             continue
 
     products.sort(
-        key=lambda x: (x["title_score"], x["rating"], x["sold"]),
+        key=lambda x: (x["final_score"], x["title_score"], x["rating"], x["sold"]),
         reverse=True,
     )
     return products
