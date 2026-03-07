@@ -3,35 +3,36 @@ name: BEN AUTO POST
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 */3 * * *"
 
 permissions:
   contents: write
 
 jobs:
-  post:
+  autopost:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
 
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - name: Install requirements
+        run: pip install -r requirements.txt
 
-      - name: run bot
+      - name: Run bot
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python app.py
+        run: python -u app.py
 
-      - name: save state
+      - name: Save state
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
