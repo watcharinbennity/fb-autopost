@@ -2,7 +2,7 @@ import json
 import random
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from shopee_scraper import update_products
 
@@ -19,6 +19,7 @@ VIRAL_FILE = "viral_posts_300.json"
 REELS_FILE = "reels_ideas_100.json"
 
 ASSET_DIR = "assets"
+TH_TZ = timezone(timedelta(hours=7))
 
 
 def load_json(file):
@@ -48,9 +49,43 @@ def log_post(post_type, name):
     data.append({
         "type": post_type,
         "name": name,
-        "time": str(datetime.now())
+        "time": str(datetime.now(TH_TZ))
     })
     save_json(LOG_FILE, data)
+
+
+def analyze_posts():
+    logs = load_json(LOG_FILE)
+    stats = {}
+    for log in logs:
+        t = log.get("type", "unknown")
+        stats[t] = stats.get(t, 0) + 1
+    return stats
+
+
+def get_mode_by_time():
+    now = datetime.now(TH_TZ)
+    h = now.hour
+    m = now.minute
+    minute_of_day = h * 60 + m
+
+    # 09:00
+    if 9 * 60 <= minute_of_day < 10 * 60:
+        return "viral"
+
+    # 12:00
+    if 12 * 60 <= minute_of_day < 13 * 60:
+        return "product"
+
+    # 18:30
+    if 18 * 60 + 30 <= minute_of_day < 19 * 60 + 30:
+        return "product"
+
+    # 21:00
+    if 21 * 60 <= minute_of_day < 22 * 60:
+        return "engage"
+
+    return None
 
 
 def pick_product():
@@ -68,7 +103,6 @@ def pick_product():
     if not good:
         return None
 
-    # ขายดี + รีวิวดี
     good.sort(
         key=lambda x: (
             int(x.get("sold", 0)),
@@ -232,15 +266,6 @@ def comment(post_id, link):
         print("COMMENT ERROR:", e, flush=True)
 
 
-def analyze_posts():
-    logs = load_json(LOG_FILE)
-    stats = {}
-    for log in logs:
-        t = log.get("type", "unknown")
-        stats[t] = stats.get(t, 0) + 1
-    return stats
-
-
 def run():
     print("Updating Shopee products...", flush=True)
     update_products()
@@ -251,8 +276,12 @@ def run():
     if os.path.isdir(ASSET_DIR):
         print("ASSETS:", os.listdir(ASSET_DIR), flush=True)
 
-    mode = random.choice(["product", "viral", "engage", "reels"])
+    mode = get_mode_by_time()
     print("MODE:", mode, flush=True)
+
+    if not mode:
+        print("SKIP: not in posting window", flush=True)
+        return
 
     if mode == "product":
         product = pick_product()
@@ -269,6 +298,9 @@ def run():
             log_post("product", product["name"])
             print("POST STATS:", analyze_posts(), flush=True)
             return
+
+        print("NO PRODUCT FOUND", flush=True)
+        return
 
     if mode == "viral":
         caption = viral_caption()
