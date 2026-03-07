@@ -11,6 +11,7 @@ AFF_ID = "15328100363"
 
 PRODUCT_FILE = "products.json"
 STATE_FILE = "state.json"
+POST_FILE = "posted_products.json"
 
 
 def load_json(file, default):
@@ -29,16 +30,32 @@ def save_json(file,data):
         json.dump(data,f,ensure_ascii=False,indent=2)
 
 
-def convert_affiliate(product_link):
+def affiliate_link(product):
 
-    encoded = urllib.parse.quote(product_link)
+    encoded = urllib.parse.quote(product)
 
     return f"https://shopee.ee/an_redir?affiliate_id={AFF_ID}&origin_link={encoded}"
 
 
+def choose_product(products, posted):
+
+    pool = [p for p in products if p["link"] not in posted]
+
+    if not pool:
+        return None
+
+    ranked = sorted(pool,key=lambda x: float(x["sold"]),reverse=True)
+
+    top = ranked[:30]
+
+    return random.choice(top)
+
+
 def caption(p,link):
 
-    text = f"""⚡ แนะนำจาก BEN Home & Electrical
+    captions = [
+
+f"""⚡ แนะนำจาก BEN Home & Electrical
 
 {p['title']}
 
@@ -50,17 +67,32 @@ def caption(p,link):
 {link}
 
 #BENHomeElectrical #ShopeeAffiliate
+""",
+
+f"""🔥 สินค้าขายดี
+
+{p['title']}
+
+⭐ {p['rating']}
+📦 ขายแล้ว {p['sold']}
+💰 {p['price']} บาท
+
+👉 {link}
+
+#ShopeeAffiliate
 """
 
-    return text
+]
+
+    return random.choice(captions)
 
 
-def upload_photo(image):
+def upload_photo(img):
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     r = requests.post(url,data={
-        "url":image,
+        "url":img,
         "published":"false",
         "access_token":TOKEN
     }).json()
@@ -95,16 +127,15 @@ def main():
 
     products = load_json(PRODUCT_FILE,[])
     state = load_json(STATE_FILE,{"posted":[]})
+    posted_products = load_json(POST_FILE,[])
 
-    pool = [p for p in products if p["link"] not in state["posted"]]
+    p = choose_product(products,state["posted"])
 
-    if not pool:
+    if not p:
         print("no product")
         return
 
-    p = random.choice(pool)
-
-    aff = convert_affiliate(p["link"])
+    aff = affiliate_link(p["link"])
 
     text = caption(p,aff)
 
@@ -124,9 +155,13 @@ def main():
 
         state["posted"].append(p["link"])
 
+        posted_products.append(p)
+
         save_json(STATE_FILE,state)
 
-        print("done")
+        save_json(POST_FILE,posted_products)
+
+        print("post success")
 
 
 if __name__ == "__main__":
