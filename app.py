@@ -3,8 +3,9 @@ import csv
 import json
 import random
 import requests
+from datetime import datetime, timezone, timedelta
 
-from ai_engine import choose_product, generate_caption
+from ai_engine import choose_product, generate_best_caption
 from product_filter import filter_products, score_title
 
 PAGE_ID = os.getenv("PAGE_ID")
@@ -13,28 +14,64 @@ CSV_URL = os.getenv("SHOPEE_CSV_URL")
 AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
 
 STATE_FILE = "state.json"
+POSTED_LOG_FILE = "posted_log.json"
 HTTP_TIMEOUT = 20
 MAX_ROWS = 500
+TH_TZ = timezone(timedelta(hours=7))
 
 
 def log(msg):
     print(msg, flush=True)
 
 
-def load_state():
+def load_json_file(path, default):
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "posted" not in data or not isinstance(data["posted"], list):
-                data["posted"] = []
-            return data
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
-        return {"posted": []}
+        return default
+
+
+def save_json_file(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_state():
+    data = load_json_file(STATE_FILE, {"posted": []})
+    if "posted" not in data or not isinstance(data["posted"], list):
+        data["posted"] = []
+    return data
 
 
 def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    save_json_file(STATE_FILE, state)
+
+
+def load_posted_log():
+    data = load_json_file(POSTED_LOG_FILE, [])
+    return data if isinstance(data, list) else []
+
+
+def save_posted_log(data):
+    save_json_file(POSTED_LOG_FILE, data[-1000:])
+
+
+def append_posted_log(product, mode, post_id, used_fallback):
+    logs = load_posted_log()
+    logs.append({
+        "time_th": datetime.now(TH_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": mode,
+        "used_fallback": used_fallback,
+        "post_id": post_id,
+        "name": product.get("name", ""),
+        "link": product.get("link", ""),
+        "price": product.get("price", ""),
+        "rating": product.get("rating", ""),
+        "sold": product.get("sold", ""),
+        "final_score": product.get("final_score", ""),
+    })
+    save_posted_log(logs)
 
 
 def clean_link(url):
@@ -93,6 +130,7 @@ def build_fallback_product(rows, state):
             "price": r.get("sale_price") or r.get("price") or "",
             "rating": r.get("item_rating") or "0",
             "sold": r.get("item_sold") or "0",
+            "final_score": 0,
         }))
 
     if not candidates:
@@ -120,8 +158,8 @@ def fallback_caption(product, link):
 def build_caption(product):
     link = aff_link(product["link"])
 
-    log("STEP 5: generate ai caption")
-    caption = generate_caption(product)
+    log("STEP 5: generate ai best caption")
+    caption = generate_best_caption(product)
 
     if caption:
         if link not in caption:
@@ -205,6 +243,8 @@ def main():
     products = filter_products(rows, state)
     log(f"STEP 4: valid products = {len(products)}")
 
+    used_fallback = False
+
     if products:
         product = choose_product(products)
         log(f"CHOSEN BY AI: {product['name']}")
@@ -214,6 +254,7 @@ def main():
         if not product:
             log("FALLBACK FAILED")
             return
+        used_fallback = True
         log(f"CHOSEN BY FALLBACK: {product['name']}")
 
     caption = build_caption(product)
@@ -225,6 +266,12 @@ def main():
         comment_link(res["id"], aff_link(product["link"]))
         state["posted"].append(product["link"])
         save_state(state)
+        append_posted_log(
+            product=product,
+            mode="product",
+            post_id=res["id"],
+            used_fallback=used_fallback
+        )
         log("POST SUCCESS")
     else:
         log("POST FAILED")
