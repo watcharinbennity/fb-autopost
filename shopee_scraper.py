@@ -137,12 +137,9 @@ def update_products() -> list:
             print(f"SCRAPER ERROR [{keyword}]: {e}", flush=True)
 
     old_products = load_products()
-
-    # merge เก่ากับใหม่ เผื่อรอบนี้ scrape ได้น้อย
     merged = all_products + old_products
     merged = dedupe_products(merged)
 
-    # เน้นตัวที่ rating/sold สูง
     merged.sort(
         key=lambda x: (
             float(x.get("sold", 0)),
