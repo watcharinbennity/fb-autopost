@@ -7,73 +7,67 @@ import requests
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
-STATE_FILE = "state.json"
-HTTP_TIMEOUT = 30
+STATE_FILE="state.json"
+TIMEOUT=30
 
-KEYWORDS = [
-"ไฟ","led","โคม","solar","หลอดไฟ","ปลั๊ก","สวิตช์",
-"เครื่องมือ","ช่าง","ไขควง","สว่าน","สายไฟ",
-"diy","โคมไฟ","พัดลม","ปั๊ม","hardware"
+KEYWORDS=[
+"ไฟ","led","โคม","solar",
+"ปลั๊ก","สวิตช์","สายไฟ",
+"เครื่องมือ","ช่าง","ไขควง",
+"สว่าน","diy","hardware"
 ]
 
-
-def log(x):
-    print(x, flush=True)
-
-
 def load_state():
+
     if not os.path.exists(STATE_FILE):
         return {"posted":[]}
-    with open(STATE_FILE,"r",encoding="utf8") as f:
+
+    with open(STATE_FILE,"r") as f:
         return json.load(f)
 
+def save_state(s):
 
-def save_state(state):
-    with open(STATE_FILE,"w",encoding="utf8") as f:
-        json.dump(state,f,ensure_ascii=False,indent=2)
-
+    with open(STATE_FILE,"w") as f:
+        json.dump(s,f)
 
 def clean_link(url):
-    return (url or "").split("?")[0].strip()
 
+    if not url:
+        return ""
 
-def build_affiliate(url):
-    base = clean_link(url)
-    return f"{base}?affiliate_id={AFF_ID}"
+    return url.split("?")[0]
 
+def aff_link(url):
 
-def category_match(title):
-    t = title.lower()
+    return f"{clean_link(url)}?affiliate_id={AFF_ID}"
+
+def category_ok(title):
+
+    t=title.lower()
+
     for k in KEYWORDS:
         if k in t:
             return True
-    return False
 
+    return False
 
 def read_csv():
 
-    r = requests.get(CSV_URL,timeout=HTTP_TIMEOUT,stream=True)
+    r=requests.get(CSV_URL,timeout=TIMEOUT,stream=True)
     r.raise_for_status()
 
-    lines = (
-        line.decode("utf8","ignore")
-        for line in r.iter_lines()
-        if line
-    )
+    lines=(l.decode("utf8","ignore") for l in r.iter_lines() if l)
 
-    reader = csv.DictReader(lines)
+    reader=csv.DictReader(lines)
 
-    rows=[]
-    for row in reader:
-        rows.append(row)
+    rows=list(reader)
 
     random.shuffle(rows)
 
     return rows
-
 
 def score(row):
 
@@ -87,37 +81,54 @@ def score(row):
     except:
         sold=0
 
-    return rating*40 + sold*0.6
+    try:
+        price=float(row.get("sale_price") or row.get("price") or 0)
+    except:
+        price=0
 
+    if rating<4.5:
+        return 0
 
-def choose_product(rows,state):
+    if sold<100:
+        return 0
+
+    if price<20 or price>300:
+        return 0
+
+    return rating*50 + sold*0.5
+
+def choose(rows,state):
 
     pool=[]
 
     for r in rows:
 
-        title=(r.get("title") or "").strip()
+        title=(r.get("title") or "")
 
-        if not category_match(title):
+        if not category_ok(title):
             continue
 
         link=clean_link(r.get("product_link"))
-        image=(r.get("image_link") or "").strip()
 
-        if not link or not image:
+        if not link:
             continue
 
         if link in state["posted"]:
             continue
 
-        pool.append((score(r),r))
+        s=score(r)
+
+        if s==0:
+            continue
+
+        pool.append((s,r))
 
     if not pool:
         return None
 
     pool.sort(key=lambda x:x[0],reverse=True)
 
-    row=random.choice(pool[:30])[1]
+    row=random.choice(pool[:40])[1]
 
     return {
         "title":row.get("title"),
@@ -128,34 +139,37 @@ def choose_product(rows,state):
         "sold":row.get("item_sold")
     }
 
+def ai_caption(p):
 
-def ai_caption(product):
-
-    if not OPENAI_API_KEY:
+    if not OPENAI_KEY:
         return None
+
+    prompt=f"""
+เขียนโพสต์ขายสินค้า
+
+สินค้า: {p['title']}
+ราคา: {p['price']} บาท
+รีวิว: {p['rating']}
+ขายแล้ว: {p['sold']}
+
+ทำให้ดูน่าซื้อ
+ใช้ emoji
+ไม่เกิน 6 บรรทัด
+"""
 
     try:
 
         r=requests.post(
         "https://api.openai.com/v1/responses",
         headers={
-        "Authorization":f"Bearer {OPENAI_API_KEY}",
+        "Authorization":f"Bearer {OPENAI_KEY}",
         "Content-Type":"application/json"
         },
         json={
         "model":"gpt-4.1-mini",
-        "input":f"""
-เขียนแคปชั่นขายสินค้า
-
-สินค้า: {product['title']}
-ราคา: {product['price']}
-รีวิว: {product['rating']}
-ขายแล้ว: {product['sold']}
-
-ใช้ emoji เล็กน้อย
-"""
+        "input":prompt
         },
-        timeout=HTTP_TIMEOUT
+        timeout=TIMEOUT
         )
 
         data=r.json()
@@ -165,23 +179,22 @@ def ai_caption(product):
     except:
         return None
 
+def fallback(p,link):
 
-def fallback(product,link):
+    return f"""
+⚡ แนะนำจาก BEN Home & Electrical
 
-    return f"""⚡ แนะนำจาก BEN Home & Electrical
+{p['title']}
 
-{product['title']}
-
-⭐ รีวิว {product['rating']}
-🔥 ขายแล้ว {product['sold']}
-💰 ราคา {product['price']} บาท
+⭐ รีวิว {p['rating']}
+🔥 ขายแล้ว {p['sold']}
+💰 ราคา {p['price']} บาท
 
 🛒 สั่งซื้อ
 {link}
 
 #BENHomeElectrical #ShopeeAffiliate
 """
-
 
 def ensure_link(text,link):
 
@@ -190,15 +203,14 @@ def ensure_link(text,link):
 
     return f"{text}\n\n🛒 สั่งซื้อ\n{link}"
 
-
 def upload_photo(image):
 
     url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     r=requests.post(url,data={
-    "url":image,
-    "published":"false",
-    "access_token":TOKEN
+        "url":image,
+        "published":"false",
+        "access_token":TOKEN
     })
 
     data=r.json()
@@ -208,49 +220,40 @@ def upload_photo(image):
 
     return data["id"]
 
-
 def create_post(media,text):
 
     url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
     r=requests.post(url,data={
-    "message":text,
-    "attached_media[0]":json.dumps({"media_fbid":media}),
-    "access_token":TOKEN
+        "message":text,
+        "attached_media[0]":json.dumps({"media_fbid":media}),
+        "access_token":TOKEN
     })
 
     return r.json()
-
 
 def comment(post_id,link):
 
     url=f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
     requests.post(url,data={
-    "message":f"🛒 ลิงก์สั่งซื้อ\n{link}",
-    "access_token":TOKEN
+        "message":f"🛒 ลิงก์สั่งซื้อ\n{link}",
+        "access_token":TOKEN
     })
 
-
 def main():
-
-    if not PAGE_ID:
-        raise ValueError("Missing PAGE_ID")
-
-    if not TOKEN:
-        raise ValueError("Missing PAGE_ACCESS_TOKEN")
 
     state=load_state()
 
     rows=read_csv()
 
-    product=choose_product(rows,state)
+    product=choose(rows,state)
 
     if not product:
-        log("no product")
+        print("NO PRODUCT")
         return
 
-    link=build_affiliate(product["link"])
+    link=aff_link(product["link"])
 
     caption=ai_caption(product)
 
@@ -271,12 +274,7 @@ def main():
 
         save_state(state)
 
-        log("POST SUCCESS")
-
-    else:
-
-        log(res)
-
+        print("POST SUCCESS")
 
 if __name__=="__main__":
     main()
