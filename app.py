@@ -4,19 +4,19 @@ import os
 import requests
 from datetime import datetime
 
-from auto_product_finder import find_trending_products
-from reels_generator import generate_reels
-from analytics_engine import analyze_posts
+from shopee_scraper import update_products
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 OPENAI = os.getenv("OPENAI_API_KEY")
 
 PRODUCT_FILE = "products.json"
+POSTED_FILE = "posted_products.json"
 LOG_FILE = "post_log.json"
 
 CAPTION_FILE = "captions_2000.txt"
 VIRAL_FILE = "viral_posts_300.json"
+REELS_FILE = "reels_ideas_100.json"
 
 ASSET_DIR = "assets"
 
@@ -51,6 +51,38 @@ def log_post(post_type, name):
         "time": str(datetime.now())
     })
     save_json(LOG_FILE, data)
+
+
+def pick_product():
+    products = load_json(PRODUCT_FILE)
+    posted = set(load_json(POSTED_FILE))
+
+    good = [
+        p for p in products
+        if p.get("link")
+        and p["link"] not in posted
+        and float(p.get("rating", 0)) >= 4.0
+        and int(p.get("sold", 0)) >= 10
+    ]
+
+    if not good:
+        return None
+
+    # ขายดี + รีวิวดี
+    good.sort(
+        key=lambda x: (
+            int(x.get("sold", 0)),
+            float(x.get("rating", 0)),
+        ),
+        reverse=True
+    )
+
+    top = good[:30] if len(good) >= 30 else good
+    product = random.choice(top)
+
+    posted.add(product["link"])
+    save_json(POSTED_FILE, list(posted))
+    return product
 
 
 def ai_caption(name):
@@ -116,6 +148,18 @@ def engage_caption():
     return random.choice(questions)
 
 
+def reels_idea():
+    reels = load_json(REELS_FILE)
+    if reels:
+        return random.choice(reels)
+    return {"hook": "ไฟโซล่าดีไหม", "idea": "อธิบายข้อดีสั้น ๆ แล้วปิดด้วย call to action"}
+
+
+def save_reels_script(idea):
+    with open("reels_script.txt", "w", encoding="utf-8") as f:
+        f.write(str(idea))
+
+
 def ensure_image_exists(path):
     if os.path.exists(path):
         return path
@@ -123,8 +167,6 @@ def ensure_image_exists(path):
     fallback_candidates = [
         os.path.join(ASSET_DIR, "home_electrical_5.jpg"),
         os.path.join(ASSET_DIR, "home_electrical_5.jpeg"),
-        os.path.join(ASSET_DIR, "home_electrical_5.JPG"),
-        os.path.join(ASSET_DIR, "home_electrical_5.JPEG"),
         os.path.join(ASSET_DIR, "solar.jpg"),
         os.path.join(ASSET_DIR, "safe_plug.jpg"),
         os.path.join(ASSET_DIR, "tools.jpg"),
@@ -137,7 +179,7 @@ def ensure_image_exists(path):
             return candidate
 
     raise FileNotFoundError(
-        f"ไม่พบไฟล์รูป: {path} | assets ที่มีอยู่: {os.listdir(ASSET_DIR) if os.path.isdir(ASSET_DIR) else 'assets folder missing'}"
+        f"ไม่พบไฟล์รูป: {path} | assets: {os.listdir(ASSET_DIR) if os.path.isdir(ASSET_DIR) else 'missing'}"
     )
 
 
@@ -158,7 +200,6 @@ def get_image(category):
 
 def post(caption, image):
     image = ensure_image_exists(image)
-
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     with open(image, "rb") as f:
@@ -191,20 +232,30 @@ def comment(post_id, link):
         print("COMMENT ERROR:", e, flush=True)
 
 
+def analyze_posts():
+    logs = load_json(LOG_FILE)
+    stats = {}
+    for log in logs:
+        t = log.get("type", "unknown")
+        stats[t] = stats.get(t, 0) + 1
+    return stats
+
+
 def run():
+    print("Updating Shopee products...", flush=True)
+    update_products()
+
     print("PWD:", os.getcwd(), flush=True)
     print("FILES:", os.listdir("."), flush=True)
 
     if os.path.isdir(ASSET_DIR):
         print("ASSETS:", os.listdir(ASSET_DIR), flush=True)
-    else:
-        print("ASSETS FOLDER MISSING", flush=True)
 
     mode = random.choice(["product", "viral", "engage", "reels"])
     print("MODE:", mode, flush=True)
 
     if mode == "product":
-        product = find_trending_products()
+        product = pick_product()
 
         if product:
             caption = ai_caption(product["name"])
@@ -216,9 +267,7 @@ def run():
                 comment(post_id, product["link"])
 
             log_post("product", product["name"])
-
-            stats = analyze_posts()
-            print("POST STATS:", stats, flush=True)
+            print("POST STATS:", analyze_posts(), flush=True)
             return
 
     if mode == "viral":
@@ -227,9 +276,7 @@ def run():
 
         post(caption, image)
         log_post("viral", "content")
-
-        stats = analyze_posts()
-        print("POST STATS:", stats, flush=True)
+        print("POST STATS:", analyze_posts(), flush=True)
         return
 
     if mode == "engage":
@@ -238,19 +285,16 @@ def run():
 
         post(caption, image)
         log_post("engagement", "question")
-
-        stats = analyze_posts()
-        print("POST STATS:", stats, flush=True)
+        print("POST STATS:", analyze_posts(), flush=True)
         return
 
     if mode == "reels":
-        idea = generate_reels()
+        idea = reels_idea()
+        save_reels_script(idea)
         print("REELS IDEA:", idea, flush=True)
 
         log_post("reels", "idea")
-
-        stats = analyze_posts()
-        print("POST STATS:", stats, flush=True)
+        print("POST STATS:", analyze_posts(), flush=True)
         return
 
 
