@@ -27,11 +27,19 @@ def save_posted(data):
 
 def parse_float(v):
     try:
-        if v is None or str(v).strip() == "":
-            return 0
         return float(str(v).replace(",", ""))
     except Exception:
         return 0
+
+
+def format_price(v):
+    try:
+        p = float(v)
+        if p <= 0:
+            return ""
+        return f"{p:,.0f} บาท"
+    except Exception:
+        return ""
 
 
 def load_csv_products():
@@ -42,13 +50,11 @@ def load_csv_products():
 
     lines = []
 
-    for line in r.iter_lines():
+    for line in r.iter_lines(decode_unicode=True):
         if line:
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="ignore")
             lines.append(line)
 
-        # header + rows ส่วนต้นพอสำหรับคัดสินค้า
+        # header + ข้อมูลส่วนต้นพอ
         if len(lines) > 800:
             break
 
@@ -56,13 +62,6 @@ def load_csv_products():
     reader = csv.DictReader(io.StringIO(text))
 
     products = []
-
-    allow_keywords = [
-        "home", "living", "tools", "accessories", "chargers",
-        "lighting", "cables", "gadgets", "electrical",
-        "led", "plug", "solar", "lamp", "light",
-        "charger", "converter", "appliance"
-    ]
 
     for row in reader:
         name = (row.get("title") or "").strip()
@@ -81,7 +80,6 @@ def load_csv_products():
 
         price = parse_float(
             row.get("price")
-            or row.get("sale_price")
             or 0
         )
 
@@ -95,19 +93,13 @@ def load_csv_products():
             or 0
         )
 
-        category1 = (row.get("global_category1") or "").strip().lower()
-        category2 = (row.get("global_category2") or "").strip().lower()
-        category3 = (row.get("global_category3") or "").strip().lower()
-
-        category_text = f"{category1} {category2} {category3} {name.lower()}"
-
         if not name or not link or not image:
             continue
 
         if rating < 4:
             continue
 
-        if not any(k in category_text for k in allow_keywords):
+        if sold < 10:
             continue
 
         products.append({
@@ -116,10 +108,7 @@ def load_csv_products():
             "image": image,
             "price": price,
             "rating": rating,
-            "sold": sold,
-            "category1": category1,
-            "category2": category2,
-            "category3": category3
+            "sold": sold
         })
 
         if len(products) >= 500:
@@ -130,14 +119,14 @@ def load_csv_products():
 
 
 def ai_caption(product):
-    price_text = f"{product['price']:,.0f} บาท" if product.get("price") else ""
+    price_text = format_price(product.get("price", 0))
 
     fallback = f"""🔥 {product['name']}
 
 💰 ราคา {price_text}
 
 ของน่าใช้สำหรับบ้านและงานไฟฟ้า
-ดูสินค้าได้ที่คอมเมนต์ 👇"""
+ดูสินค้าได้ที่ลิงก์ด้านล่าง 👇"""
 
     if not OPENAI_KEY:
         return fallback
@@ -184,6 +173,14 @@ def ai_caption(product):
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback
+
+
+def build_caption_with_link(product):
+    base = ai_caption(product).strip()
+    return f"""{base}
+
+🛒 สั่งซื้อสินค้า
+{product['link']}"""
 
 
 def post_facebook(product, caption):
@@ -238,13 +235,7 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    candidates.sort(
-        key=lambda x: (x.get("rating", 0), x.get("sold", 0), x.get("price", 0)),
-        reverse=True
-    )
-
-    pool = candidates[:30] if len(candidates) >= 30 else candidates
-    return random.choice(pool)
+    return random.choice(candidates)
 
 
 def run():
@@ -259,7 +250,7 @@ def run():
     if not product:
         return
 
-    caption = ai_caption(product)
+    caption = build_caption_with_link(product)
     res = post_facebook(product, caption)
 
     post_id = res.get("post_id") or res.get("id")
