@@ -1,45 +1,42 @@
-name: BEN AUTO POST
+name: FB Auto Post
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
-    - cron: "0 5 * * *"
-    - cron: "30 11 * * *"
-    - cron: "0 14 * * *"
+    - cron: '0 2 * * *'
+    - cron: '0 5 * * *'
+    - cron: '30 11 * * *'
+    - cron: '0 14 * * *'
 
 permissions:
   contents: write
 
 jobs:
-  autopost:
+  runbot:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install requirements
+      - name: Install
         run: pip install -r requirements.txt
 
       - name: Run bot
-        env:
-          PAGE_ID: ${{ secrets.PAGE_ID }}
-          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RAW_BASE_URL: https://raw.githubusercontent.com/watcharinbootprasan/fb-autopost/main/assets
         run: python -u app.py
+        env:
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Save state
+      - name: Save logs
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
-          git add state.json posted_log.json
-          git commit -m "update state" || echo "no change"
+          git add posted_log.json posted_products.json reels_script.txt
+          git commit -m "update bot logs" || echo "no change"
           git push
