@@ -1,35 +1,43 @@
 import json
 import random
 
-def load_reels():
+REELS_FILE = "reels_ideas_100.json"
+OUTPUT_FILE = "reels_script.txt"
 
+
+def load_reels():
     try:
-        with open("reels_ideas_100.json",encoding="utf-8") as f:
-            return json.load(f)
-    except:
+        with open(REELS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
         return []
 
 
 def generate_reels():
+    reels = load_reels()
 
-    reels=load_reels()
+    if reels:
+        idea = random.choice(reels)
+        hook = idea.get("hook", "ของดีที่ควรมีติดบ้าน")
+        content = idea.get("idea", "อธิบายข้อดีสั้น ๆ และปิดด้วย call to action")
+    else:
+        hook = "ของดีที่ควรมีติดบ้าน"
+        content = "อธิบายข้อดีสั้น ๆ และปิดด้วย call to action"
 
-    idea=random.choice(reels)
-
-    script=f"""
-🎬 Reel Idea
+    script = f"""🎬 REELS IDEA
 
 Hook:
-{idea['hook']}
+{hook}
 
 Content:
-{idea['idea']}
+{content}
 
 CTA:
 ดูสินค้าในคอมเมนต์
 """
 
-    with open("reels_script.txt","w",encoding="utf-8") as f:
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(script)
 
     return script
