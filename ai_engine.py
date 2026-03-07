@@ -33,23 +33,20 @@ def ask_ai(prompt):
 
 def choose_product(products):
 
-    if not products:
-        return None
-
-    text="\n".join([
+    text = "\n".join([
         f"{p['name']} | rating:{p['rating']} | sold:{p['sold']} | price:{p['price']}"
         for p in products[:20]
     ])
 
-    prompt=f"""
-เลือกสินค้า 1 ตัวที่มีโอกาสขายดีที่สุดสำหรับเพจขายเครื่องมือช่าง
+    prompt = f"""
+เลือกสินค้า 1 ตัวที่มีโอกาสขายดีที่สุดสำหรับเพจเครื่องมือช่าง
 
 {text}
 
-ตอบชื่อสินค้า
+ตอบชื่อสินค้าอย่างเดียว
 """
 
-    result=ask_ai(prompt)
+    result = ask_ai(prompt)
 
     if result:
 
@@ -62,7 +59,7 @@ def choose_product(products):
 
 def generate_caption(product):
 
-    prompt=f"""
+    prompt = f"""
 เขียนโพสต์ Facebook สำหรับขายสินค้า
 
 สินค้า: {product['name']}
