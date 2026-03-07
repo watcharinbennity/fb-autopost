@@ -4,36 +4,30 @@ import json
 import random
 import requests
 
-from ai_helper import ai_caption, ai_choose_product
+from ai_engine import choose_product, generate_caption
+from product_filter import filter_products
 
-PAGE_ID = os.getenv("PAGE_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
-AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID=os.getenv("PAGE_ID")
+TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL=os.getenv("SHOPEE_CSV_URL")
+AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
 
 STATE_FILE="state.json"
 
 
 def load_state():
 
-    if not os.path.exists(STATE_FILE):
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except:
         return {"posted":[]}
-
-    with open(STATE_FILE) as f:
-        return json.load(f)
 
 
 def save_state(state):
 
     with open(STATE_FILE,"w") as f:
         json.dump(state,f)
-
-
-def aff_link(url):
-
-    url=url.split("?")[0]
-
-    return f"{url}?affiliate_id={AFF_ID}"
 
 
 def read_csv():
@@ -47,41 +41,11 @@ def read_csv():
     return rows
 
 
-def collect_products(rows,state):
+def aff_link(url):
 
-    products=[]
+    url=url.split("?")[0]
 
-    for r in rows:
-
-        link=r.get("product_link")
-        image=r.get("image_link")
-
-        if not link or not image:
-            continue
-
-        if link in state["posted"]:
-            continue
-
-        try:
-            rating=float(r.get("item_rating") or 0)
-            sold=int(float(r.get("item_sold") or 0))
-            price=float(r.get("sale_price") or r.get("price") or 0)
-        except:
-            continue
-
-        if rating<4.5 or sold<100 or price<20 or price>300:
-            continue
-
-        products.append({
-            "name":r.get("title"),
-            "link":link,
-            "image":image,
-            "price":price,
-            "rating":rating,
-            "sold":sold
-        })
-
-    return products
+    return f"{url}?affiliate_id={AFF_ID}"
 
 
 def upload_photo(url):
@@ -126,15 +90,15 @@ def main():
 
     rows=read_csv()
 
-    products=collect_products(rows,state)
+    products=filter_products(rows,state)
 
     if not products:
         print("NO PRODUCT")
         return
 
-    product=ai_choose_product(products)
+    product=choose_product(products)
 
-    caption=ai_caption(product)
+    caption=generate_caption(product)
 
     link=aff_link(product["link"])
 
