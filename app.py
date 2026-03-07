@@ -4,24 +4,26 @@ import os
 import requests
 from datetime import datetime
 
+from auto_product_finder import find_trending_products
+from reels_generator import generate_reels
+from analytics_engine import analyze_posts
+
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 OPENAI = os.getenv("OPENAI_API_KEY")
 
 PRODUCT_FILE = "products.json"
-POSTED_FILE = "posted_products.json"
 LOG_FILE = "post_log.json"
 
 CAPTION_FILE = "captions_2000.txt"
 VIRAL_FILE = "viral_posts_300.json"
-REELS_FILE = "reels_ideas_100.json"
 
 ASSET_DIR = "assets"
 
 
 def load_json(file):
     try:
-        with open(file, encoding="utf-8") as f:
+        with open(file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return []
@@ -34,7 +36,7 @@ def save_json(file, data):
 
 def load_captions():
     try:
-        with open(CAPTION_FILE, encoding="utf-8") as f:
+        with open(CAPTION_FILE, "r", encoding="utf-8") as f:
             lines = [x.strip() for x in f.read().splitlines() if x.strip()]
             return lines if lines else ["⚡ {name} ของดีสำหรับบ้าน"]
     except Exception:
@@ -49,27 +51,6 @@ def log_post(post_type, name):
         "time": str(datetime.now())
     })
     save_json(LOG_FILE, data)
-
-
-def pick_product():
-    products = load_json(PRODUCT_FILE)
-    posted = load_json(POSTED_FILE)
-
-    good = [
-        p for p in products
-        if p.get("link")
-        and p["link"] not in posted
-        and p.get("rating", 4) >= 4
-        and p.get("sold", 0) >= 10
-    ]
-
-    if not good:
-        return None
-
-    product = random.choice(good)
-    posted.append(product["link"])
-    save_json(POSTED_FILE, posted)
-    return product
 
 
 def ai_caption(name):
@@ -107,19 +88,21 @@ def ai_caption(name):
 
 def viral_caption():
     posts = load_json(VIRAL_FILE)
+
     if posts:
         post = random.choice(posts)
         if isinstance(post, dict) and post.get("caption"):
             return post["caption"]
 
-    topics = [
+    fallback_topics = [
         "ไฟโซล่าดีไหม",
         "ปลั๊กไฟแบบไหนปลอดภัย",
         "เครื่องมือช่างที่ควรมีติดบ้าน",
         "5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน",
         "หลอดไฟ LED ประหยัดไฟจริงไหม"
     ]
-    topic = random.choice(topics)
+
+    topic = random.choice(fallback_topics)
     return f"⚡ {topic}\n\nบ้านคุณคิดว่ายังไง ?\n\nคอมเมนต์หน่อย"
 
 
@@ -133,18 +116,10 @@ def engage_caption():
     return random.choice(questions)
 
 
-def reels_idea():
-    reels = load_json(REELS_FILE)
-    if reels:
-        return random.choice(reels)
-    return {"hook": "ไฟโซล่าดีไหม", "idea": "อธิบายข้อดีสั้น ๆ แล้วปิดด้วย call to action"}
-
-
 def ensure_image_exists(path):
     if os.path.exists(path):
         return path
 
-    # fallback ไล่หาไฟล์ที่มีจริง
     fallback_candidates = [
         os.path.join(ASSET_DIR, "home_electrical_5.jpg"),
         os.path.join(ASSET_DIR, "home_electrical_5.jpeg"),
@@ -219,6 +194,7 @@ def comment(post_id, link):
 def run():
     print("PWD:", os.getcwd(), flush=True)
     print("FILES:", os.listdir("."), flush=True)
+
     if os.path.isdir(ASSET_DIR):
         print("ASSETS:", os.listdir(ASSET_DIR), flush=True)
     else:
@@ -228,7 +204,7 @@ def run():
     print("MODE:", mode, flush=True)
 
     if mode == "product":
-        product = pick_product()
+        product = find_trending_products()
 
         if product:
             caption = ai_caption(product["name"])
@@ -240,26 +216,41 @@ def run():
                 comment(post_id, product["link"])
 
             log_post("product", product["name"])
+
+            stats = analyze_posts()
+            print("POST STATS:", stats, flush=True)
             return
 
     if mode == "viral":
         caption = viral_caption()
         image = ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+
         post(caption, image)
         log_post("viral", "content")
+
+        stats = analyze_posts()
+        print("POST STATS:", stats, flush=True)
         return
 
     if mode == "engage":
         caption = engage_caption()
         image = ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+
         post(caption, image)
         log_post("engagement", "question")
+
+        stats = analyze_posts()
+        print("POST STATS:", stats, flush=True)
         return
 
     if mode == "reels":
-        idea = reels_idea()
+        idea = generate_reels()
         print("REELS IDEA:", idea, flush=True)
+
         log_post("reels", "idea")
+
+        stats = analyze_posts()
+        print("POST STATS:", stats, flush=True)
         return
 
 
