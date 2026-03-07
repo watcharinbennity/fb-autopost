@@ -1,13 +1,20 @@
 import os
 import csv
 import json
-import random
 import requests
 from datetime import datetime, timezone, timedelta
 
-from ai_engine import choose_product, generate_best_caption, viral_caption
+from ai_engine import (
+    choose_product,
+    generate_best_caption,
+    viral_caption,
+    engagement_caption,
+)
 from product_filter import filter_products, score_title
-from viral_engine import viral_post, engagement_post
+from viral_engine import (
+    generate_viral_fallback,
+    generate_engagement_fallback,
+)
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
@@ -19,6 +26,12 @@ POSTED_LOG_FILE = "posted_log.json"
 HTTP_TIMEOUT = 20
 MAX_ROWS = 500
 TH_TZ = timezone(timedelta(hours=7))
+
+RAW_BASE_URL = os.getenv(
+    "RAW_BASE_URL",
+    "https://raw.githubusercontent.com/watcharinbootprasan/fb-autopost/main/assets"
+)
+DEFAULT_FALLBACK_IMAGE = f"{RAW_BASE_URL}/home_electrical_5.jpg"
 
 
 def log(msg):
@@ -58,13 +71,14 @@ def save_posted_log(data):
     save_json_file(POSTED_LOG_FILE, data[-1000:])
 
 
-def append_posted_log(mode, post_id, name="", link="", price="", rating="", sold="", used_fallback=False, final_score=""):
+def append_posted_log(mode, post_id, name="", link="", price="", rating="", sold="", used_fallback=False, final_score="", topic=""):
     logs = load_posted_log()
     logs.append({
         "time_th": datetime.now(TH_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "mode": mode,
         "post_id": post_id,
         "used_fallback": used_fallback,
+        "topic": topic,
         "name": name,
         "link": link,
         "price": price,
@@ -105,7 +119,6 @@ def read_csv():
         if i >= MAX_ROWS:
             break
 
-    random.shuffle(rows)
     log(f"STEP 2: csv rows loaded = {len(rows)}")
     return rows
 
@@ -141,7 +154,7 @@ def build_fallback_product(rows, state):
     return candidates[0][1]
 
 
-def fallback_caption(product, link):
+def fallback_product_caption(product, link):
     return f"""⚡ แนะนำจาก BEN Home & Electrical
 
 {product['name']}
@@ -168,7 +181,21 @@ def build_product_caption(product):
         return caption
 
     log("STEP 6: fallback caption")
-    return fallback_caption(product, link)
+    return fallback_product_caption(product, link)
+
+
+def ensure_image_url(url):
+    if not url:
+        return DEFAULT_FALLBACK_IMAGE
+
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200 and len(r.content) > 1000:
+            return url
+    except Exception:
+        pass
+
+    return DEFAULT_FALLBACK_IMAGE
 
 
 def upload_photo(url):
@@ -229,6 +256,31 @@ def comment_link(post_id, link):
     log(f"comment response: {r.json()}")
 
 
+def decide_mode():
+    now = datetime.now(TH_TZ)
+    h = now.hour
+    m = now.minute
+    t = h * 60 + m
+
+    # 09:00 viral
+    if 8 * 60 <= t <= 10 * 60:
+        return "viral"
+
+    # 12:00 product
+    if 11 * 60 <= t <= 13 * 60:
+        return "product"
+
+    # 18:30 product
+    if 18 * 60 <= t <= 19 * 60:
+        return "product"
+
+    # 21:00 engagement
+    if 20 * 60 <= t <= 22 * 60:
+        return "engagement"
+
+    return None
+
+
 def main():
     if not PAGE_ID:
         raise ValueError("Missing PAGE_ID")
@@ -240,26 +292,41 @@ def main():
     state = load_state()
     first_run = len(state.get("posted", [])) == 0
 
-    # run แรกบังคับโพสต์สินค้า
     if first_run:
         mode = "product"
         log("FIRST RUN -> FORCE PRODUCT POST")
     else:
-        mode = random.choice(["viral", "engagement", "product", "product"])
+        mode = decide_mode()
+        if not mode:
+            log("SKIP TIME")
+            return
 
     if mode == "viral":
-        topic, image = viral_post()
-        caption = viral_caption(topic) or f"⚡ {topic}\n\nคอมเมนต์บอกหน่อย"
+        caption, image, topic = generate_viral_fallback()
+
+        ai_text = viral_caption(topic)
+        if ai_text:
+            caption = ai_text
+
+        image = ensure_image_url(image)
         media = upload_photo(image)
         res = post_image(media, caption)
+
         if "id" in res:
-            append_posted_log(mode="viral", post_id=res["id"])
+            append_posted_log(mode="viral", post_id=res["id"], topic=topic)
         return
 
     if mode == "engagement":
-        text, image = engagement_post()
+        caption, image = generate_engagement_fallback()
+
+        ai_text = engagement_caption()
+        if ai_text:
+            caption = ai_text
+
+        image = ensure_image_url(image)
         media = upload_photo(image)
-        res = post_image(media, text)
+        res = post_image(media, caption)
+
         if "id" in res:
             append_posted_log(mode="engagement", post_id=res["id"])
         return
@@ -286,6 +353,7 @@ def main():
 
     caption = build_product_caption(product)
 
+    product["image"] = ensure_image_url(product["image"])
     media = upload_photo(product["image"])
     res = post_image(media, caption)
 
