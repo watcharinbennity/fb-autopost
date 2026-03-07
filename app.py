@@ -18,6 +18,7 @@ REELS_FILE="reels_ideas_100.json"
 
 
 def load_json(file):
+
     try:
         with open(file,encoding="utf-8") as f:
             return json.load(f)
@@ -26,11 +27,13 @@ def load_json(file):
 
 
 def save_json(file,data):
+
     with open(file,"w",encoding="utf-8") as f:
         json.dump(data,f,indent=2,ensure_ascii=False)
 
 
 def load_captions():
+
     try:
         with open(CAPTION_FILE,encoding="utf-8") as f:
             return f.read().splitlines()
@@ -69,6 +72,7 @@ def pick_product():
     product=random.choice(good)
 
     posted.append(product["link"])
+
     save_json(POSTED_FILE,posted)
 
     return product
@@ -77,11 +81,20 @@ def pick_product():
 def ai_caption(name):
 
     if not OPENAI:
+
         captions=load_captions()
+
         template=random.choice(captions)
+
         return template.replace("{name}",name)
 
-    prompt=f"เขียนโพสต์ขายสินค้า Facebook สำหรับ {name}"
+    prompt=f"""
+เขียนโพสต์ Facebook ขายสินค้า
+
+สินค้า: {name}
+
+โพสต์สั้น น่าสนใจ กระตุ้นให้คลิก
+"""
 
     r=requests.post(
         "https://api.openai.com/v1/responses",
@@ -98,8 +111,12 @@ def ai_caption(name):
     try:
         return r.json()["output"][0]["content"][0]["text"]
     except:
+
         captions=load_captions()
-        return random.choice(captions).replace("{name}",name)
+
+        template=random.choice(captions)
+
+        return template.replace("{name}",name)
 
 
 def viral_caption():
@@ -111,23 +128,23 @@ def viral_caption():
     return post["caption"]
 
 
-def reels_script():
+def engage_caption():
+
+    questions=[
+        "บ้านคุณใช้ปลั๊กไฟกี่ตัว ?",
+        "เคยใช้ไฟโซล่าหรือยัง ?",
+        "เครื่องมือช่างที่ใช้บ่อยคืออะไร ?",
+        "บ้านคุณใช้หลอดไฟ LED หรือยัง ?"
+    ]
+
+    return random.choice(questions)
+
+
+def reels_idea():
 
     reels=load_json(REELS_FILE)
 
     return random.choice(reels)
-
-
-def engage_caption():
-
-    questions=[
-    "บ้านคุณใช้ปลั๊กไฟกี่ตัว ?",
-    "เคยใช้ไฟโซล่าหรือยัง ?",
-    "เครื่องมือช่างที่ใช้บ่อยคืออะไร ?",
-    "บ้านคุณใช้หลอดไฟ LED หรือยัง ?"
-    ]
-
-    return random.choice(questions)
 
 
 def get_image(category):
@@ -182,6 +199,7 @@ def run():
 
     mode=random.choice(["product","viral","engage","reels"])
 
+
     if mode=="product":
 
         product=pick_product()
@@ -222,7 +240,7 @@ def run():
 
     if mode=="reels":
 
-        idea=reels_script()
+        idea=reels_idea()
 
         print("REELS IDEA:",idea)
 
@@ -230,4 +248,5 @@ def run():
 
 
 if __name__=="__main__":
+
     run()
