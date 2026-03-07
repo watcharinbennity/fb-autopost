@@ -1,4 +1,4 @@
-name: BEN V200 AUTO POST
+name: BEN V202 AUTO POST
 
 on:
   workflow_dispatch:
