@@ -47,10 +47,15 @@ def clean_link(url):
 
 def convert_affiliate_link(product_url):
     base = clean_link(product_url)
+    if not AFF_ID:
+        return base
     return f"{base}?affiliate_id={AFF_ID}"
 
 
 def read_csv():
+    if not CSV_URL:
+        raise ValueError("Missing SHOPEE_CSV_URL secret")
+
     r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
     r.raise_for_status()
 
@@ -84,7 +89,21 @@ def score_product(row):
     except Exception:
         sold = 0
 
+    try:
+        price = float(str(row.get("sale_price") or row.get("price") or 0).replace(",", ""))
+    except Exception:
+        price = 0.0
+
     score = rating * 40 + sold * 0.6
+
+    if 20 <= price <= 299:
+        score += 20
+    elif 300 <= price <= 699:
+        score += 8
+
+    if sold >= 100:
+        score += 10
+
     return score
 
 
@@ -125,14 +144,19 @@ def ai_caption(product):
         return None
 
     prompt = f"""
-เขียนแคปชั่นขายสินค้าให้เพจ BEN Home & Electrical
+เขียนแคปชั่นขายสินค้าให้เพจ BEN Home & Electrical ภาษาไทย
 
 สินค้า: {product['title']}
-ราคา: {product['price']}
+ราคา: {product['price']} บาท
 รีวิว: {product['rating']}
 ขายแล้ว: {product['sold']}
 
-ให้สั้น น่าเชื่อถือ มี emoji และ hashtag
+เงื่อนไข:
+- ไม่เกิน 8 บรรทัด
+- มี emoji พอดี
+- โทนน่าเชื่อถือ
+- ปิดท้าย hashtag 2-3 อัน
+- ยังไม่ต้องใส่ลิงก์
 """
 
     try:
@@ -239,8 +263,6 @@ def main():
         raise ValueError("Missing PAGE_ACCESS_TOKEN secret")
     if not CSV_URL:
         raise ValueError("Missing SHOPEE_CSV_URL secret")
-    if not AFF_ID:
-        raise ValueError("Missing SHOPEE_AFFILIATE_ID secret")
 
     state = load_state()
     rows = read_csv()
