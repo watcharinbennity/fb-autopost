@@ -1,36 +1,81 @@
-import random
+import os
+import requests
 
-def price_score(price):
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
-    if price <= 99:
-        return 25
+def ask_ai(prompt):
 
-    if price <= 299:
-        return 20
+    if not OPENAI_KEY:
+        return None
 
-    if price <= 699:
-        return 12
+    try:
 
-    return 5
+        r = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {OPENAI_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4.1-mini",
+                "input": prompt
+            },
+            timeout=30
+        )
 
+        data = r.json()
 
-def ai_score(product):
+        return data["output"][0]["content"][0]["text"]
 
-    score=0
-
-    score+=product["rating"]*40
-    score+=product["sold"]*0.5
-    score+=price_score(product["price_num"])
-
-    score+=random.random()*5
-
-    return score
+    except:
+        return None
 
 
 def choose_product(products):
 
-    ranked=sorted(products,key=ai_score,reverse=True)
+    if not products:
+        return None
 
-    top=ranked[:40]
+    text="\n".join([
+        f"{p['name']} | rating:{p['rating']} | sold:{p['sold']} | price:{p['price']}"
+        for p in products[:20]
+    ])
 
-    return random.choice(top)
+    prompt=f"""
+เลือกสินค้า 1 ตัวที่มีโอกาสขายดีที่สุดสำหรับเพจขายเครื่องมือช่าง
+
+{text}
+
+ตอบชื่อสินค้า
+"""
+
+    result=ask_ai(prompt)
+
+    if result:
+
+        for p in products:
+            if p["name"] in result:
+                return p
+
+    return products[0]
+
+
+def generate_caption(product):
+
+    prompt=f"""
+เขียนโพสต์ Facebook สำหรับขายสินค้า
+
+สินค้า: {product['name']}
+ราคา: {product['price']} บาท
+รีวิว: {product['rating']}
+ขายแล้ว: {product['sold']}
+
+เงื่อนไข
+
+- ภาษาไทย
+- ไม่เกิน 5 บรรทัด
+- มี emoji
+- แนวขายของ
+"""
+
+    return ask_ai(prompt)
