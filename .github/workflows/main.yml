@@ -3,13 +3,9 @@ name: FB Auto Post
 on:
   workflow_dispatch:
   schedule:
-    # เวลาไทย 09:00
     - cron: '0 2 * * *'
-    # เวลาไทย 12:00
     - cron: '0 5 * * *'
-    # เวลาไทย 18:30
     - cron: '30 11 * * *'
-    # เวลาไทย 21:00
     - cron: '0 14 * * *'
 
 permissions:
