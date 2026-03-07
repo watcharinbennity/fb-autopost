@@ -34,11 +34,16 @@ def save_json(file, data):
 
 def log_post(post_type, name):
     logs = load_json(LOG_FILE)
+
+    if not isinstance(logs, list):
+        logs = []
+
     logs.append({
         "type": post_type,
         "name": name,
         "time": str(datetime.now(TH_TZ))
     })
+
     save_json(LOG_FILE, logs)
 
 
@@ -46,7 +51,13 @@ def analyze_posts():
     logs = load_json(LOG_FILE)
     stats = {}
 
+    if not isinstance(logs, list):
+        return stats
+
     for item in logs:
+        if not isinstance(item, dict):
+            continue
+
         t = item.get("type", "unknown")
         stats[t] = stats.get(t, 0) + 1
 
@@ -54,7 +65,8 @@ def analyze_posts():
 
 
 def is_first_run():
-    posted = load_json(POSTED_FILE)
+    posted_raw = load_json(POSTED_FILE)
+    posted = normalize_posted_products(posted_raw)
     return len(posted) == 0
 
 
@@ -62,28 +74,62 @@ def get_mode_by_time():
     now = datetime.now(TH_TZ)
     minute = now.hour * 60 + now.minute
 
+    # 09:00 - 09:59
     if 9 * 60 <= minute < 10 * 60:
         return "viral"
 
+    # 12:00 - 12:59
     if 12 * 60 <= minute < 13 * 60:
         return "product"
 
+    # 18:30 - 19:29
     if 18 * 60 + 30 <= minute < 19 * 60 + 30:
         return "product"
 
+    # 21:00 - 21:59
     if 21 * 60 <= minute < 22 * 60:
         return "engage"
 
     return None
 
 
+def normalize_posted_products(raw):
+    cleaned = []
+
+    if not isinstance(raw, list):
+        return cleaned
+
+    for item in raw:
+        if isinstance(item, str):
+            value = item.strip()
+            if value:
+                cleaned.append(value)
+
+        elif isinstance(item, dict):
+            link = item.get("link")
+            if isinstance(link, str) and link.strip():
+                cleaned.append(link.strip())
+
+    # กันซ้ำโดยคงลำดับเดิม
+    return list(dict.fromkeys(cleaned))
+
+
 def pick_product():
     products = load_json(PRODUCT_FILE)
-    posted = set(load_json(POSTED_FILE))
+
+    if not isinstance(products, list):
+        products = []
+
+    posted_raw = load_json(POSTED_FILE)
+    posted_clean = normalize_posted_products(posted_raw)
+    posted = set(posted_clean)
 
     good = []
 
     for p in products:
+        if not isinstance(p, dict):
+            continue
+
         link = p.get("link")
         if not link:
             continue
@@ -91,8 +137,15 @@ def pick_product():
         if link in posted:
             continue
 
-        rating = float(p.get("rating", 0))
-        sold = int(p.get("sold", 0))
+        try:
+            rating = float(p.get("rating", 0))
+        except Exception:
+            rating = 0
+
+        try:
+            sold = int(p.get("sold", 0))
+        except Exception:
+            sold = 0
 
         if rating >= 4 and sold >= 10:
             good.append(p)
@@ -108,7 +161,8 @@ def pick_product():
         reverse=True
     )
 
-    product = random.choice(good[:20] if len(good) >= 20 else good)
+    pool = good[:20] if len(good) >= 20 else good
+    product = random.choice(pool)
 
     posted.add(product["link"])
     save_json(POSTED_FILE, list(posted))
@@ -202,6 +256,7 @@ def ensure_image_exists(path):
         os.path.join(ASSET_DIR, "safe_plug.jpg"),
         os.path.join(ASSET_DIR, "tools.jpg"),
         os.path.join(ASSET_DIR, "home_electrical_5.jpg"),
+        os.path.join(ASSET_DIR, "led_save_power.jpg"),
     ]
 
     for f in fallback:
@@ -223,7 +278,7 @@ def get_image(category):
         return ensure_image_exists(os.path.join(ASSET_DIR, "tools.jpg"))
 
     if category == "led":
-        return ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+        return ensure_image_exists(os.path.join(ASSET_DIR, "led_save_power.jpg"))
 
     return ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
 
