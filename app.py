@@ -8,16 +8,52 @@ PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
 AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
 STATE_FILE="state.json"
-TIMEOUT=30
 
 KEYWORDS=[
 "ไฟ","led","โคม","solar",
 "ปลั๊ก","สวิตช์","สายไฟ",
 "เครื่องมือ","ช่าง","ไขควง",
-"สว่าน","diy","hardware"
+"สว่าน","diy"
+]
+
+CAPTIONS=[
+
+"""⚡ ของมันต้องมีติดบ้าน
+
+{name}
+
+⭐ รีวิว {rating}
+🔥 ขายแล้ว {sold}
+💰 ราคา {price} บาท
+
+🛒 {link}
+""",
+
+"""🔧 เครื่องมือช่างขายดี
+
+{name}
+
+⭐ {rating}
+📦 {sold} คนซื้อแล้ว
+
+💰 {price} บาท
+
+👉 {link}
+""",
+
+"""🏠 อุปกรณ์ไฟฟ้าขายดี
+
+{name}
+
+⭐ รีวิว {rating}
+🔥 ขายแล้ว {sold}
+
+💰 ราคา {price}
+
+🛒 {link}
+"""
 ]
 
 def load_state():
@@ -25,13 +61,13 @@ def load_state():
     if not os.path.exists(STATE_FILE):
         return {"posted":[]}
 
-    with open(STATE_FILE,"r") as f:
+    with open(STATE_FILE) as f:
         return json.load(f)
 
-def save_state(s):
+def save_state(state):
 
     with open(STATE_FILE,"w") as f:
-        json.dump(s,f)
+        json.dump(state,f)
 
 def clean_link(url):
 
@@ -44,22 +80,21 @@ def aff_link(url):
 
     return f"{clean_link(url)}?affiliate_id={AFF_ID}"
 
-def category_ok(title):
+def match_category(title):
 
-    t=title.lower()
+    title=title.lower()
 
     for k in KEYWORDS:
-        if k in t:
+        if k in title:
             return True
 
     return False
 
 def read_csv():
 
-    r=requests.get(CSV_URL,timeout=TIMEOUT,stream=True)
-    r.raise_for_status()
+    r=requests.get(CSV_URL)
 
-    lines=(l.decode("utf8","ignore") for l in r.iter_lines() if l)
+    lines=r.text.splitlines()
 
     reader=csv.DictReader(lines)
 
@@ -95,22 +130,23 @@ def score(row):
     if price<20 or price>300:
         return 0
 
-    return rating*50 + sold*0.5
+    return rating*40 + sold*0.5
 
-def choose(rows,state):
+def choose_product(rows,state):
 
     pool=[]
 
     for r in rows:
 
-        title=(r.get("title") or "")
+        title=r.get("title") or ""
 
-        if not category_ok(title):
+        if not match_category(title):
             continue
 
         link=clean_link(r.get("product_link"))
+        image=r.get("image_link")
 
-        if not link:
+        if not link or not image:
             continue
 
         if link in state["posted"]:
@@ -126,12 +162,12 @@ def choose(rows,state):
     if not pool:
         return None
 
-    pool.sort(key=lambda x:x[0],reverse=True)
+    pool.sort(reverse=True)
 
     row=random.choice(pool[:40])[1]
 
     return {
-        "title":row.get("title"),
+        "name":row.get("title"),
         "link":clean_link(row.get("product_link")),
         "image":row.get("image_link"),
         "price":row.get("sale_price") or row.get("price"),
@@ -139,92 +175,35 @@ def choose(rows,state):
         "sold":row.get("item_sold")
     }
 
-def ai_caption(p):
+def build_caption(p):
 
-    if not OPENAI_KEY:
-        return None
+    temp=random.choice(CAPTIONS)
 
-    prompt=f"""
-เขียนโพสต์ขายสินค้า
+    return temp.format(
+        name=p["name"],
+        rating=p["rating"],
+        sold=p["sold"],
+        price=p["price"],
+        link=aff_link(p["link"])
+    )
 
-สินค้า: {p['title']}
-ราคา: {p['price']} บาท
-รีวิว: {p['rating']}
-ขายแล้ว: {p['sold']}
+def upload_photo(url):
 
-ทำให้ดูน่าซื้อ
-ใช้ emoji
-ไม่เกิน 6 บรรทัด
-"""
+    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    try:
-
-        r=requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-        "Authorization":f"Bearer {OPENAI_KEY}",
-        "Content-Type":"application/json"
-        },
-        json={
-        "model":"gpt-4.1-mini",
-        "input":prompt
-        },
-        timeout=TIMEOUT
-        )
-
-        data=r.json()
-
-        return data["output"][0]["content"][0]["text"]
-
-    except:
-        return None
-
-def fallback(p,link):
-
-    return f"""
-⚡ แนะนำจาก BEN Home & Electrical
-
-{p['title']}
-
-⭐ รีวิว {p['rating']}
-🔥 ขายแล้ว {p['sold']}
-💰 ราคา {p['price']} บาท
-
-🛒 สั่งซื้อ
-{link}
-
-#BENHomeElectrical #ShopeeAffiliate
-"""
-
-def ensure_link(text,link):
-
-    if link in text:
-        return text
-
-    return f"{text}\n\n🛒 สั่งซื้อ\n{link}"
-
-def upload_photo(image):
-
-    url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
-
-    r=requests.post(url,data={
-        "url":image,
+    r=requests.post(endpoint,data={
+        "url":url,
         "published":"false",
         "access_token":TOKEN
     })
 
-    data=r.json()
+    return r.json()["id"]
 
-    if "id" not in data:
-        raise RuntimeError(data)
+def post_image(media,text):
 
-    return data["id"]
+    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
-def create_post(media,text):
-
-    url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-
-    r=requests.post(url,data={
+    r=requests.post(endpoint,data={
         "message":text,
         "attached_media[0]":json.dumps({"media_fbid":media}),
         "access_token":TOKEN
@@ -232,11 +211,11 @@ def create_post(media,text):
 
     return r.json()
 
-def comment(post_id,link):
+def comment_link(post_id,link):
 
-    url=f"https://graph.facebook.com/v25.0/{post_id}/comments"
+    endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
-    requests.post(url,data={
+    requests.post(endpoint,data={
         "message":f"🛒 ลิงก์สั่งซื้อ\n{link}",
         "access_token":TOKEN
     })
@@ -247,30 +226,23 @@ def main():
 
     rows=read_csv()
 
-    product=choose(rows,state)
+    p=choose_product(rows,state)
 
-    if not product:
+    if not p:
         print("NO PRODUCT")
         return
 
-    link=aff_link(product["link"])
+    caption=build_caption(p)
 
-    caption=ai_caption(product)
+    media=upload_photo(p["image"])
 
-    if not caption:
-        caption=fallback(product,link)
-
-    caption=ensure_link(caption,link)
-
-    media=upload_photo(product["image"])
-
-    res=create_post(media,caption)
+    res=post_image(media,caption)
 
     if "id" in res:
 
-        comment(res["id"],link)
+        comment_link(res["id"],aff_link(p["link"]))
 
-        state["posted"].append(product["link"])
+        state["posted"].append(p["link"])
 
         save_state(state)
 
