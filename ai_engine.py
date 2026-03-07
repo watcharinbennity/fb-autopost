@@ -32,7 +32,7 @@ def ask_ai(prompt):
         return None
 
 
-def ai_caption(product):
+def product_caption(product):
 
     prompt=f"""
 เขียนโพสต์ Facebook ขายสินค้า
@@ -43,6 +43,34 @@ def ai_caption(product):
 ขายแล้ว {product['sold']}
 
 สั้น กระตุ้นซื้อ
+"""
+
+    return ask_ai(prompt)
+
+
+def viral_text(topic):
+
+    prompt=f"""
+เขียนโพสต์ Facebook แบบไวรัล
+
+หัวข้อ {topic}
+
+สั้น กระตุ้นคอมเมนต์
+"""
+
+    return ask_ai(prompt)
+
+
+def reels_script(product):
+
+    prompt=f"""
+เขียน script reels 15 วินาที
+
+สินค้า {product['name']}
+
+Hook
+โชว์สินค้า
+Call to action
 """
 
     return ask_ai(prompt)
