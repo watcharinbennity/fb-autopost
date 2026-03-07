@@ -1,26 +1,23 @@
 import json
-from datetime import datetime
+
+LOG_FILE = "post_log.json"
 
 
-def log_post(mode: str, topic: str = "", image: str = "", product: dict | None = None, post_id: str | None = None) -> None:
-    row = {
-        "time": str(datetime.now()),
-        "mode": mode,
-        "topic": topic,
-        "image": image,
-        "post_id": post_id or "",
-        "product": product or {},
-    }
-
+def load_logs():
     try:
-        with open("posted_log.json", "r", encoding="utf-8") as f:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if not isinstance(data, list):
-                data = []
+            return data if isinstance(data, list) else []
     except Exception:
-        data = []
+        return []
 
-    data.append(row)
 
-    with open("posted_log.json", "w", encoding="utf-8") as f:
-        json.dump(data[-1000:], f, ensure_ascii=False, indent=2)
+def analyze_posts():
+    logs = load_logs()
+    stats = {}
+
+    for log in logs:
+        t = log.get("type", "unknown")
+        stats[t] = stats.get(t, 0) + 1
+
+    return stats
