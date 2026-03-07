@@ -1,25 +1,25 @@
 import os
-import csv
 import json
 import random
 import requests
+from datetime import datetime
+from openai import OpenAI
 
-PAGE_ID = os.getenv("PAGE_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PAGE_ID = os.environ["PAGE_ID"]
+PAGE_ACCESS_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
+AFFILIATE_ID = os.environ["SHOPEE_AFFILIATE_ID"]
 
-AFF_ID = "15328100363"
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 STATE_FILE = "state.json"
 
 
 def load_state():
-    if not os.path.exists(STATE_FILE):
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except:
         return {"posted": []}
-
-    with open(STATE_FILE) as f:
-        return json.load(f)
 
 
 def save_state(state):
@@ -27,150 +27,52 @@ def save_state(state):
         json.dump(state, f)
 
 
-def clean_link(url):
-
-    if not url:
-        return ""
-
-    url = url.strip()
-
-    return url.split("?")[0]
+def load_products():
+    with open("products.json") as f:
+        return json.load(f)
 
 
-def convert_affiliate_link(url):
+def build_affiliate_link(product):
+    product_id = product["product_id"]
+    shop_id = product["shop_id"]
 
-    base = clean_link(url)
-
-    return f"{base}?affiliate_id={AFF_ID}"
-
-
-def read_csv():
-
-    r = requests.get(CSV_URL, timeout=20, stream=True)
-
-    lines = (
-        line.decode("utf-8", errors="ignore")
-        for line in r.iter_lines()
-        if line
-    )
-
-    reader = csv.DictReader(lines)
-
-    rows = []
-
-    for i, row in enumerate(reader):
-
-        rows.append(row)
-
-        if i > 4000:
-            break
-
-    random.shuffle(rows)
-
-    return rows
+    return f"https://shopee.co.th/product/{shop_id}/{product_id}?affiliate_id={AFFILIATE_ID}"
 
 
-def score_product(row):
-
-    rating = float(row.get("item_rating", 0) or 0)
-    sold = int(float(row.get("item_sold", 0) or 0))
-    price = float(row.get("sale_price", 0) or 0)
-
-    score = 0
-
-    score += rating * 40
-    score += sold * 0.6
-
-    if 20 < price < 300:
-        score += 20
-
-    if sold > 100:
-        score += 10
-
-    return score
-
-
-def choose_product(rows, state):
-
-    pool = []
-
-    for row in rows:
-
-        link = clean_link(row.get("product_link"))
-
-        if not link:
-            continue
-
-        if link in state["posted"]:
-            continue
-
-        image = row.get("image_link")
-
-        if not image:
-            continue
-
-        score = score_product(row)
-
-        pool.append((score, row))
-
-    if not pool:
-        return None
-
-    pool.sort(reverse=True)
-
-    best = pool[:30]
-
-    row = random.choice(best)[1]
-
-    return {
-        "title": row.get("title"),
-        "link": clean_link(row.get("product_link")),
-        "image": row.get("image_link"),
-        "price": row.get("sale_price"),
-        "rating": row.get("item_rating"),
-        "sold": row.get("item_sold")
-    }
-
-
-def ai_caption(product):
-
-    if not OPENAI_API_KEY:
-        return None
-
-    prompt = f"""
-เขียนแคปชั่นขายของให้เพจ BEN Home & Electrical
-
-สินค้า: {product['title']}
-ราคา: {product['price']}
-รีวิว: {product['rating']}
-ขายแล้ว: {product['sold']}
-
-ให้กระชับ มี emoji และ hashtag
-"""
-
+def ai_caption(product, link):
     try:
 
-        r = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "gpt-4.1-mini",
-                "input": prompt
-            }
+        prompt = f"""
+เขียนแคปชั่นขายของ Facebook ภาษาไทย
+
+สินค้า: {product['title']}
+ราคา: {product['price']} บาท
+ขายแล้ว: {product['sold']}
+รีวิว: {product['rating']}
+
+ใส่ emoji และ hashtag
+"""
+
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        data = r.json()
+        text = r.choices[0].message.content
 
-        return data["output"][0]["content"][0]["text"]
+        return f"""{text}
+
+🛒 สั่งซื้อ
+{link}
+
+#BENHomeElectrical #ShopeeAffiliate
+"""
 
     except:
         return None
 
 
-def fallback_caption(product):
+def fallback_caption(product, link):
 
     return f"""
 ⚡ แนะนำจาก BEN Home & Electrical
@@ -181,96 +83,88 @@ def fallback_caption(product):
 🔥 ขายแล้ว {product['sold']}
 💰 ราคา {product['price']} บาท
 
+🛒 สั่งซื้อ
+{link}
+
 #BENHomeElectrical #ShopeeAffiliate
 """
 
 
-def upload_photo(image):
+def post_photo(image_url, caption):
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    r = requests.post(
-        url,
-        data={
-            "url": image,
-            "published": "false",
-            "access_token": TOKEN
-        }
-    ).json()
+    data = {
+        "url": image_url,
+        "caption": caption,
+        "access_token": PAGE_ACCESS_TOKEN,
+    }
 
-    return r["id"]
+    r = requests.post(url, data=data)
 
-
-def create_post(media, text):
-
-    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-
-    r = requests.post(
-        url,
-        data={
-            "message": text,
-            "attached_media[0]": json.dumps({"media_fbid": media}),
-            "access_token": TOKEN
-        }
-    ).json()
-
-    return r
+    return r.json()
 
 
 def comment_link(post_id, link):
 
     url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
-    requests.post(
-        url,
-        data={
-            "message": f"🛒 สั่งซื้อ\n{link}",
-            "access_token": TOKEN
-        }
-    )
+    msg = f"""
+🛒 ลิงก์สั่งซื้อ
+{link}
+"""
+
+    data = {
+        "message": msg,
+        "access_token": PAGE_ACCESS_TOKEN,
+    }
+
+    requests.post(url, data=data)
+
+
+def pick_product(products, posted):
+
+    items = [p for p in products if p["product_id"] not in posted]
+
+    if not items:
+        return None
+
+    return random.choice(items)
 
 
 def main():
 
     state = load_state()
+    products = load_products()
 
-    rows = read_csv()
-
-    product = choose_product(rows, state)
+    product = pick_product(products, state["posted"])
 
     if not product:
+        print("no product")
+        return
 
-        r = rows[0]
+    aff_link = build_affiliate_link(product)
 
-        product = {
-            "title": r.get("title"),
-            "link": clean_link(r.get("product_link")),
-            "image": r.get("image_link"),
-            "price": r.get("sale_price"),
-            "rating": r.get("item_rating"),
-            "sold": r.get("item_sold")
-        }
-
-    aff_link = convert_affiliate_link(product["link"])
-
-    caption = ai_caption(product)
+    caption = ai_caption(product, aff_link)
 
     if not caption:
-        caption = fallback_caption(product)
+        caption = fallback_caption(product, aff_link)
 
-    media = upload_photo(product["image"])
+    res = post_photo(product["image"], caption)
 
-    res = create_post(media, caption)
+    if "post_id" not in res:
+        print(res)
+        return
 
-    if "id" in res:
+    post_id = res["post_id"]
 
-        comment_link(res["id"], aff_link)
+    comment_link(post_id, aff_link)
 
-        state["posted"].append(product["link"])
+    state["posted"].append(product["product_id"])
 
-        save_state(state)
+    save_state(state)
 
-        print("POST SUCCESS")
+    print("POSTED:", product["title"])
 
 
 if __name__ == "__main__":
