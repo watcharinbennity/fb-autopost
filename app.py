@@ -3,12 +3,12 @@ import csv
 import json
 import random
 import urllib.parse
-
 import requests
 
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 CSV_URL = os.getenv("SHOPEE_CSV_URL")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 AFF_ID = "15328100363"
 
@@ -26,7 +26,7 @@ KEYWORDS = [
     "ไฟโซล่า", "ไฟประดับ", "หลอดไฟ", "รางปลั๊ก", "เต้ารับ"
 ]
 
-CAPTIONS = [
+FALLBACK_CAPTIONS = [
     """⚡ แนะนำจาก BEN Home & Electrical
 
 {name}
@@ -125,7 +125,8 @@ def append_posted_product(p):
         "image_link": p["image"],
         "rating": p["rating"],
         "sold": p["sold"],
-        "price": p["price"]
+        "price": p["price"],
+        "score": p["score"]
     })
 
     data = data[-1000:]
@@ -137,13 +138,8 @@ def clean_product_link(product_url):
     if not url:
         return ""
 
-    # ตัด query / fragment ออกก่อน
     url = url.split("#")[0]
     url = url.split("?")[0]
-
-    # รองรับลิงก์แบบ product_short_link ถ้ามี
-    url = url.replace("product_short link", "").strip()
-
     return url
 
 
@@ -282,8 +278,51 @@ def choose_product(pool):
     return random.choice(top)
 
 
-def caption(p, aff_link):
-    c = random.choice(CAPTIONS)
+def ai_caption(product, aff_link):
+    if not OPENAI_API_KEY:
+        return None
+
+    prompt = f"""
+เขียนแคปชั่นขายของภาษาไทยสำหรับเพจ BEN Home & Electrical
+
+สินค้า: {product['title']}
+รีวิว: {product['rating']}
+ขายแล้ว: {product['sold']}
+ราคา: {product['price']} บาท
+ลิงก์: {aff_link}
+
+กติกา:
+- ไม่เกิน 8 บรรทัด
+- โทนขายเก่ง แต่น่าเชื่อถือ
+- ใส่ emoji พอดี
+- ปิดท้าย hashtag 2-3 อัน
+- ห้ามเวอร์เกินจริง
+"""
+
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-5.4",
+                "input": prompt
+            },
+            timeout=30
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        return data["output"][0]["content"][0]["text"].strip()
+    except Exception as e:
+        log(f"ai caption failed: {e}")
+        return None
+
+
+def fallback_caption(p, aff_link):
+    c = random.choice(FALLBACK_CAPTIONS)
     return c.format(
         name=p["title"],
         rating=p["rating"],
@@ -291,6 +330,13 @@ def caption(p, aff_link):
         price=p["price"],
         link=aff_link
     )
+
+
+def make_caption(p, aff_link):
+    ai_text = ai_caption(p, aff_link)
+    if ai_text:
+        return ai_text
+    return fallback_caption(p, aff_link)
 
 
 def upload_photo(image_url):
@@ -361,7 +407,7 @@ def main():
         return
 
     aff_link = convert_affiliate_link(p["link"])
-    text = caption(p, aff_link)
+    text = make_caption(p, aff_link)
 
     log("upload image")
     media = upload_photo(p["image"])
