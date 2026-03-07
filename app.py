@@ -87,7 +87,6 @@ def normalize_posted_products(raw):
             value = item.strip()
             if value:
                 cleaned.append(value)
-
         elif isinstance(item, dict):
             link = item.get("link")
             if isinstance(link, str) and link.strip():
