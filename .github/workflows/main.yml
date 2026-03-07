@@ -10,11 +10,10 @@ permissions:
 
 jobs:
   autopost:
-
     runs-on: ubuntu-latest
+    timeout-minutes: 8
 
     steps:
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -28,7 +27,7 @@ jobs:
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-        run: python app.py
+        run: python -u app.py
 
       - name: save state
         run: |
