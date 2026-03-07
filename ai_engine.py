@@ -36,46 +36,84 @@ def choose_product(products: list[dict]):
 
     shortlist = products[:10]
     text = "\n".join(
-        f"{p['name']} | rating:{p['rating']} | sold:{p['sold']} | price:{p['price']}"
-        for p in shortlist
+        f"{i+1}. {p['name']} | rating:{p['rating']} | sold:{p['sold']} | price:{p['price']} | score:{p['final_score']}"
+        for i, p in enumerate(shortlist)
     )
 
     prompt = f"""
 เลือกสินค้า 1 ตัวที่เหมาะกับเพจ BEN Home & Electrical มากที่สุด
 เน้นของใช้ในบ้าน อุปกรณ์ไฟฟ้า เครื่องมือช่าง DIY
-ดูจากความตรงหมวด ความน่าขาย และความน่าเชื่อถือ
+ดูจากความตรงหมวด ความน่าขาย และความคุ้มราคา
 
 รายการ:
 {text}
 
-ตอบชื่อสินค้าอย่างเดียว
+ตอบเป็นเลขข้อเดียว เช่น 1 หรือ 2 หรือ 3
 """.strip()
 
     result = ask_ai(prompt)
 
     if result:
-        for p in shortlist:
-            if p["name"] and p["name"] in result:
-                return p
+        for i in range(len(shortlist)):
+            if str(i + 1) in result:
+                return shortlist[i]
 
     return shortlist[0]
 
 
-def generate_caption(product: dict):
+def generate_caption_variants(product: dict):
     prompt = f"""
-เขียนแคปชั่น Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
-
+เขียนแคปชั่นขายสินค้า Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 สินค้า: {product['name']}
 ราคา: {product['price']} บาท
 รีวิว: {product['rating']}
 ขายแล้ว: {product['sold']}
 
-กติกา:
-- ไม่เกิน 5 บรรทัด
-- มี emoji พอดี
-- โทนน่าเชื่อถือ
-- ชวนกดซื้อ
-- ยังไม่ต้องใส่ลิงก์
+เขียนมา 3 แบบ
+แต่ละแบบไม่เกิน 5 บรรทัด
+มี emoji พอดี
+ชวนกดซื้อ
+ยังไม่ต้องใส่ลิงก์
+
+คั่นแต่ละแบบด้วย ----
 """.strip()
 
-    return ask_ai(prompt)
+    result = ask_ai(prompt)
+    if not result:
+        return None
+
+    parts = [p.strip() for p in result.split("----") if p.strip()]
+    return parts[:3] if parts else None
+
+
+def choose_best_caption(product: dict, captions: list[str]):
+    if not captions:
+        return None
+    if len(captions) == 1:
+        return captions[0]
+
+    text = "\n\n".join([f"{i+1}. {c}" for i, c in enumerate(captions)])
+
+    prompt = f"""
+เลือกแคปชั่นที่น่ากดที่สุดสำหรับโพสต์ Facebook ขายสินค้า
+สินค้า: {product['name']}
+
+ตัวเลือก:
+{text}
+
+ตอบเป็นเลขข้อเดียว เช่น 1 หรือ 2 หรือ 3
+""".strip()
+
+    result = ask_ai(prompt)
+
+    if result:
+        for i in range(len(captions)):
+            if str(i + 1) in result:
+                return captions[i]
+
+    return captions[0]
+
+
+def generate_best_caption(product: dict):
+    captions = generate_caption_variants(product)
+    return choose_best_caption(product, captions)
