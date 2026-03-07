@@ -1,24 +1,44 @@
-ALLOWED = [
-"ปลั๊ก","สายไฟ","หลอด","โคม","สวิตช์",
-"ไขควง","คีม","สว่าน","มัลติมิเตอร์",
-"ups","อินเวอร์เตอร์","โซล่า","แบตเตอรี่"
-]
+def filter_products(rows,state):
 
-BLOCK = [
-"เสื้อ","รองเท้า","กระเป๋า","ลิป","ครีม",
-"อาหาร","ขนม","ของเล่น"
-]
+    products=[]
 
-def allow_product(name):
+    for r in rows:
 
-    name=name.lower()
+        try:
 
-    for b in BLOCK:
-        if b in name:
-            return False
+            rating=float(r.get("item_rating") or 0)
+            sold=int(float(r.get("item_sold") or 0))
+            price=float(r.get("sale_price") or r.get("price") or 0)
 
-    for a in ALLOWED:
-        if a in name:
-            return True
+        except:
+            continue
 
-    return False
+        if rating < 4.5:
+            continue
+
+        if sold < 100:
+            continue
+
+        if price < 20 or price > 300:
+            continue
+
+        link=r.get("product_link")
+
+        if link in state["posted"]:
+            continue
+
+        image=r.get("image_link")
+
+        if not image:
+            continue
+
+        products.append({
+            "name":r.get("title"),
+            "link":link,
+            "image":image,
+            "price":price,
+            "rating":rating,
+            "sold":sold
+        })
+
+    return products
