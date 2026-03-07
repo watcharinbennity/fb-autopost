@@ -1,4 +1,4 @@
-name: BEN AUTO POST CSV AI
+name: BEN AUTO POST
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ permissions:
 jobs:
   autopost:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +19,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: install
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
       - name: run bot
         env:
@@ -35,6 +33,6 @@ jobs:
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
-          git add state.json posted_products.json
+          git add state.json
           git commit -m "update state" || echo "no change"
           git push
