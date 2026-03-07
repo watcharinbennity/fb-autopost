@@ -4,7 +4,7 @@ import json
 import random
 import requests
 
-from ai_engine import ai_caption
+from ai_engine import product_caption,viral_text
 from product_filter import score_product
 from viral_engine import viral_post
 
@@ -65,11 +65,9 @@ def choose_product(rows,state):
         image=r.get("image_link")
 
         if not name or not link or not image:
-
             continue
 
         if link in posted:
-
             continue
 
         rating=float(r.get("item_rating") or 0)
@@ -142,13 +140,29 @@ def main():
 
     state=load_state()
 
-    mode=random.randint(1,4)
+    mode=random.randint(1,3)
 
     if mode==1:
 
-        text=viral_post()
+        topic,image=viral_post()
 
-        media=upload_photo("https://i.imgur.com/8Km9tLL.jpg")
+        caption=viral_text(topic)
+
+        media=upload_photo(image)
+
+        post_image(media,caption)
+
+        return
+
+    if mode==2:
+
+        text="""
+💬 คุณใช้เครื่องมือช่างอะไรบ่อยที่สุด ?
+
+คอมเมนต์หน่อย
+"""
+
+        media=upload_photo("https://i.imgur.com/9XqvF2C.jpg")
 
         post_image(media,text)
 
@@ -159,10 +173,9 @@ def main():
     product=choose_product(rows,state)
 
     if not product:
-
         return
 
-    caption=ai_caption(product)
+    caption=product_caption(product)
 
     link=aff_link(product["link"])
 
