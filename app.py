@@ -10,16 +10,14 @@ CSV_URL = os.getenv("SHOPEE_CSV_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 AFF_ID = "15328100363"
+
 STATE_FILE = "state.json"
-
-
-def log(x):
-    print(x, flush=True)
 
 
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {"posted": []}
+
     with open(STATE_FILE) as f:
         return json.load(f)
 
@@ -30,15 +28,18 @@ def save_state(state):
 
 
 def clean_link(url):
+
     if not url:
         return ""
+
     url = url.strip()
+
     return url.split("?")[0]
 
 
-def convert_affiliate_link(product_url):
+def convert_affiliate_link(url):
 
-    base = clean_link(product_url)
+    base = clean_link(url)
 
     return f"{base}?affiliate_id={AFF_ID}"
 
@@ -61,17 +62,37 @@ def read_csv():
 
         rows.append(row)
 
-        if i > 2000:
+        if i > 4000:
             break
 
     random.shuffle(rows)
 
-    log(f"rows {len(rows)}")
-
     return rows
 
 
+def score_product(row):
+
+    rating = float(row.get("item_rating", 0) or 0)
+    sold = int(float(row.get("item_sold", 0) or 0))
+    price = float(row.get("sale_price", 0) or 0)
+
+    score = 0
+
+    score += rating * 40
+    score += sold * 0.6
+
+    if 20 < price < 300:
+        score += 20
+
+    if sold > 100:
+        score += 10
+
+    return score
+
+
 def choose_product(rows, state):
+
+    pool = []
 
     for row in rows:
 
@@ -88,32 +109,43 @@ def choose_product(rows, state):
         if not image:
             continue
 
-        return {
-            "title": row.get("title"),
-            "link": link,
-            "image": image,
-            "price": row.get("sale_price"),
-            "rating": row.get("item_rating"),
-            "sold": row.get("item_sold")
-        }
+        score = score_product(row)
 
-    return None
+        pool.append((score, row))
+
+    if not pool:
+        return None
+
+    pool.sort(reverse=True)
+
+    best = pool[:30]
+
+    row = random.choice(best)[1]
+
+    return {
+        "title": row.get("title"),
+        "link": clean_link(row.get("product_link")),
+        "image": row.get("image_link"),
+        "price": row.get("sale_price"),
+        "rating": row.get("item_rating"),
+        "sold": row.get("item_sold")
+    }
 
 
-def ai_caption(product, link):
+def ai_caption(product):
 
     if not OPENAI_API_KEY:
         return None
 
     prompt = f"""
-เขียนแคปชั่นขายสินค้าให้เพจ BEN Home & Electrical
+เขียนแคปชั่นขายของให้เพจ BEN Home & Electrical
 
 สินค้า: {product['title']}
 ราคา: {product['price']}
 รีวิว: {product['rating']}
 ขายแล้ว: {product['sold']}
 
-ให้สั้น น่าเชื่อถือ มี emoji และ hashtag
+ให้กระชับ มี emoji และ hashtag
 """
 
     try:
@@ -192,7 +224,7 @@ def comment_link(post_id, link):
     requests.post(
         url,
         data={
-            "message": f"🛒 ลิงก์สั่งซื้อ\n{link}",
+            "message": f"🛒 สั่งซื้อ\n{link}",
             "access_token": TOKEN
         }
     )
@@ -208,8 +240,6 @@ def main():
 
     if not product:
 
-        log("fallback product")
-
         r = rows[0]
 
         product = {
@@ -223,7 +253,7 @@ def main():
 
     aff_link = convert_affiliate_link(product["link"])
 
-    caption = ai_caption(product, aff_link)
+    caption = ai_caption(product)
 
     if not caption:
         caption = fallback_caption(product)
@@ -231,8 +261,6 @@ def main():
     media = upload_photo(product["image"])
 
     res = create_post(media, caption)
-
-    log(res)
 
     if "id" in res:
 
@@ -242,7 +270,7 @@ def main():
 
         save_state(state)
 
-        log("POST SUCCESS")
+        print("POST SUCCESS")
 
 
 if __name__ == "__main__":
