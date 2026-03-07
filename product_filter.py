@@ -2,7 +2,8 @@ KEYWORDS = [
     "ไฟ", "led", "โคม", "solar",
     "ปลั๊ก", "สวิตช์", "สายไฟ",
     "เครื่องมือ", "ช่าง", "ไขควง",
-    "สว่าน", "diy", "hardware"
+    "สว่าน", "diy", "hardware",
+    "พัดลม", "ปั๊ม", "โฮม", "home"
 ]
 
 
@@ -34,11 +35,12 @@ def filter_products(rows, state):
             sold = int(float(r.get("item_sold") or 0))
             price = float(r.get("sale_price") or r.get("price") or 0)
 
-            if rating < 4.5:
+            # ผ่อนเงื่อนไขลง
+            if rating < 4.0:
                 continue
-            if sold < 100:
+            if sold < 10:
                 continue
-            if price < 20 or price > 300:
+            if price < 10 or price > 500:
                 continue
 
             products.append({
