@@ -1,362 +1,533 @@
 import json
 import random
 import os
+import csv
+import io
 import requests
 from datetime import datetime, timedelta, timezone
 
-from shopee_scraper import update_products
-
 PAGE_ID = os.getenv("PAGE_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+OPENAI = os.getenv("OPENAI_API_KEY")
+CSV_URL = os.getenv("SHOPEE_CSV_URL")
+
+ASSET_DIR = "assets"
 
 PRODUCT_FILE = "products.json"
 POSTED_FILE = "posted_products.json"
 LOG_FILE = "post_log.json"
-
-ASSET_DIR = "assets"
+REELS_SCRIPT_FILE = "reels_script.txt"
 
 TH_TZ = timezone(timedelta(hours=7))
 
 
-# ---------------- JSON ----------------
+# ---------- JSON ----------
 
-def load_json(file):
+def load_json(path, default=None):
+    if default is None:
+        default = []
     try:
-        with open(file,"r",encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
-        return []
+    except Exception:
+        return default
 
 
-def save_json(file,data):
-    with open(file,"w",encoding="utf-8") as f:
-        json.dump(data,f,indent=2,ensure_ascii=False)
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ---------------- LOG ----------------
+# ---------- LOG ----------
 
-def log_post(ptype,name):
+def log_post(post_type, name, extra=None):
+    logs = load_json(LOG_FILE, [])
+    if not isinstance(logs, list):
+        logs = []
 
-    logs = load_json(LOG_FILE)
+    row = {
+        "type": post_type,
+        "name": name,
+        "time": str(datetime.now(TH_TZ))
+    }
 
-    if not isinstance(logs,list):
-        logs=[]
+    if isinstance(extra, dict):
+        row.update(extra)
 
-    logs.append({
-        "type":ptype,
-        "name":name,
-        "time":str(datetime.now(TH_TZ))
-    })
-
-    save_json(LOG_FILE,logs)
+    logs.append(row)
+    save_json(LOG_FILE, logs)
 
 
 def analyze_posts():
+    logs = load_json(LOG_FILE, [])
+    stats = {}
 
-    logs=load_json(LOG_FILE)
+    if not isinstance(logs, list):
+        return stats
 
-    stats={}
-
-    for l in logs:
-
-        if not isinstance(l,dict):
+    for item in logs:
+        if not isinstance(item, dict):
             continue
 
-        t=l.get("type","unknown")
-
-        stats[t]=stats.get(t,0)+1
+        t = item.get("type", "unknown")
+        stats[t] = stats.get(t, 0) + 1
 
     return stats
 
 
-# ---------------- SCHEDULE ----------------
+# ---------- TIME ----------
 
-def get_mode():
+def is_first_run():
+    posted_raw = load_json(POSTED_FILE, [])
+    posted = normalize_posted_products(posted_raw)
+    return len(posted) == 0
 
-    now=datetime.now(TH_TZ)
 
-    m=now.hour*60+now.minute
+def get_mode_by_time():
+    now = datetime.now(TH_TZ)
+    minute = now.hour * 60 + now.minute
 
-    if 9*60 <= m < 10*60:
+    # 09:00 - 09:59
+    if 9 * 60 <= minute < 10 * 60:
         return "viral"
 
-    if 12*60 <= m < 13*60:
+    # 12:00 - 12:59
+    if 12 * 60 <= minute < 13 * 60:
         return "product"
 
-    if 18*60+30 <= m < 19*60+30:
+    # 18:30 - 19:29
+    if 18 * 60 + 30 <= minute < 19 * 60 + 30:
         return "product"
 
-    if 21*60 <= m < 22*60:
+    # 21:00 - 21:59
+    if 21 * 60 <= minute < 22 * 60:
         return "engage"
 
     return None
 
 
-# ---------------- IMAGE ----------------
+# ---------- CSV / PRODUCT ----------
 
-def image(path):
+def normalize_posted_products(raw):
+    cleaned = []
 
-    full=os.path.join(ASSET_DIR,path)
+    if not isinstance(raw, list):
+        return cleaned
 
-    if os.path.exists(full):
-        return full
+    for item in raw:
+        if isinstance(item, str):
+            value = item.strip()
+            if value:
+                cleaned.append(value)
 
-    fallback=[
-        "solar.jpg",
-        "safe_plug.jpg",
-        "tools.jpg",
-        "led_save_power.jpg",
-        "home_electrical_5.jpg"
-    ]
+        elif isinstance(item, dict):
+            link = item.get("link")
+            if isinstance(link, str) and link.strip():
+                cleaned.append(link.strip())
 
-    for f in fallback:
-
-        p=os.path.join(ASSET_DIR,f)
-
-        if os.path.exists(p):
-            return p
-
-    raise Exception("NO IMAGE")
+    return list(dict.fromkeys(cleaned))
 
 
-def image_by_category(cat):
+def detect_category(name, category=""):
+    text = f"{name} {category}".lower()
 
-    if cat=="solar":
-        return image("solar.jpg")
+    if any(k in text for k in ["โซล่า", "solar", "sola"]):
+        return "solar"
 
-    if cat=="plug":
-        return image("safe_plug.jpg")
+    if any(k in text for k in ["ปลั๊ก", "plug", "usb", "power strip", "ปลั๊กไฟ"]):
+        return "plug"
 
-    if cat=="tools":
-        return image("tools.jpg")
+    if any(k in text for k in ["สว่าน", "ไขควง", "คีม", "ประแจ", "tools", "tool", "เครื่องมือ", "ช่าง"]):
+        return "tools"
 
-    if cat=="led":
-        return image("led_save_power.jpg")
+    if any(k in text for k in ["led", "หลอดไฟ", "lamp", "light bulb", "โคมไฟ"]):
+        return "led"
 
-    return image("home_electrical_5.jpg")
-
-
-# ---------------- CAPTION ----------------
-
-def product_caption(name):
-
-    captions=[
-
-        f"⚡ {name}\n\nของดีที่ควรมีติดบ้าน",
-
-        f"🔥 {name}\n\nกำลังฮิตตอนนี้",
-
-        f"🛠 {name}\n\nแนะนำเลยรุ่นนี้",
-
-        f"💡 {name}\n\nตัวนี้ขายดีมาก",
-
-        f"⚡ {name}\n\nใครใช้อยู่บ้าง"
-
-    ]
-
-    return random.choice(captions)
+    return "other"
 
 
-def viral_caption():
-
-    posts=[
-
-        "⚡ ไฟโซล่าดีไหม\n\nบ้านใครใช้อยู่บ้าง",
-
-        "🔌 ปลั๊กไฟแบบไหนปลอดภัยที่สุด",
-
-        "🛠 เครื่องมือช่างที่ควรมีติดบ้าน",
-
-        "💡 หลอดไฟ LED ประหยัดไฟจริงไหม",
-
-        "🏠 5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน"
-
-    ]
-
-    return random.choice(posts)
+def parse_float(v, default=0.0):
+    try:
+        return float(v)
+    except Exception:
+        return default
 
 
-def engage_caption():
-
-    posts=[
-
-        "บ้านคุณใช้หลอดไฟ LED หรือยัง",
-
-        "เครื่องมือช่างที่ใช้บ่อยคืออะไร",
-
-        "เคยใช้ไฟโซล่าหรือยัง",
-
-        "บ้านคุณใช้ปลั๊กไฟกี่ตัว",
-
-        "ของใช้ไฟฟ้าชิ้นไหนสำคัญสุด"
-
-    ]
-
-    return random.choice(posts)
+def parse_int(v, default=0):
+    try:
+        return int(float(v))
+    except Exception:
+        return default
 
 
-# ---------------- PRODUCT ----------------
+def load_products_from_csv():
+    if not CSV_URL:
+        print("CSV_URL MISSING", flush=True)
+        return []
 
-def clean_posted(raw):
+    try:
+        r = requests.get(CSV_URL, timeout=30)
+        r.raise_for_status()
 
-    result=[]
+        text = r.content.decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(io.StringIO(text))
 
-    if not isinstance(raw,list):
-        return result
+        products = []
 
-    for i in raw:
+        for row in reader:
+            name = (
+                row.get("name")
+                or row.get("title")
+                or row.get("product_name")
+                or row.get("item_name")
+                or ""
+            ).strip()
 
-        if isinstance(i,str):
-            result.append(i)
+            link = (
+                row.get("link")
+                or row.get("product_link")
+                or row.get("url")
+                or row.get("deeplink")
+                or ""
+            ).strip()
 
-        if isinstance(i,dict):
-            link=i.get("link")
-            if link:
-                result.append(link)
+            raw_category = (
+                row.get("category")
+                or row.get("cat")
+                or row.get("group")
+                or ""
+            ).strip()
 
-    return list(dict.fromkeys(result))
+            rating = parse_float(
+                row.get("rating")
+                or row.get("item_rating")
+                or row.get("star")
+                or 0
+            )
+
+            sold = parse_int(
+                row.get("sold")
+                or row.get("item_sold")
+                or row.get("historical_sold")
+                or 0
+            )
+
+            price = parse_float(
+                row.get("price")
+                or row.get("sale_price")
+                or row.get("item_price")
+                or 0
+            )
+
+            if not name or not link:
+                continue
+
+            category = detect_category(name, raw_category)
+
+            products.append({
+                "name": name,
+                "category": category,
+                "rating": rating,
+                "sold": sold,
+                "price": price,
+                "link": link
+            })
+
+        print(f"CSV PRODUCTS LOADED: {len(products)}", flush=True)
+        return products
+
+    except Exception as e:
+        print("CSV LOAD ERROR:", e, flush=True)
+        return []
+
+
+def load_products_fallback():
+    data = load_json(PRODUCT_FILE, [])
+    return data if isinstance(data, list) else []
 
 
 def pick_product():
+    csv_products = load_products_from_csv()
 
-    products=load_json(PRODUCT_FILE)
+    if csv_products:
+        products = csv_products
+        print("USING PRODUCTS FROM CSV", flush=True)
+    else:
+        products = load_products_fallback()
+        print("USING PRODUCTS FROM products.json", flush=True)
 
-    posted=set(clean_posted(load_json(POSTED_FILE)))
+    posted = set(normalize_posted_products(load_json(POSTED_FILE, [])))
 
-    good=[]
+    good = []
 
     for p in products:
+        if not isinstance(p, dict):
+            continue
 
-        link=p.get("link")
-
+        link = p.get("link")
         if not link:
             continue
 
         if link in posted:
             continue
 
-        rating=float(p.get("rating",0))
-        sold=int(p.get("sold",0))
+        rating = parse_float(p.get("rating", 0))
+        sold = parse_int(p.get("sold", 0))
+        name = (p.get("name") or "").strip()
 
-        if rating>=4 and sold>=10:
+        if not name:
+            continue
+
+        if rating >= 4 and sold >= 10:
             good.append(p)
 
     if not good:
         return None
 
-    good.sort(key=lambda x:(int(x["sold"]),float(x["rating"])),reverse=True)
+    good.sort(
+        key=lambda x: (
+            parse_int(x.get("sold", 0)),
+            parse_float(x.get("rating", 0))
+        ),
+        reverse=True
+    )
 
-    product=random.choice(good[:20] if len(good)>=20 else good)
+    pool = good[:30] if len(good) >= 30 else good
+    product = random.choice(pool)
 
     posted.add(product["link"])
-
-    save_json(POSTED_FILE,list(posted))
+    save_json(POSTED_FILE, list(posted))
 
     return product
 
 
-# ---------------- FACEBOOK ----------------
+# ---------- CAPTION ----------
 
-def post(caption,img):
+def ai_caption(name):
+    fallback = [
+        f"⚡ {name}\n\nของดีที่ควรมีติดบ้าน",
+        f"🔥 {name}\n\nของมันต้องมี",
+        f"🛠 {name}\n\nใครใช้อยู่บ้าง",
+        f"💡 {name}\n\nน่าใช้มาก",
+        f"⚡ {name}\n\nแนะนำเลยตัวนี้"
+    ]
 
-    url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
+    if not OPENAI:
+        return random.choice(fallback)
 
-    with open(img,"rb") as f:
+    prompt = f"""
+เขียนโพสต์ Facebook ขายสินค้า
 
-        files={"source":f}
+สินค้า: {name}
 
-        data={
-            "caption":caption,
-            "access_token":TOKEN
+เงื่อนไข:
+- สั้น
+- อ่านง่าย
+- น่าคลิก
+- ภาษาไทย
+""".strip()
+
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {OPENAI}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4.1-mini",
+                "input": prompt
+            },
+            timeout=20
+        )
+        data = r.json()
+        return data["output"][0]["content"][0]["text"]
+    except Exception:
+        return random.choice(fallback)
+
+
+def viral_caption():
+    posts = [
+        "⚡ ไฟโซล่าดีไหม\n\nบ้านใครใช้อยู่บ้าง",
+        "🔌 ปลั๊กไฟแบบไหนปลอดภัยที่สุด",
+        "🛠 เครื่องมือช่างที่ควรมีติดบ้าน",
+        "💡 หลอดไฟ LED ประหยัดไฟจริงไหม",
+        "🏠 5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน"
+    ]
+    return random.choice(posts)
+
+
+def engage_caption():
+    posts = [
+        "บ้านคุณใช้หลอดไฟ LED หรือยัง",
+        "เครื่องมือช่างที่ใช้บ่อยคืออะไร",
+        "เคยใช้ไฟโซล่าหรือยัง",
+        "บ้านคุณใช้ปลั๊กไฟกี่ตัว",
+        "ของใช้ไฟฟ้าชิ้นไหนสำคัญสุดในบ้าน"
+    ]
+    return random.choice(posts)
+
+
+def reels_idea():
+    ideas = [
+        "รีวิวไฟโซล่ากลางคืน",
+        "ปลั๊กไฟแบบไหนปลอดภัย",
+        "เครื่องมือช่างที่ควรมีติดบ้าน",
+        "หลอดไฟ LED ประหยัดไฟไหม",
+        "รีวิวสว่านไร้สาย"
+    ]
+    return random.choice(ideas)
+
+
+def save_reels_script(text):
+    with open(REELS_SCRIPT_FILE, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+# ---------- IMAGE ----------
+
+def ensure_image_exists(path):
+    if os.path.exists(path):
+        return path
+
+    fallback = [
+        os.path.join(ASSET_DIR, "solar.jpg"),
+        os.path.join(ASSET_DIR, "safe_plug.jpg"),
+        os.path.join(ASSET_DIR, "tools.jpg"),
+        os.path.join(ASSET_DIR, "led_save_power.jpg"),
+        os.path.join(ASSET_DIR, "home_electrical_5.jpg"),
+    ]
+
+    for f in fallback:
+        if os.path.exists(f):
+            print("IMAGE FALLBACK ->", f, flush=True)
+            return f
+
+    raise Exception("NO IMAGE FOUND")
+
+
+def get_image(category):
+    if category == "solar":
+        return ensure_image_exists(os.path.join(ASSET_DIR, "solar.jpg"))
+
+    if category == "plug":
+        return ensure_image_exists(os.path.join(ASSET_DIR, "safe_plug.jpg"))
+
+    if category == "tools":
+        return ensure_image_exists(os.path.join(ASSET_DIR, "tools.jpg"))
+
+    if category == "led":
+        return ensure_image_exists(os.path.join(ASSET_DIR, "led_save_power.jpg"))
+
+    return ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+
+
+# ---------- FACEBOOK ----------
+
+def post(caption, image):
+    image = ensure_image_exists(image)
+
+    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
+
+    with open(image, "rb") as f:
+        files = {"source": f}
+        data = {
+            "caption": caption,
+            "access_token": TOKEN
         }
+        r = requests.post(url, data=data, files=files, timeout=30)
 
-        r=requests.post(url,data=data,files=files)
+    try:
+        res = r.json()
+        print("POST RESPONSE:", res, flush=True)
+        return res.get("post_id")
+    except Exception:
+        print(r.text, flush=True)
+        return None
 
-    res=r.json()
 
-    print("POST RESPONSE:",res,flush=True)
+def comment(post_id, link):
+    url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
-    return res.get("post_id")
-
-
-def comment(post_id,link):
-
-    url=f"https://graph.facebook.com/v25.0/{post_id}/comments"
-
-    data={
-        "message":f"🛒 สั่งซื้อ\n{link}",
-        "access_token":TOKEN
+    data = {
+        "message": f"🛒 สั่งซื้อ\n{link}",
+        "access_token": TOKEN
     }
 
-    r=requests.post(url,data=data)
+    try:
+        r = requests.post(url, data=data, timeout=20)
+        print("COMMENT:", r.json(), flush=True)
+    except Exception as e:
+        print("COMMENT ERROR:", e, flush=True)
 
-    print("COMMENT:",r.json(),flush=True)
 
-
-# ---------------- MAIN ----------------
+# ---------- MAIN ----------
 
 def run():
+    mode = None
 
-    print("Updating Shopee products",flush=True)
-
-    update_products()
-
-    mode=get_mode()
+    if is_first_run():
+        mode = "product"
+        print("FIRST RUN -> FORCE PRODUCT", flush=True)
+    else:
+        mode = get_mode_by_time()
 
     if mode is None:
+        print("MANUAL RUN -> FORCE PRODUCT", flush=True)
+        mode = "product"
 
-        print("MANUAL RUN -> FORCE PRODUCT",flush=True)
+    print("MODE:", mode, flush=True)
 
-        mode="product"
+    if mode == "product":
+        product = pick_product()
 
-    print("MODE:",mode,flush=True)
-
-
-    if mode=="product":
-
-        p=pick_product()
-
-        if not p:
-            print("NO PRODUCT")
+        if not product:
+            print("NO PRODUCT", flush=True)
             return
 
-        caption=product_caption(p["name"])
+        cap = ai_caption(product["name"])
+        img = get_image(product.get("category", ""))
 
-        img=image_by_category(p.get("category",""))
-
-        post_id=post(caption,img)
+        post_id = post(cap, img)
 
         if post_id:
-            comment(post_id,p["link"])
+            comment(post_id, product["link"])
 
-        log_post("product",p["name"])
+        log_post("product", product["name"], {
+            "category": product.get("category", ""),
+            "rating": product.get("rating", 0),
+            "sold": product.get("sold", 0),
+            "link": product.get("link", "")
+        })
+        print("POST STATS:", analyze_posts(), flush=True)
+        return
+
+    if mode == "viral":
+        cap = viral_caption()
+        img = get_image("tools")
+
+        post(cap, img)
+        log_post("viral", "viral_post")
+        print("POST STATS:", analyze_posts(), flush=True)
+        return
+
+    if mode == "engage":
+        cap = engage_caption()
+        img = get_image("tools")
+
+        post(cap, img)
+        log_post("engage", "question")
+        print("POST STATS:", analyze_posts(), flush=True)
+        return
+
+    if mode == "reels":
+        idea = reels_idea()
+        save_reels_script(idea)
+        print("REELS IDEA:", idea, flush=True)
+        log_post("reels", "idea")
+        print("POST STATS:", analyze_posts(), flush=True)
+        return
 
 
-    if mode=="viral":
-
-        caption=viral_caption()
-
-        img=image("tools.jpg")
-
-        post(caption,img)
-
-        log_post("viral","viral")
-
-
-    if mode=="engage":
-
-        caption=engage_caption()
-
-        img=image("tools.jpg")
-
-        post(caption,img)
-
-        log_post("engage","engage")
-
-
-    print("POST STATS:",analyze_posts(),flush=True)
-
-
-if __name__=="__main__":
-
+if __name__ == "__main__":
     run()
