@@ -1,0 +1,7 @@
+- name: run bot
+  env:
+    PAGE_ID: ${{ secrets.PAGE_ID }}
+    PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+    SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  run: python -u app.py
