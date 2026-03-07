@@ -1,17 +1,12 @@
 name: BEN AUTO POST
 
 on:
-
   workflow_dispatch:
 
   schedule:
     - cron: "0 */2 * * *"
 
-permissions:
-  contents: write
-
 jobs:
-
   autopost:
 
     runs-on: ubuntu-latest
@@ -34,11 +29,3 @@ jobs:
           SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python app.py
-
-      - name: save state
-        run: |
-          git config user.name bot
-          git config user.email bot@bot.com
-          git add state.json
-          git commit -m update || echo ok
-          git push
