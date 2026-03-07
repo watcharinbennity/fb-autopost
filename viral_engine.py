@@ -1,27 +1,54 @@
+import os
 import random
 
-RAW_BASE="https://raw.githubusercontent.com/watcharinbootprasan/fb-autopost/main/assets"
+RAW_BASE = os.getenv(
+    "RAW_BASE_URL",
+    "https://raw.githubusercontent.com/watcharinbootprasan/fb-autopost/main/assets"
+)
 
-TOPICS={
-"ไฟโซล่าดีไหม":f"{RAW_BASE}/solar.jpg",
-"ปลั๊กไฟแบบไหนปลอดภัย":f"{RAW_BASE}/safe_plug.jpg",
-"เครื่องมือช่างที่ควรมีติดบ้าน":f"{RAW_BASE}/tools.jpg",
-"5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน":f"{RAW_BASE}/home_electrical_5.jpg",
-"หลอดไฟ LED ประหยัดไฟจริงไหม":f"{RAW_BASE}/led_save_power.jpg"
+DEFAULT_IMAGE = f"{RAW_BASE}/home_electrical_5.jpg"
+
+TOPIC_IMAGE_MAP = {
+    "ไฟโซล่าดีไหม": f"{RAW_BASE}/solar.jpg",
+    "ปลั๊กไฟแบบไหนปลอดภัย": f"{RAW_BASE}/safe_plug.jpg",
+    "เครื่องมือช่างที่ควรมีติดบ้าน": f"{RAW_BASE}/tools.jpg",
+    "5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน": f"{RAW_BASE}/home_electrical_5.jpg",
+    "หลอดไฟ LED ประหยัดไฟจริงไหม": f"{RAW_BASE}/led_save_power.jpg",
 }
 
-def generate():
+TOPICS = list(TOPIC_IMAGE_MAP.keys())
 
- topic=random.choice(list(TOPICS.keys()))
+ENGAGEMENT_POSTS = [
+    {
+        "text": "💬 บ้านคุณใช้ปลั๊กไฟกี่ตัว ?\n\nคอมเมนต์หน่อย",
+        "image": f"{RAW_BASE}/safe_plug.jpg"
+    },
+    {
+        "text": "💬 คุณใช้เครื่องมือช่างอะไรบ่อยที่สุด ?\n\nคอมเมนต์หน่อย",
+        "image": f"{RAW_BASE}/tools.jpg"
+    },
+    {
+        "text": "💬 บ้านคุณมีอุปกรณ์ไฟฟ้ากี่อย่างที่ใช้ทุกวัน ?\n\nคอมเมนต์หน่อย",
+        "image": f"{RAW_BASE}/home_electrical_5.jpg"
+    }
+]
 
- caption=f"""
-⚡ {topic}
 
-บ้านคุณคิดว่ายังไง ?
+def choose_topic():
+    return random.choice(TOPICS)
 
-คอมเมนต์บอกหน่อย 👇
-"""
 
- image=TOPICS[topic]
+def get_image_by_topic(topic: str):
+    return TOPIC_IMAGE_MAP.get(topic, DEFAULT_IMAGE)
 
- return caption,image
+
+def generate_viral_fallback():
+    topic = choose_topic()
+    caption = f"⚡ {topic}\n\nบ้านคุณคิดว่ายังไง ?\n\nคอมเมนต์บอกหน่อย"
+    image = get_image_by_topic(topic)
+    return caption, image, topic
+
+
+def generate_engagement_fallback():
+    post = random.choice(ENGAGEMENT_POSTS)
+    return post["text"], post["image"]
