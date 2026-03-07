@@ -52,7 +52,6 @@ def choose_product(products: list[dict]):
 """.strip()
 
     result = ask_ai(prompt)
-
     if result:
         for i in range(len(shortlist)):
             if str(i + 1) in result:
@@ -64,16 +63,17 @@ def choose_product(products: list[dict]):
 def generate_caption_variants(product: dict):
     prompt = f"""
 เขียนแคปชั่นขายสินค้า Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
+
 สินค้า: {product['name']}
 ราคา: {product['price']} บาท
 รีวิว: {product['rating']}
 ขายแล้ว: {product['sold']}
 
 เขียนมา 3 แบบ
-แต่ละแบบไม่เกิน 5 บรรทัด
-มี emoji พอดี
-ชวนกดซื้อ
-ยังไม่ต้องใส่ลิงก์
+- แต่ละแบบไม่เกิน 5 บรรทัด
+- มี emoji พอดี
+- ชวนกดซื้อ
+- ยังไม่ต้องใส่ลิงก์
 
 คั่นแต่ละแบบด้วย ----
 """.strip()
@@ -96,6 +96,7 @@ def choose_best_caption(product: dict, captions: list[str]):
 
     prompt = f"""
 เลือกแคปชั่นที่น่ากดที่สุดสำหรับโพสต์ Facebook ขายสินค้า
+
 สินค้า: {product['name']}
 
 ตัวเลือก:
@@ -105,7 +106,6 @@ def choose_best_caption(product: dict, captions: list[str]):
 """.strip()
 
     result = ask_ai(prompt)
-
     if result:
         for i in range(len(captions)):
             if str(i + 1) in result:
@@ -121,15 +121,31 @@ def generate_best_caption(product: dict):
 
 def viral_caption(topic: str):
     prompt = f"""
-เขียนโพสต์ Facebook แบบไวรัล ภาษาไทย
+เขียนโพสต์ Facebook ภาษาไทยแบบไวรัล สำหรับเพจ BEN Home & Electrical
 
 หัวข้อ: {topic}
 
 กติกา:
-- สั้น
+- ไม่เกิน 4 บรรทัด
 - มี emoji
 - ชวนคอมเมนต์
-- ไม่เกิน 4 บรรทัด
+- อ่านง่าย
+- ไม่ต้องใส่ลิงก์
+""".strip()
+
+    return ask_ai(prompt)
+
+
+def engagement_caption():
+    prompt = """
+เขียนโพสต์ Facebook ภาษาไทยสำหรับชวนคอมเมนต์
+หัวข้อเกี่ยวกับของใช้ในบ้าน อุปกรณ์ไฟฟ้า หรือเครื่องมือช่าง
+
+กติกา:
+- ไม่เกิน 3 บรรทัด
+- เป็นคำถาม
+- ชวนคอมเมนต์
+- มี emoji เล็กน้อย
 """.strip()
 
     return ask_ai(prompt)
