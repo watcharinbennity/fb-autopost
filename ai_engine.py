@@ -1,7 +1,7 @@
 import os
 import requests
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_KEY=os.getenv("OPENAI_API_KEY")
 
 def ask_ai(prompt):
 
@@ -27,9 +27,7 @@ def ask_ai(prompt):
 
         return data["output"][0]["content"][0]["text"]
 
-    except Exception as e:
-
-        print("AI ERROR",e)
+    except:
 
         return None
 
@@ -37,16 +35,17 @@ def ask_ai(prompt):
 def generate_caption(product):
 
     prompt=f"""
-เขียนแคปชั่นขายสินค้า Facebook
+เขียนโพสต์ขายสินค้า Facebook
 
-สินค้า: {product['name']}
-ราคา: {product['price']}
-รีวิว: {product['rating']}
-ขายแล้ว: {product['sold']}
+สินค้า {product['name']}
+ราคา {product['price']}
+รีวิว {product['rating']}
+ขายแล้ว {product['sold']}
 
-โพสต์สั้น
+กติกา
+Hook แรง
+สั้น
 มี emoji
-ชวนซื้อ
 """
 
     return ask_ai(prompt)
