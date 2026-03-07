@@ -34,100 +34,101 @@ def parse_float(v):
         return 0
 
 
-def format_price(v):
-    try:
-        p = float(v)
-        if p <= 0:
-            return ""
-        return f"{p:,.0f} บาท"
-    except Exception:
-        return ""
-
-
 def load_csv_products():
     print("STEP: load csv", flush=True)
 
-    try:
-        r = requests.get(CSV_URL, timeout=(10, 20), stream=True)
-        r.raise_for_status()
+    r = requests.get(CSV_URL, stream=True, timeout=60)
+    r.raise_for_status()
 
-        chunks = []
-        size = 0
-        max_size = 3 * 1024 * 1024  # 3 MB
+    lines = []
 
-        for chunk in r.iter_content(chunk_size=8192):
-            if not chunk:
-                continue
+    for line in r.iter_lines(decode_unicode=True):
+        if line:
+            lines.append(line)
 
-            size += len(chunk)
-            if size > max_size:
-                print("CSV TOO LARGE", flush=True)
-                return []
+        # header + ข้อมูลส่วนแรกพอ
+        if len(lines) > 800:
+            break
 
-            chunks.append(chunk)
+    text = "\n".join(lines)
+    reader = csv.DictReader(io.StringIO(text))
 
-        text = b"".join(chunks).decode("utf-8", errors="ignore")
-        reader = csv.DictReader(io.StringIO(text))
+    products = []
 
-        products = []
+    allow_keywords = [
+        "home", "living", "tools", "accessories", "chargers",
+        "lighting", "cables", "gadgets", "electrical",
+        "led", "plug", "solar", "lamp", "light",
+        "charger", "converter", "appliance"
+    ]
 
-        for row in reader:
-            if len(products) >= 500:
-                break
+    for row in reader:
+        name = (row.get("title") or "").strip()
 
-            name = (row.get("product_name") or "").strip()
+        link = (
+            row.get("product_short link")
+            or row.get("product_link")
+            or ""
+        ).strip()
 
-            link = (
-                row.get("offer_link")
-                or row.get("product_link")
-                or ""
-            ).strip()
+        image = (
+            row.get("image_link")
+            or row.get("additional_image_link")
+            or ""
+        ).strip()
 
-            image = (
-                row.get("image_url")
-                or row.get("image")
-                or ""
-            ).strip()
+        price = parse_float(
+            row.get("price")
+            or row.get("sale_price")
+            or 0
+        )
 
-            price = parse_float(
-                row.get("price_min")
-                or row.get("price")
-                or 0
-            )
+        rating = parse_float(
+            row.get("item_rating")
+            or 0
+        )
 
-            rating = parse_float(
-                row.get("rating_star")
-                or row.get("rating")
-                or 0
-            )
+        sold = parse_float(
+            row.get("item_sold")
+            or 0
+        )
 
-            if not name or not link or not image:
-                continue
+        category1 = (row.get("global_category1") or "").strip().lower()
+        category2 = (row.get("global_category2") or "").strip().lower()
+        category3 = (row.get("global_category3") or "").strip().lower()
 
-            if rating < 4:
-                continue
+        category_text = f"{category1} {category2} {category3} {name.lower()}"
 
-            products.append({
-                "name": name,
-                "link": link,
-                "image": image,
-                "price": price,
-                "rating": rating
-            })
+        if not name or not link or not image:
+            continue
 
-        print("CSV PRODUCTS:", len(products), flush=True)
-        return products
+        if rating < 4:
+            continue
 
-    except requests.exceptions.Timeout:
-        print("CSV TIMEOUT", flush=True)
-        return []
-    except Exception as e:
-        print("CSV ERROR:", e, flush=True)
-        return []
+        if not any(k in category_text for k in allow_keywords):
+            continue
+
+        products.append({
+            "name": name,
+            "link": link,
+            "image": image,
+            "price": price,
+            "rating": rating,
+            "sold": sold,
+            "category1": category1,
+            "category2": category2,
+            "category3": category3
+        })
+
+        if len(products) >= 500:
+            break
+
+    print("CSV PRODUCTS:", len(products), flush=True)
+    return products
 
 
 def ai_caption(product):
-    price_text = format_price(product.get("price", 0))
+    price_text = f"{product['price']:,.0f} บาท" if product.get("price") else ""
 
     fallback = f"""🔥 {product['name']}
 
@@ -152,7 +153,7 @@ def ai_caption(product):
 - ใส่ราคาได้
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
-- โทนเหมือนแนะนำของใช้ไฟฟ้า/ของใช้ในบ้าน
+- โทนเหมือนแนะนำของใช้ไฟฟ้าและของใช้ในบ้าน
 - ปิดท้ายชวนกดดูสินค้า
 """.strip()
 
@@ -235,7 +236,14 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    return random.choice(candidates)
+    # เน้น rating ก่อน แล้วค่อยสุ่มจากกลุ่มบน ๆ
+    candidates.sort(
+        key=lambda x: (x.get("rating", 0), x.get("sold", 0), x.get("price", 0)),
+        reverse=True
+    )
+
+    pool = candidates[:30] if len(candidates) >= 30 else candidates
+    return random.choice(pool)
 
 
 def run():
