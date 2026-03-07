@@ -1,10 +1,9 @@
-name: BEN V73 AUTO AFFILIATE
+name: BEN V200 AUTO POST
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 5 * * *"
-    - cron: "30 11 * * *"
+    - cron: "0 */2 * * *"
 
 permissions:
   contents: write
@@ -21,21 +20,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install requirements
+      - name: Install
         run: pip install -r requirements.txt
 
       - name: Run bot
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
         run: python -u app.py
 
-      - name: Save state
+      - name: Save files
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
-          git add state.json
+          git add state.json posted_products.json reels_candidates.json
           git commit -m "update state" || echo "no change"
           git push
