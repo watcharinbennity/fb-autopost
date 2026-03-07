@@ -68,7 +68,6 @@ def analyze_posts():
     for item in logs:
         if not isinstance(item, dict):
             continue
-
         t = item.get("type", "unknown")
         stats[t] = stats.get(t, 0) + 1
 
@@ -76,37 +75,6 @@ def analyze_posts():
 
 
 # ---------- TIME ----------
-
-def is_first_run():
-    posted_raw = load_json(POSTED_FILE, [])
-    posted = normalize_posted_products(posted_raw)
-    return len(posted) == 0
-
-
-def get_mode_by_time():
-    now = datetime.now(TH_TZ)
-    minute = now.hour * 60 + now.minute
-
-    # 09:00 - 09:59
-    if 9 * 60 <= minute < 10 * 60:
-        return "viral"
-
-    # 12:00 - 12:59
-    if 12 * 60 <= minute < 13 * 60:
-        return "product"
-
-    # 18:30 - 19:29
-    if 18 * 60 + 30 <= minute < 19 * 60 + 30:
-        return "product"
-
-    # 21:00 - 21:59
-    if 21 * 60 <= minute < 22 * 60:
-        return "engage"
-
-    return None
-
-
-# ---------- CSV / PRODUCT ----------
 
 def normalize_posted_products(raw):
     cleaned = []
@@ -128,10 +96,37 @@ def normalize_posted_products(raw):
     return list(dict.fromkeys(cleaned))
 
 
+def is_first_run():
+    posted_raw = load_json(POSTED_FILE, [])
+    posted = normalize_posted_products(posted_raw)
+    return len(posted) == 0
+
+
+def get_mode_by_time():
+    now = datetime.now(TH_TZ)
+    minute = now.hour * 60 + now.minute
+
+    if 9 * 60 <= minute < 10 * 60:
+        return "viral"
+
+    if 12 * 60 <= minute < 13 * 60:
+        return "product"
+
+    if 18 * 60 + 30 <= minute < 19 * 60 + 30:
+        return "product"
+
+    if 21 * 60 <= minute < 22 * 60:
+        return "engage"
+
+    return None
+
+
+# ---------- PRODUCT / CSV ----------
+
 def detect_category(name, category=""):
     text = f"{name} {category}".lower()
 
-    if any(k in text for k in ["โซล่า", "solar", "sola"]):
+    if any(k in text for k in ["โซล่า", "solar"]):
         return "solar"
 
     if any(k in text for k in ["ปลั๊ก", "plug", "usb", "power strip", "ปลั๊กไฟ"]):
@@ -166,7 +161,8 @@ def load_products_from_csv():
         return []
 
     try:
-        r = requests.get(CSV_URL, timeout=30)
+        print("STEP: load csv", flush=True)
+        r = requests.get(CSV_URL, timeout=20)
         r.raise_for_status()
 
         text = r.content.decode("utf-8-sig", errors="ignore")
@@ -257,7 +253,6 @@ def pick_product():
         print("USING PRODUCTS FROM products.json", flush=True)
 
     posted = set(normalize_posted_products(load_json(POSTED_FILE, [])))
-
     good = []
 
     for p in products:
@@ -328,6 +323,7 @@ def ai_caption(name):
 """.strip()
 
     try:
+        print("STEP: openai caption", flush=True)
         r = requests.post(
             "https://api.openai.com/v1/responses",
             headers={
@@ -340,9 +336,11 @@ def ai_caption(name):
             },
             timeout=20
         )
+        r.raise_for_status()
         data = r.json()
         return data["output"][0]["content"][0]["text"]
-    except Exception:
+    except Exception as e:
+        print("OPENAI ERROR:", e, flush=True)
         return random.choice(fallback)
 
 
@@ -427,6 +425,7 @@ def get_image(category):
 def post(caption, image):
     image = ensure_image_exists(image)
 
+    print("STEP: facebook post", flush=True)
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
     with open(image, "rb") as f:
@@ -442,11 +441,12 @@ def post(caption, image):
         print("POST RESPONSE:", res, flush=True)
         return res.get("post_id")
     except Exception:
-        print(r.text, flush=True)
+        print("POST RAW:", r.text, flush=True)
         return None
 
 
 def comment(post_id, link):
+    print("STEP: facebook comment", flush=True)
     url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
     data = {
@@ -464,8 +464,6 @@ def comment(post_id, link):
 # ---------- MAIN ----------
 
 def run():
-    mode = None
-
     if is_first_run():
         mode = "product"
         print("FIRST RUN -> FORCE PRODUCT", flush=True)
@@ -530,4 +528,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as e:
+        print("BOT ERROR:", e, flush=True)
