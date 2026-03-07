@@ -4,249 +4,264 @@ import os
 import requests
 from datetime import datetime
 
-PAGE_ID=os.getenv("PAGE_ID")
-TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
-OPENAI=os.getenv("OPENAI_API_KEY")
+PAGE_ID = os.getenv("PAGE_ID")
+TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+OPENAI = os.getenv("OPENAI_API_KEY")
 
-PRODUCT_FILE="products.json"
-POSTED_FILE="posted_products.json"
-LOG_FILE="post_log.json"
+PRODUCT_FILE = "products.json"
+POSTED_FILE = "posted_products.json"
+LOG_FILE = "post_log.json"
 
-CAPTION_FILE="captions_2000.txt"
-VIRAL_FILE="viral_posts_300.json"
-REELS_FILE="reels_ideas_100.json"
+CAPTION_FILE = "captions_2000.txt"
+VIRAL_FILE = "viral_posts_300.json"
+REELS_FILE = "reels_ideas_100.json"
+
+ASSET_DIR = "assets"
 
 
 def load_json(file):
-
     try:
-        with open(file,encoding="utf-8") as f:
+        with open(file, encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception:
         return []
 
 
-def save_json(file,data):
-
-    with open(file,"w",encoding="utf-8") as f:
-        json.dump(data,f,indent=2,ensure_ascii=False)
+def save_json(file, data):
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def load_captions():
-
     try:
-        with open(CAPTION_FILE,encoding="utf-8") as f:
-            return f.read().splitlines()
-    except:
+        with open(CAPTION_FILE, encoding="utf-8") as f:
+            lines = [x.strip() for x in f.read().splitlines() if x.strip()]
+            return lines if lines else ["⚡ {name} ของดีสำหรับบ้าน"]
+    except Exception:
         return ["⚡ {name} ของดีสำหรับบ้าน"]
 
 
-def log_post(type,name):
-
-    data=load_json(LOG_FILE)
-
+def log_post(post_type, name):
+    data = load_json(LOG_FILE)
     data.append({
-        "type":type,
-        "name":name,
-        "time":str(datetime.now())
+        "type": post_type,
+        "name": name,
+        "time": str(datetime.now())
     })
-
-    save_json(LOG_FILE,data)
+    save_json(LOG_FILE, data)
 
 
 def pick_product():
+    products = load_json(PRODUCT_FILE)
+    posted = load_json(POSTED_FILE)
 
-    products=load_json(PRODUCT_FILE)
-    posted=load_json(POSTED_FILE)
-
-    good=[
+    good = [
         p for p in products
-        if p["link"] not in posted
-        and p.get("rating",4)>=4
-        and p.get("sold",0)>=10
+        if p.get("link")
+        and p["link"] not in posted
+        and p.get("rating", 4) >= 4
+        and p.get("sold", 0) >= 10
     ]
 
     if not good:
         return None
 
-    product=random.choice(good)
-
+    product = random.choice(good)
     posted.append(product["link"])
-
-    save_json(POSTED_FILE,posted)
-
+    save_json(POSTED_FILE, posted)
     return product
 
 
 def ai_caption(name):
+    captions = load_captions()
 
     if not OPENAI:
+        return random.choice(captions).replace("{name}", name)
 
-        captions=load_captions()
-
-        template=random.choice(captions)
-
-        return template.replace("{name}",name)
-
-    prompt=f"""
+    prompt = f"""
 เขียนโพสต์ Facebook ขายสินค้า
 
 สินค้า: {name}
 
-โพสต์สั้น น่าสนใจ กระตุ้นให้คลิก
-"""
-
-    r=requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization":f"Bearer {OPENAI}",
-            "Content-Type":"application/json"
-        },
-        json={
-            "model":"gpt-4.1-mini",
-            "input":prompt
-        }
-    )
+ให้โพสต์สั้น น่าสนใจ กระตุ้นให้คลิก
+""".strip()
 
     try:
-        return r.json()["output"][0]["content"][0]["text"]
-    except:
-
-        captions=load_captions()
-
-        template=random.choice(captions)
-
-        return template.replace("{name}",name)
+        r = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {OPENAI}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4.1-mini",
+                "input": prompt
+            },
+            timeout=20
+        )
+        data = r.json()
+        return data["output"][0]["content"][0]["text"]
+    except Exception:
+        return random.choice(captions).replace("{name}", name)
 
 
 def viral_caption():
+    posts = load_json(VIRAL_FILE)
+    if posts:
+        post = random.choice(posts)
+        if isinstance(post, dict) and post.get("caption"):
+            return post["caption"]
 
-    posts=load_json(VIRAL_FILE)
-
-    post=random.choice(posts)
-
-    return post["caption"]
+    topics = [
+        "ไฟโซล่าดีไหม",
+        "ปลั๊กไฟแบบไหนปลอดภัย",
+        "เครื่องมือช่างที่ควรมีติดบ้าน",
+        "5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน",
+        "หลอดไฟ LED ประหยัดไฟจริงไหม"
+    ]
+    topic = random.choice(topics)
+    return f"⚡ {topic}\n\nบ้านคุณคิดว่ายังไง ?\n\nคอมเมนต์หน่อย"
 
 
 def engage_caption():
-
-    questions=[
+    questions = [
         "บ้านคุณใช้ปลั๊กไฟกี่ตัว ?",
         "เคยใช้ไฟโซล่าหรือยัง ?",
         "เครื่องมือช่างที่ใช้บ่อยคืออะไร ?",
         "บ้านคุณใช้หลอดไฟ LED หรือยัง ?"
     ]
-
     return random.choice(questions)
 
 
 def reels_idea():
+    reels = load_json(REELS_FILE)
+    if reels:
+        return random.choice(reels)
+    return {"hook": "ไฟโซล่าดีไหม", "idea": "อธิบายข้อดีสั้น ๆ แล้วปิดด้วย call to action"}
 
-    reels=load_json(REELS_FILE)
 
-    return random.choice(reels)
+def ensure_image_exists(path):
+    if os.path.exists(path):
+        return path
+
+    # fallback ไล่หาไฟล์ที่มีจริง
+    fallback_candidates = [
+        os.path.join(ASSET_DIR, "home_electrical_5.jpg"),
+        os.path.join(ASSET_DIR, "home_electrical_5.jpeg"),
+        os.path.join(ASSET_DIR, "home_electrical_5.JPG"),
+        os.path.join(ASSET_DIR, "home_electrical_5.JPEG"),
+        os.path.join(ASSET_DIR, "solar.jpg"),
+        os.path.join(ASSET_DIR, "safe_plug.jpg"),
+        os.path.join(ASSET_DIR, "tools.jpg"),
+        os.path.join(ASSET_DIR, "led_save_power.jpg"),
+    ]
+
+    for candidate in fallback_candidates:
+        if os.path.exists(candidate):
+            print(f"IMAGE FALLBACK -> {candidate}", flush=True)
+            return candidate
+
+    raise FileNotFoundError(
+        f"ไม่พบไฟล์รูป: {path} | assets ที่มีอยู่: {os.listdir(ASSET_DIR) if os.path.isdir(ASSET_DIR) else 'assets folder missing'}"
+    )
 
 
 def get_image(category):
+    if category == "solar":
+        path = os.path.join(ASSET_DIR, "solar.jpg")
+    elif category == "plug":
+        path = os.path.join(ASSET_DIR, "safe_plug.jpg")
+    elif category == "tools":
+        path = os.path.join(ASSET_DIR, "tools.jpg")
+    elif category == "led":
+        path = os.path.join(ASSET_DIR, "led_save_power.jpg")
+    else:
+        path = os.path.join(ASSET_DIR, "home_electrical_5.jpg")
 
-    if category=="solar":
-        return "assets/solar.jpg"
-
-    if category=="plug":
-        return "assets/safe_plug.jpg"
-
-    if category=="tools":
-        return "assets/tools.jpg"
-
-    if category=="led":
-        return "assets/led_save_power.jpg"
-
-    return "assets/home_electrical_5.jpg"
+    return ensure_image_exists(path)
 
 
-def post(caption,image):
+def post(caption, image):
+    image = ensure_image_exists(image)
 
-    url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
+    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    files={"source":open(image,"rb")}
-
-    data={
-        "caption":caption,
-        "access_token":TOKEN
-    }
-
-    r=requests.post(url,data=data,files=files)
+    with open(image, "rb") as f:
+        files = {"source": f}
+        data = {
+            "caption": caption,
+            "access_token": TOKEN
+        }
+        r = requests.post(url, data=data, files=files, timeout=30)
 
     try:
-        return r.json()["post_id"]
-    except:
+        res = r.json()
+        print("POST RESPONSE:", res, flush=True)
+        return res.get("post_id")
+    except Exception:
+        print("POST TEXT:", r.text, flush=True)
         return None
 
 
-def comment(post_id,link):
-
-    url=f"https://graph.facebook.com/v25.0/{post_id}/comments"
-
-    data={
-        "message":f"🛒 สั่งซื้อ\n{link}",
-        "access_token":TOKEN
+def comment(post_id, link):
+    url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
+    data = {
+        "message": f"🛒 สั่งซื้อ\n{link}",
+        "access_token": TOKEN
     }
-
-    requests.post(url,data=data)
+    try:
+        r = requests.post(url, data=data, timeout=20)
+        print("COMMENT RESPONSE:", r.json(), flush=True)
+    except Exception as e:
+        print("COMMENT ERROR:", e, flush=True)
 
 
 def run():
+    print("PWD:", os.getcwd(), flush=True)
+    print("FILES:", os.listdir("."), flush=True)
+    if os.path.isdir(ASSET_DIR):
+        print("ASSETS:", os.listdir(ASSET_DIR), flush=True)
+    else:
+        print("ASSETS FOLDER MISSING", flush=True)
 
-    mode=random.choice(["product","viral","engage","reels"])
+    mode = random.choice(["product", "viral", "engage", "reels"])
+    print("MODE:", mode, flush=True)
 
-
-    if mode=="product":
-
-        product=pick_product()
+    if mode == "product":
+        product = pick_product()
 
         if product:
+            caption = ai_caption(product["name"])
+            image = get_image(product.get("category", ""))
 
-            caption=ai_caption(product["name"])
-
-            image=get_image(product["category"])
-
-            post_id=post(caption,image)
+            post_id = post(caption, image)
 
             if post_id:
-                comment(post_id,product["link"])
+                comment(post_id, product["link"])
 
-            log_post("product",product["name"])
-
+            log_post("product", product["name"])
             return
 
+    if mode == "viral":
+        caption = viral_caption()
+        image = ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+        post(caption, image)
+        log_post("viral", "content")
+        return
 
-    if mode=="viral":
+    if mode == "engage":
+        caption = engage_caption()
+        image = ensure_image_exists(os.path.join(ASSET_DIR, "home_electrical_5.jpg"))
+        post(caption, image)
+        log_post("engagement", "question")
+        return
 
-        caption=viral_caption()
-
-        post(caption,"assets/home_electrical_5.jpg")
-
-        log_post("viral","content")
-
-
-    if mode=="engage":
-
-        caption=engage_caption()
-
-        post(caption,"assets/home_electrical_5.jpg")
-
-        log_post("engagement","question")
-
-
-    if mode=="reels":
-
-        idea=reels_idea()
-
-        print("REELS IDEA:",idea)
-
-        log_post("reels","idea")
+    if mode == "reels":
+        idea = reels_idea()
+        print("REELS IDEA:", idea, flush=True)
+        log_post("reels", "idea")
+        return
 
 
-if __name__=="__main__":
-
+if __name__ == "__main__":
     run()
