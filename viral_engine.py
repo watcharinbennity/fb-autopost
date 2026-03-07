@@ -1,35 +1,27 @@
 import random
 
-VIRAL_POSTS = [
-    {
-        "topic": "ไฟโซล่าดีไหม",
-        "image": "https://i.imgur.com/3g7nmJC.jpg"
-    },
-    {
-        "topic": "ปลั๊กไฟแบบไหนปลอดภัย",
-        "image": "https://i.imgur.com/QX8QK0L.jpg"
-    },
-    {
-        "topic": "เครื่องมือช่างที่ควรมีติดบ้าน",
-        "image": "https://i.imgur.com/OnqT5pE.jpg"
-    },
-    {
-        "topic": "5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน",
-        "image": "https://i.imgur.com/9XqvF2C.jpg"
-    }
-]
+RAW_BASE="https://raw.githubusercontent.com/watcharinbootprasan/fb-autopost/main/assets"
 
-ENGAGEMENT_POSTS = [
-    "💬 บ้านคุณใช้ปลั๊กไฟกี่ตัว ?\n\nคอมเมนต์หน่อย",
-    "💬 คุณใช้เครื่องมือช่างอะไรบ่อยที่สุด ?\n\nคอมเมนต์หน่อย",
-    "💬 บ้านคุณใช้หลอดไฟสีอะไร ?\n\nคอมเมนต์หน่อย"
-]
+TOPICS={
+"ไฟโซล่าดีไหม":f"{RAW_BASE}/solar.jpg",
+"ปลั๊กไฟแบบไหนปลอดภัย":f"{RAW_BASE}/safe_plug.jpg",
+"เครื่องมือช่างที่ควรมีติดบ้าน":f"{RAW_BASE}/tools.jpg",
+"5 อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน":f"{RAW_BASE}/home_electrical_5.jpg",
+"หลอดไฟ LED ประหยัดไฟจริงไหม":f"{RAW_BASE}/led_save_power.jpg"
+}
 
+def generate():
 
-def viral_post():
-    post = random.choice(VIRAL_POSTS)
-    return post["topic"], post["image"]
+ topic=random.choice(list(TOPICS.keys()))
 
+ caption=f"""
+⚡ {topic}
 
-def engagement_post():
-    return random.choice(ENGAGEMENT_POSTS), "https://i.imgur.com/9XqvF2C.jpg"
+บ้านคุณคิดว่ายังไง ?
+
+คอมเมนต์บอกหน่อย 👇
+"""
+
+ image=TOPICS[topic]
+
+ return caption,image
