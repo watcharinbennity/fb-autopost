@@ -42,11 +42,13 @@ def load_csv_products():
 
     lines = []
 
-    for line in r.iter_lines(decode_unicode=True):
+    for line in r.iter_lines():
         if line:
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="ignore")
             lines.append(line)
 
-        # header + ข้อมูลส่วนแรกพอ
+        # header + rows ส่วนต้นพอสำหรับคัดสินค้า
         if len(lines) > 800:
             break
 
@@ -236,7 +238,6 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    # เน้น rating ก่อน แล้วค่อยสุ่มจากกลุ่มบน ๆ
     candidates.sort(
         key=lambda x: (x.get("rating", 0), x.get("sold", 0), x.get("price", 0)),
         reverse=True
