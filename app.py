@@ -7,120 +7,196 @@ import requests
 from ai_engine import choose_product, generate_caption
 from product_filter import filter_products
 
-PAGE_ID=os.getenv("PAGE_ID")
-TOKEN=os.getenv("PAGE_ACCESS_TOKEN")
-CSV_URL=os.getenv("SHOPEE_CSV_URL")
-AFF_ID=os.getenv("SHOPEE_AFFILIATE_ID")
+PAGE_ID = os.getenv("PAGE_ID")
+TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+CSV_URL = os.getenv("SHOPEE_CSV_URL")
+AFF_ID = os.getenv("SHOPEE_AFFILIATE_ID")
 
-STATE_FILE="state.json"
+STATE_FILE = "state.json"
+HTTP_TIMEOUT = 20
+MAX_ROWS = 2000
+
+
+def log(msg):
+    print(msg, flush=True)
 
 
 def load_state():
-
     try:
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    except:
-        return {"posted":[]}
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if "posted" not in data or not isinstance(data["posted"], list):
+                data["posted"] = []
+            return data
+    except Exception:
+        return {"posted": []}
 
 
 def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
-    with open(STATE_FILE,"w") as f:
-        json.dump(state,f)
 
-
-def read_csv():
-
-    r=requests.get(CSV_URL)
-
-    rows=list(csv.DictReader(r.text.splitlines()))
-
-    random.shuffle(rows)
-
-    return rows
+def clean_link(url):
+    if not url:
+        return ""
+    return url.split("?")[0].strip()
 
 
 def aff_link(url):
+    base = clean_link(url)
+    return f"{base}?affiliate_id={AFF_ID}" if AFF_ID else base
 
-    url=url.split("?")[0]
 
-    return f"{url}?affiliate_id={AFF_ID}"
+def read_csv():
+    log("STEP 1: download csv")
+
+    r = requests.get(CSV_URL, timeout=HTTP_TIMEOUT, stream=True)
+    r.raise_for_status()
+
+    lines = (
+        line.decode("utf-8-sig", errors="ignore")
+        for line in r.iter_lines()
+        if line
+    )
+
+    reader = csv.DictReader(lines)
+
+    rows = []
+    for i, row in enumerate(reader):
+        rows.append(row)
+        if i >= MAX_ROWS:
+            break
+
+    random.shuffle(rows)
+    log(f"STEP 2: csv rows loaded = {len(rows)}")
+    return rows
+
+
+def fallback_caption(product, link):
+    return f"""⚡ แนะนำจาก BEN Home & Electrical
+
+{product['name']}
+
+⭐ รีวิว {product['rating']}
+🔥 ขายแล้ว {product['sold']}
+💰 ราคา {product['price']} บาท
+
+🛒 สั่งซื้อ
+{link}
+
+#BENHomeElectrical #ShopeeAffiliate"""
+
+
+def build_caption(product):
+    link = aff_link(product["link"])
+
+    log("STEP 5: generate ai caption")
+    caption = generate_caption(product)
+
+    if caption:
+        if link not in caption:
+            caption = f"{caption}\n\n🛒 สั่งซื้อ\n{link}"
+        return caption
+
+    log("STEP 6: fallback caption")
+    return fallback_caption(product, link)
 
 
 def upload_photo(url):
+    log("STEP 7: upload photo")
+    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
-    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
+    r = requests.post(
+        endpoint,
+        data={
+            "url": url,
+            "published": "false",
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    )
 
-    r=requests.post(endpoint,data={
-        "url":url,
-        "published":"false",
-        "access_token":TOKEN
-    })
+    data = r.json()
+    log(f"upload response: {data}")
 
-    return r.json()["id"]
+    if "id" not in data:
+        raise RuntimeError(data)
 
-
-def post_image(media,text):
-
-    endpoint=f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-
-    r=requests.post(endpoint,data={
-        "message":text,
-        "attached_media[0]":json.dumps({"media_fbid":media}),
-        "access_token":TOKEN
-    })
-
-    return r.json()
+    return data["id"]
 
 
-def comment_link(post_id,link):
+def post_image(media, text):
+    log("STEP 8: create post")
+    endpoint = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
 
-    endpoint=f"https://graph.facebook.com/v25.0/{post_id}/comments"
+    r = requests.post(
+        endpoint,
+        data={
+            "message": text,
+            "attached_media[0]": json.dumps({"media_fbid": media}),
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    )
 
-    requests.post(endpoint,data={
-        "message":f"🛒 ลิงก์สั่งซื้อ\n{link}",
-        "access_token":TOKEN
-    })
+    data = r.json()
+    log(f"post response: {data}")
+    return data
+
+
+def comment_link(post_id, link):
+    log("STEP 9: comment link")
+    endpoint = f"https://graph.facebook.com/v25.0/{post_id}/comments"
+
+    r = requests.post(
+        endpoint,
+        data={
+            "message": f"🛒 ลิงก์สั่งซื้อ\n{link}",
+            "access_token": TOKEN
+        },
+        timeout=HTTP_TIMEOUT
+    )
+
+    log(f"comment response: {r.json()}")
 
 
 def main():
+    if not PAGE_ID:
+        raise ValueError("Missing PAGE_ID")
+    if not TOKEN:
+        raise ValueError("Missing PAGE_ACCESS_TOKEN")
+    if not CSV_URL:
+        raise ValueError("Missing SHOPEE_CSV_URL")
 
-    state=load_state()
+    state = load_state()
 
-    rows=read_csv()
+    rows = read_csv()
 
-    products=filter_products(rows,state)
+    log("STEP 3: filter products")
+    products = filter_products(rows, state)
+    log(f"STEP 4: valid products = {len(products)}")
 
     if not products:
-        print("NO PRODUCT")
+        print("NO PRODUCT", flush=True)
         return
 
-    product=choose_product(products)
+    product = choose_product(products)
+    log(f"CHOSEN: {product['name']}")
 
-    caption=generate_caption(product)
+    caption = build_caption(product)
 
-    link=aff_link(product["link"])
-
-    if caption:
-        caption=f"{caption}\n\n🛒 {link}"
-    else:
-        caption=f"{product['name']}\n\n🛒 {link}"
-
-    media=upload_photo(product["image"])
-
-    res=post_image(media,caption)
+    media = upload_photo(product["image"])
+    res = post_image(media, caption)
 
     if "id" in res:
-
-        comment_link(res["id"],link)
-
+        comment_link(res["id"], aff_link(product["link"]))
         state["posted"].append(product["link"])
-
         save_state(state)
+        log("POST SUCCESS")
+    else:
+        log("POST FAILED")
 
-        print("POST SUCCESS")
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
