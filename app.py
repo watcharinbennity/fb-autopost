@@ -15,101 +15,146 @@ POST_DB = "posted.json"
 
 def load_posted():
     if os.path.exists(POST_DB):
-        return json.load(open(POST_DB))
+        with open(POST_DB, "r", encoding="utf-8") as f:
+            return json.load(f)
     return []
 
 
 def save_posted(data):
-    json.dump(data, open(POST_DB, "w"))
+    with open(POST_DB, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def parse_float(v):
     try:
-        return float(v)
-    except:
+        if v is None or str(v).strip() == "":
+            return 0
+        return float(str(v).replace(",", ""))
+    except Exception:
         return 0
 
 
-def load_csv_products():
+def format_price(v):
+    try:
+        p = float(v)
+        if p <= 0:
+            return ""
+        return f"{p:,.0f} บาท"
+    except Exception:
+        return ""
 
+
+def load_csv_products():
     print("STEP: load csv", flush=True)
 
-    r = requests.get(CSV_URL, timeout=60)
-    r.raise_for_status()
+    try:
+        r = requests.get(CSV_URL, timeout=(10, 20), stream=True)
+        r.raise_for_status()
 
-    text = r.content.decode("utf-8", errors="ignore")
+        chunks = []
+        size = 0
+        max_size = 3 * 1024 * 1024  # 3 MB
 
-    reader = csv.DictReader(io.StringIO(text))
+        for chunk in r.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
 
-    products = []
+            size += len(chunk)
+            if size > max_size:
+                print("CSV TOO LARGE", flush=True)
+                return []
 
-    for row in reader:
+            chunks.append(chunk)
 
-        if len(products) > 500:
-            break
+        text = b"".join(chunks).decode("utf-8", errors="ignore")
+        reader = csv.DictReader(io.StringIO(text))
 
-        name = row.get("product_name","").strip()
+        products = []
 
-        link = (
-            row.get("offer_link")
-            or row.get("product_link")
-            or ""
-        ).strip()
+        for row in reader:
+            if len(products) >= 500:
+                break
 
-        image = (
-            row.get("image_url")
-            or ""
-        ).strip()
+            name = (row.get("product_name") or "").strip()
 
-        price = parse_float(
-            row.get("price_min")
-            or row.get("price")
-            or 0
-        )
+            link = (
+                row.get("offer_link")
+                or row.get("product_link")
+                or ""
+            ).strip()
 
-        rating = parse_float(
-            row.get("rating_star")
-            or 0
-        )
+            image = (
+                row.get("image_url")
+                or row.get("image")
+                or ""
+            ).strip()
 
-        if not name or not link or not image:
-            continue
+            price = parse_float(
+                row.get("price_min")
+                or row.get("price")
+                or 0
+            )
 
-        if rating < 4:
-            continue
+            rating = parse_float(
+                row.get("rating_star")
+                or row.get("rating")
+                or 0
+            )
 
-        products.append({
-            "name": name,
-            "link": link,
-            "image": image,
-            "price": price
-        })
+            if not name or not link or not image:
+                continue
 
-    print("CSV PRODUCTS:", len(products), flush=True)
+            if rating < 4:
+                continue
 
-    return products
+            products.append({
+                "name": name,
+                "link": link,
+                "image": image,
+                "price": price,
+                "rating": rating
+            })
+
+        print("CSV PRODUCTS:", len(products), flush=True)
+        return products
+
+    except requests.exceptions.Timeout:
+        print("CSV TIMEOUT", flush=True)
+        return []
+    except Exception as e:
+        print("CSV ERROR:", e, flush=True)
+        return []
 
 
 def ai_caption(product):
+    price_text = format_price(product.get("price", 0))
+
+    fallback = f"""🔥 {product['name']}
+
+💰 ราคา {price_text}
+
+ของน่าใช้สำหรับบ้านและงานไฟฟ้า
+ดูสินค้าได้ที่คอมเมนต์ 👇"""
 
     if not OPENAI_KEY:
-        return f"""
-🔥 {product['name']}
-
-💰 ราคา {int(product['price'])} บาท
-
-สินค้าคุณภาพดีจาก Shopee
-ใช้งานคุ้มค่า
-
-🛒 กดดูสินค้าในคอมเมนต์
-"""
+        return fallback
 
     prompt = f"""
-เขียนโพสต์ขายของ Facebook ภาษาไทย
+เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
+
 สินค้า: {product['name']}
-ราคา: {product['price']} บาท
-ไม่ต้องพูดยอดขาย
-"""
+ราคา: {price_text}
+
+เงื่อนไข:
+- สั้น
+- อ่านง่าย
+- น่าคลิก
+- ใส่ราคาได้
+- ห้ามพูดถึงยอดขาย
+- ห้ามบอกว่าขายได้กี่ชิ้น
+- โทนเหมือนแนะนำของใช้ไฟฟ้า/ของใช้ในบ้าน
+- ปิดท้ายชวนกดดูสินค้า
+""".strip()
 
     headers = {
         "Authorization": f"Bearer {OPENAI_KEY}",
@@ -118,24 +163,28 @@ def ai_caption(product):
 
     data = {
         "model": "gpt-4.1-mini",
-        "messages":[{"role":"user","content":prompt}]
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
     }
 
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=data
-    )
-
     try:
+        print("STEP: openai caption", flush=True)
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=20
+        )
+        r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
-    except:
-        return product["name"]
+    except Exception as e:
+        print("OPENAI ERROR:", e, flush=True)
+        return fallback
 
 
 def post_facebook(product, caption):
-
-    print("STEP: facebook post")
+    print("STEP: facebook post", flush=True)
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
 
@@ -145,14 +194,20 @@ def post_facebook(product, caption):
         "access_token": PAGE_TOKEN
     }
 
-    r = requests.post(url, data=payload)
+    r = requests.post(url, data=payload, timeout=30)
 
-    return r.json()
+    try:
+        data = r.json()
+    except Exception:
+        print("POST RAW:", r.text, flush=True)
+        return {}
+
+    print("POST RESPONSE:", data, flush=True)
+    return data
 
 
 def comment_link(post_id, link):
-
-    print("STEP: comment affiliate")
+    print("STEP: comment affiliate", flush=True)
 
     url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
 
@@ -161,11 +216,14 @@ def comment_link(post_id, link):
         "access_token": PAGE_TOKEN
     }
 
-    requests.post(url, data=payload)
+    try:
+        r = requests.post(url, data=payload, timeout=20)
+        print("COMMENT RESPONSE:", r.text, flush=True)
+    except Exception as e:
+        print("COMMENT ERROR:", e, flush=True)
 
 
 def pick_product(products):
-
     posted = load_posted()
 
     candidates = [
@@ -174,18 +232,17 @@ def pick_product(products):
     ]
 
     if not candidates:
-        print("NO NEW PRODUCT")
+        print("NO NEW PRODUCT", flush=True)
         return None
 
     return random.choice(candidates)
 
 
 def run():
-
     products = load_csv_products()
 
     if not products:
-        print("NO PRODUCTS")
+        print("NO PRODUCTS", flush=True)
         return
 
     product = pick_product(products)
@@ -194,13 +251,12 @@ def run():
         return
 
     caption = ai_caption(product)
-
     res = post_facebook(product, caption)
 
     post_id = res.get("post_id") or res.get("id")
 
     if not post_id:
-        print("POST FAIL")
+        print("POST FAIL", res, flush=True)
         return
 
     comment_link(post_id, product["link"])
@@ -209,7 +265,7 @@ def run():
     posted.append(product["link"])
     save_posted(posted)
 
-    print("POST SUCCESS")
+    print("POST SUCCESS", flush=True)
 
 
 if __name__ == "__main__":
