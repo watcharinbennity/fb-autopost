@@ -90,7 +90,8 @@ def load_csv_products():
 
         lines.append(line)
 
-        if len(lines) > 1500:
+        # ทดลองอ่าน 20,000 rows
+        if len(lines) > 20000:
             break
 
     text = "\n".join(lines)
@@ -101,7 +102,7 @@ def load_csv_products():
     for row in reader:
         name = (row.get("title") or "").strip()
 
-        # ใช้ short link เท่านั้น ถ้าไม่มีให้ข้าม
+        # ใช้ short link เท่านั้น
         link = (row.get("product_short link") or "").strip()
 
         image = (
