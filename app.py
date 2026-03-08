@@ -12,6 +12,22 @@ OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 
 POST_DB = "posted.json"
 
+ALLOW_KEYWORDS = [
+    "led", "light", "lamp", "lighting", "solar", "โซล่า", "โซลาร์เซลล์",
+    "หลอดไฟ", "โคมไฟ", "ไฟ", "ปลั๊ก", "ปลั๊กไฟ", "socket", "plug",
+    "charger", "adapter", "usb", "สายไฟ", "extension", "power strip",
+    "electrical", "electric", "อุปกรณ์ไฟฟ้า", "เครื่องใช้ไฟฟ้า",
+    "tool", "tools", "hardware", "เครื่องมือ", "เครื่องมือช่าง",
+    "ไขควง", "สว่าน", "คีม", "ประแจ", "home", "living", "ของใช้ในบ้าน"
+]
+
+BLOCK_KEYWORDS = [
+    "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "ลิป", "ครีม", "น้ำหอม",
+    "วิตามิน", "อาหารเสริม", "เครื่องสำอาง", "แฟชั่น", "fashion",
+    "dress", "shirt", "pants", "cosmetic", "perfume", "makeup",
+    "supplement", "toy", "ตุ๊กตา", "เด็กอ่อน", "ผ้าอ้อม", "สัตว์เลี้ยง"
+]
+
 
 def load_posted():
     if os.path.exists(POST_DB):
@@ -42,6 +58,21 @@ def format_price(v):
         return ""
 
 
+def is_relevant_product(row, name: str) -> bool:
+    cat1 = (row.get("global_category1") or "").strip().lower()
+    cat2 = (row.get("global_category2") or "").strip().lower()
+    cat3 = (row.get("global_category3") or "").strip().lower()
+    text = f"{name} {cat1} {cat2} {cat3}".lower()
+
+    if any(k in text for k in BLOCK_KEYWORDS):
+        return False
+
+    if any(k in text for k in ALLOW_KEYWORDS):
+        return True
+
+    return False
+
+
 def load_csv_products():
     print("STEP: load csv", flush=True)
 
@@ -59,8 +90,7 @@ def load_csv_products():
 
         lines.append(line)
 
-        # อ่านแค่ช่วงต้นของไฟล์พอ
-        if len(lines) > 1000:
+        if len(lines) > 1500:
             break
 
     text = "\n".join(lines)
@@ -71,7 +101,6 @@ def load_csv_products():
     for row in reader:
         name = (row.get("title") or "").strip()
 
-        # ใช้ short link ก่อนเสมอ
         link = (
             row.get("product_short link")
             or ""
@@ -94,14 +123,16 @@ def load_csv_products():
         if not image:
             continue
 
-        # AI v3 filter
-        if rating < 4.5:
+        if not is_relevant_product(row, name):
             continue
 
-        if sold < 50:
+        if rating < 4.3:
             continue
 
-        if price < 50 or price > 1500:
+        if sold < 20:
+            continue
+
+        if price < 50 or price > 3000:
             continue
 
         products.append({
@@ -109,6 +140,8 @@ def load_csv_products():
             "link": link,
             "image": image,
             "price": price,
+            "rating": rating,
+            "sold": sold,
         })
 
         if len(products) >= 500:
@@ -121,24 +154,45 @@ def load_csv_products():
 def ai_caption(product):
     price_text = format_price(product["price"])
 
-    fallback = f"""🔥 ของใช้ในบ้านที่กำลังฮิต
+    fallback_options = [
+        f"""🔥 ของใช้ในบ้านน่าใช้
 
 {product['name']}
 
 💰 ราคา {price_text}
 
-เหมาะกับบ้าน งานช่าง งานไฟฟ้า
-ใช้งานง่าย ประหยัดพื้นที่
+เหมาะกับบ้าน งานช่าง และงานไฟฟ้า
+กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
 
-กดดูสินค้า / โค้ดส่วนลดได้ที่ลิงก์ด้านล่าง 👇
+#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง""",
+        f"""⚡ ไอเทมน่าใช้สำหรับบ้าน
 
-#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ShopeeAffiliate"""
+{product['name']}
+
+💰 ราคา {price_text}
+
+ใช้งานง่าย น่ามีติดบ้านไว้
+ดูรายละเอียดได้ที่ลิงก์ด้านล่าง 👇
+
+#BENHomeElectrical #ของใช้ในบ้าน #งานช่าง #ShopeeAffiliate""",
+        f"""🛠 ของน่าใช้สำหรับบ้านและงานไฟฟ้า
+
+{product['name']}
+
+💰 ราคา {price_text}
+
+ใครกำลังหาอุปกรณ์ใช้งานดี ๆ ลองดูตัวนี้ได้เลย 👇
+
+#BENHomeElectrical #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #ShopeeAffiliate"""
+    ]
+
+    fallback = random.choice(fallback_options)
 
     if not OPENAI_KEY:
         return fallback
 
     prompt = f"""
-เขียนโพสต์ขายของ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
+เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า: {product['name']}
 ราคา: {price_text}
@@ -147,10 +201,13 @@ def ai_caption(product):
 - สั้น
 - อ่านง่าย
 - น่าซื้อ
-- แนวรีวิวสินค้า
+- แนวแนะนำสินค้าใช้งานจริง
 - ใส่ราคาได้
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
+- ห้ามใส่ลิงก์ในคำตอบ
+- ปิดท้ายแบบชวนกดดูสินค้า
+- ใส่แฮชแท็ก 3-4 อันที่เกี่ยวกับของใช้ในบ้าน/อุปกรณ์ไฟฟ้า
 """.strip()
 
     headers = {
@@ -235,7 +292,14 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    return random.choice(candidates)
+    # ให้ตัวคะแนนสูงและขายดีมีโอกาสถูกเลือกมากขึ้น
+    candidates.sort(
+        key=lambda x: (x["rating"], x["sold"], -abs(x["price"] - 299)),
+        reverse=True
+    )
+
+    pool = candidates[:30] if len(candidates) >= 30 else candidates
+    return random.choice(pool)
 
 
 def run():
