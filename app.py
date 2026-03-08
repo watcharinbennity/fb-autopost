@@ -29,7 +29,8 @@ HOT_CATEGORIES = {
     "tools": [
         "tool", "tools", "hardware", "tester", "multimeter", "drill",
         "screwdriver", "plier", "wrench",
-        "เครื่องมือ", "เครื่องมือช่าง", "ไขควง", "สว่าน", "คีม", "ประแจ", "มิเตอร์"
+        "เครื่องมือ", "เครื่องมือช่าง", "ไขควง", "สว่าน", "คีม", "ประแจ", "มิเตอร์",
+        "เชื่อม", "หน้ากากเชื่อม", "welder", "welding"
     ],
 }
 
@@ -56,7 +57,7 @@ def save_posted(data):
 
 def parse_float(v):
     try:
-        s = str(v).replace(",", "").strip()
+        s = str(v).replace(",", "").replace("฿", "").strip()
         if not s:
             return 0
         return float(s)
@@ -74,7 +75,7 @@ def format_price(v):
         return ""
 
 
-def get_best_price(row):
+def get_price_candidates(row):
     candidate_keys = [
         "sale_price",
         "discount_price",
@@ -82,6 +83,7 @@ def get_best_price(row):
         "current_price",
         "promo_price",
         "price_min",
+        "price_max",
         "price",
     ]
 
@@ -91,7 +93,43 @@ def get_best_price(row):
         if v > 0:
             values.append(v)
 
-    return min(values) if values else 0
+    return sorted(set(values))
+
+
+def get_price_info(row, name=""):
+    values = get_price_candidates(row)
+
+    if not values:
+        return {
+            "price": 0,
+            "price_text": "",
+            "is_range": False
+        }
+
+    low = min(values)
+    high = max(values)
+
+    variant_hint = False
+    name_l = (name or "").lower()
+
+    if "/" in name_l or "รุ่น" in name_l or "model" in name_l:
+        variant_hint = True
+
+    if high > low:
+        variant_hint = True
+
+    if variant_hint:
+        return {
+            "price": low,
+            "price_text": f"เริ่มต้น {low:,.0f} บาท",
+            "is_range": True
+        }
+
+    return {
+        "price": low,
+        "price_text": f"{low:,.0f} บาท",
+        "is_range": False
+    }
 
 
 def get_search_text(row, name):
@@ -125,7 +163,7 @@ def score_product(price, rating, sold, category):
     category_bonus = {
         "lighting": 45,
         "power": 40,
-        "tools": 38,
+        "tools": 42,
     }.get(category, 0)
 
     if 79 <= price <= 499:
@@ -177,7 +215,10 @@ def load_products():
             or ""
         ).strip()
 
-        price = get_best_price(row)
+        price_info = get_price_info(row, name)
+        price = price_info["price"]
+        price_text = price_info["price_text"]
+
         rating = parse_float(row.get("item_rating") or 0)
         sold = parse_float(row.get("item_sold") or 0)
 
@@ -201,6 +242,7 @@ def load_products():
             "link": link,
             "image": image,
             "price": price,
+            "price_text": price_text,
             "rating": rating,
             "sold": sold,
             "category": category,
@@ -213,14 +255,14 @@ def load_products():
 
 
 def fallback_caption(product):
-    price = format_price(product["price"])
+    price_text = product.get("price_text") or format_price(product["price"])
 
     by_cat = {
         "lighting": f"""🔥 ของใช้ไฟฟ้าน่าใช้สำหรับบ้าน
 
 {product['name']}
 
-💰 ราคา {price}
+💰 ราคา {price_text}
 
 เหมาะกับงานแสงสว่างและใช้งานในบ้าน
 กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
@@ -231,7 +273,7 @@ def fallback_caption(product):
 
 {product['name']}
 
-💰 ราคา {price}
+💰 ราคา {price_text}
 
 ใช้งานง่าย น่ามีติดบ้านไว้
 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง 👇
@@ -242,7 +284,7 @@ def fallback_caption(product):
 
 {product['name']}
 
-💰 ราคา {price}
+💰 ราคา {price_text}
 
 ใครกำลังหาอุปกรณ์ดี ๆ ลองดูตัวนี้ได้เลย 👇
 
@@ -256,13 +298,13 @@ def ai_caption(product):
     if not client:
         return fallback_caption(product)
 
-    price = format_price(product["price"])
+    price_text = product.get("price_text") or format_price(product["price"])
 
     prompt = f"""
 เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า: {product['name']}
-ราคา: {price}
+ราคา: {price_text}
 หมวด: {product['category']}
 
 เงื่อนไข:
@@ -271,6 +313,7 @@ def ai_caption(product):
 - น่าซื้อ
 - โทนแนะนำสินค้าใช้งานจริง
 - ใส่ราคาได้
+- ถ้าเป็นสินค้าหลายรุ่นให้ใช้คำว่า "ราคาเริ่มต้น"
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
 - ห้ามใส่ hashtag ShopeeAffiliate
