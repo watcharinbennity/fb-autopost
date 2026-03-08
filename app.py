@@ -4,16 +4,11 @@ import io
 import json
 import random
 import requests
-from urllib.parse import quote, urlparse, urlunparse
 
 PAGE_ID = os.environ["PAGE_ID"]
 PAGE_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
 CSV_URL = os.environ["SHOPEE_CSV_URL"]
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
-AFFILIATE_ID = os.environ["SHOPEE_AFFILIATE_ID"]
-
-AFF_TAG = "BENHomeElectrical"
-UTM_SOURCE = "facebook"
 
 POST_DB = "posted.json"
 
@@ -47,40 +42,6 @@ def format_price(v):
         return ""
 
 
-def clean_shopee_link(link: str) -> str:
-    link = (link or "").strip()
-    if not link:
-        return ""
-
-    parsed = urlparse(link)
-
-    cleaned = urlunparse((
-        parsed.scheme,
-        parsed.netloc,
-        parsed.path,
-        "",
-        "",
-        ""
-    ))
-
-    return cleaned
-
-
-def build_affiliate_link(link: str) -> str:
-    clean_link = clean_shopee_link(link)
-    if not clean_link:
-        return ""
-
-    encoded = quote(clean_link, safe="")
-    return (
-        f"https://shopee.ee/an_redir?"
-        f"origin_link={encoded}"
-        f"&affiliate_id={AFFILIATE_ID}"
-        f"&utm_source={UTM_SOURCE}"
-        f"&afftag={AFF_TAG}"
-    )
-
-
 def load_csv_products():
     print("STEP: load csv", flush=True)
 
@@ -109,13 +70,12 @@ def load_csv_products():
     for row in reader:
         name = (row.get("title") or "").strip()
 
-        origin_link = (
-            row.get("product_link")
-            or row.get("product_short link")
+        # ใช้ short link ก่อนเสมอ
+        link = (
+            row.get("product_short link")
+            or row.get("product_link")
             or ""
         ).strip()
-
-        link = build_affiliate_link(origin_link)
 
         image = (
             row.get("image_link")
@@ -171,12 +131,14 @@ def ai_caption(product):
 สินค้า: {product['name']}
 ราคา: {price_text}
 
-เงื่อนไข
+เงื่อนไข:
 - โพสต์สั้น
 - อ่านง่าย
 - น่าซื้อ
-- ใส่ราคา
+- ใส่ราคาได้
 - ห้ามพูดถึงยอดขาย
+- ห้ามบอกว่าขายได้กี่ชิ้น
+- โทนเหมือนแนะนำของใช้ไฟฟ้าและของใช้ในบ้าน
 """.strip()
 
     headers = {
