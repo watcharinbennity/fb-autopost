@@ -101,10 +101,8 @@ def load_csv_products():
     for row in reader:
         name = (row.get("title") or "").strip()
 
-        link = (
-            row.get("product_short link")
-            or ""
-        ).strip()
+        # ใช้ short link เท่านั้น ถ้าไม่มีให้ข้าม
+        link = (row.get("product_short link") or "").strip()
 
         image = (
             row.get("image_link")
@@ -165,6 +163,7 @@ def ai_caption(product):
 กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
 
 #BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง""",
+
         f"""⚡ ไอเทมน่าใช้สำหรับบ้าน
 
 {product['name']}
@@ -174,7 +173,8 @@ def ai_caption(product):
 ใช้งานง่าย น่ามีติดบ้านไว้
 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง 👇
 
-#BENHomeElectrical #ของใช้ในบ้าน #งานช่าง #ShopeeAffiliate""",
+#BENHomeElectrical #ของใช้ในบ้าน #งานช่าง""",
+
         f"""🛠 ของน่าใช้สำหรับบ้านและงานไฟฟ้า
 
 {product['name']}
@@ -183,7 +183,7 @@ def ai_caption(product):
 
 ใครกำลังหาอุปกรณ์ใช้งานดี ๆ ลองดูตัวนี้ได้เลย 👇
 
-#BENHomeElectrical #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #ShopeeAffiliate"""
+#BENHomeElectrical #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง"""
     ]
 
     fallback = random.choice(fallback_options)
@@ -205,9 +205,9 @@ def ai_caption(product):
 - ใส่ราคาได้
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
+- ห้ามใส่ hashtag ShopeeAffiliate
 - ห้ามใส่ลิงก์ในคำตอบ
-- ปิดท้ายแบบชวนกดดูสินค้า
-- ใส่แฮชแท็ก 3-4 อันที่เกี่ยวกับของใช้ในบ้าน/อุปกรณ์ไฟฟ้า
+- ใส่ hashtag เกี่ยวกับของใช้ในบ้านหรืออุปกรณ์ไฟฟ้า 3-4 อัน
 """.strip()
 
     headers = {
@@ -292,7 +292,6 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    # ให้ตัวคะแนนสูงและขายดีมีโอกาสถูกเลือกมากขึ้น
     candidates.sort(
         key=lambda x: (x["rating"], x["sold"], -abs(x["price"] - 299)),
         reverse=True
