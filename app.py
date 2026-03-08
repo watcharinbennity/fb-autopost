@@ -12,18 +12,26 @@ OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 
 POST_DB = "posted.json"
 
-STRICT_CATEGORY_ALLOW = [
-    "electrical", "electric", "lighting", "light", "led", "lamp",
-    "solar", "charger", "adapter", "plug", "socket", "power strip",
-    "extension", "cable", "wire", "battery", "switch", "breaker",
-    "tools", "tool", "hardware", "tester", "multimeter", "drill",
-    "screwdriver", "plier", "wrench",
-    "home appliance", "home electrical",
-    "อุปกรณ์ไฟฟ้า", "เครื่องใช้ไฟฟ้า", "โคมไฟ", "หลอดไฟ",
-    "เครื่องมือช่าง", "เครื่องมือ", "สวิตช์", "เบรกเกอร์", "สายไฟ"
-]
+HOT_CATEGORIES = {
+    "lighting": [
+        "electrical", "electric", "lighting", "light", "led", "lamp",
+        "solar", "solar light", "โซล่า", "โซลาร์เซลล์",
+        "หลอดไฟ", "โคมไฟ", "ไฟ", "ไฟ led"
+    ],
+    "power": [
+        "plug", "socket", "power strip", "extension", "adapter",
+        "charger", "usb charger", "cable", "wire", "battery",
+        "ปลั๊ก", "ปลั๊กไฟ", "สายไฟ", "สายชาร์จ", "อุปกรณ์ไฟฟ้า",
+        "เครื่องใช้ไฟฟ้า", "เบรกเกอร์", "สวิตช์", "switch", "breaker"
+    ],
+    "tools": [
+        "tool", "tools", "hardware", "tester", "multimeter", "drill",
+        "screwdriver", "plier", "wrench",
+        "เครื่องมือ", "เครื่องมือช่าง", "ไขควง", "สว่าน", "คีม", "ประแจ", "มิเตอร์"
+    ],
+}
 
-STRICT_CATEGORY_BLOCK = [
+BLOCK_KEYWORDS = [
     "automotive", "auto", "car", "motorcycle", "bike", "brake", "steering",
     "ยานยนต์", "รถ", "รถยนต์", "มอเตอร์ไซค์", "อะไหล่รถ", "แต่งรถ",
     "fashion", "beauty", "cosmetic", "perfume", "makeup", "supplement",
@@ -74,43 +82,47 @@ def get_best_price(row):
         "price_min",
         "price",
     ]
-
     values = []
-
     for key in candidate_keys:
         v = parse_float(row.get(key))
         if v > 0:
             values.append(v)
-
-    if not values:
-        return 0
-
-    return min(values)
+    return min(values) if values else 0
 
 
-def get_category_text(row):
+def get_search_text(row, name):
     cat1 = (row.get("global_category1") or "").strip().lower()
     cat2 = (row.get("global_category2") or "").strip().lower()
     cat3 = (row.get("global_category3") or "").strip().lower()
-    return f"{cat1} {cat2} {cat3}".strip()
+    shop_name = (row.get("shop_name") or "").strip().lower()
+    seller_name = (row.get("seller_name") or "").strip().lower()
+    return f"{name} {cat1} {cat2} {cat3} {shop_name} {seller_name}".lower()
 
 
-def is_strict_category_match(row):
-    text = get_category_text(row)
+def detect_hot_category(row, name):
+    text = get_search_text(row, name)
 
-    if not text:
-        return False
+    if any(k in text for k in BLOCK_KEYWORDS):
+        return None
 
-    if any(k in text for k in STRICT_CATEGORY_BLOCK):
-        return False
+    scores = {}
+    for category, keywords in HOT_CATEGORIES.items():
+        hits = sum(1 for k in keywords if k in text)
+        scores[category] = hits
 
-    hits = sum(1 for k in STRICT_CATEGORY_ALLOW if k in text)
-    return hits >= 1
+    best_category = max(scores, key=scores.get)
+    if scores[best_category] <= 0:
+        return None
+
+    return best_category
 
 
-def product_score(row, price, rating, sold):
-    text = get_category_text(row)
-    allow_hits = sum(1 for k in STRICT_CATEGORY_ALLOW if k in text)
+def product_score(price, rating, sold, category):
+    category_bonus = {
+        "lighting": 30,
+        "power": 25,
+        "tools": 20,
+    }.get(category, 0)
 
     if 79 <= price <= 499:
         price_score = 3
@@ -119,12 +131,7 @@ def product_score(row, price, rating, sold):
     else:
         price_score = 1
 
-    return (
-        allow_hits * 100
-        + rating * 5
-        + min(sold, 500) / 50
-        + price_score
-    )
+    return category_bonus + rating * 5 + min(sold, 500) / 50 + price_score
 
 
 def load_csv_products():
@@ -134,16 +141,12 @@ def load_csv_products():
     r.raise_for_status()
 
     lines = []
-
     for line in r.iter_lines():
         if not line:
             continue
-
         if isinstance(line, bytes):
             line = line.decode("utf-8", errors="ignore")
-
         lines.append(line)
-
         if len(lines) > 20000:
             break
 
@@ -155,7 +158,6 @@ def load_csv_products():
     for row in reader:
         name = (row.get("title") or "").strip()
         link = (row.get("product_short link") or "").strip()
-
         image = (
             row.get("image_link")
             or row.get("additional_image_link")
@@ -166,26 +168,20 @@ def load_csv_products():
         rating = parse_float(row.get("item_rating") or 0)
         sold = parse_float(row.get("item_sold") or 0)
 
-        if not name:
+        if not name or not link or not image:
             continue
-        if not link:
-            continue
-        if not image:
-            continue
-
-        if not is_strict_category_match(row):
-            continue
-
         if rating < 4.2:
             continue
-
         if sold < 10:
             continue
-
         if price < 50 or price > 3000:
             continue
 
-        score = product_score(row, price, rating, sold)
+        hot_category = detect_hot_category(row, name)
+        if not hot_category:
+            continue
+
+        score = product_score(price, rating, sold, hot_category)
 
         products.append({
             "name": name,
@@ -194,6 +190,7 @@ def load_csv_products():
             "price": price,
             "rating": rating,
             "sold": sold,
+            "hot_category": hot_category,
             "score": score
         })
 
@@ -207,30 +204,34 @@ def load_csv_products():
 def ai_caption(product):
     price_text = format_price(product["price"])
 
-    fallback_options = [
-        f"""🔥 ของใช้ไฟฟ้าน่าใช้สำหรับบ้าน
+    hashtags = {
+        "lighting": "#BENHomeElectrical #ไฟLED #โคมไฟ #ของใช้ในบ้าน",
+        "power": "#BENHomeElectrical #อุปกรณ์ไฟฟ้า #ปลั๊กไฟ #ของใช้ในบ้าน",
+        "tools": "#BENHomeElectrical #เครื่องมือช่าง #อุปกรณ์ไฟฟ้า #ของใช้ในบ้าน",
+    }
+
+    fallback_options = {
+        "lighting": f"""🔥 ของใช้ไฟฟ้าน่าใช้สำหรับบ้าน
 
 {product['name']}
 
 💰 ราคา {price_text}
 
-เหมาะกับบ้าน งานช่าง และงานไฟฟ้า
-ดูรายละเอียดสินค้าได้ที่ลิงก์ด้านล่าง 👇
+เหมาะกับงานแสงสว่างและใช้งานในบ้าน
+กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
 
-#BENHomeElectrical #อุปกรณ์ไฟฟ้า #เครื่องมือช่าง #ของใช้ในบ้าน""",
-
-        f"""⚡ ไอเทมน่าใช้สำหรับบ้านและงานไฟฟ้า
+{hashtags['lighting']}""",
+        "power": f"""⚡ ไอเทมน่าใช้สำหรับบ้านและงานไฟฟ้า
 
 {product['name']}
 
 💰 ราคา {price_text}
 
 ใช้งานง่าย น่ามีติดบ้านไว้
-กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
+ดูรายละเอียดได้ที่ลิงก์ด้านล่าง 👇
 
-#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า""",
-
-        f"""🛠 ของน่าใช้สำหรับบ้านและงานช่าง
+{hashtags['power']}""",
+        "tools": f"""🛠 ของน่าใช้สำหรับบ้านและงานช่าง
 
 {product['name']}
 
@@ -238,10 +239,10 @@ def ai_caption(product):
 
 ใครกำลังหาอุปกรณ์ดี ๆ ลองดูตัวนี้ได้เลย 👇
 
-#BENHomeElectrical #เครื่องมือช่าง #อุปกรณ์ไฟฟ้า"""
-    ]
+{hashtags['tools']}"""
+    }
 
-    fallback = random.choice(fallback_options)
+    fallback = fallback_options.get(product["hot_category"], fallback_options["power"])
 
     if not OPENAI_KEY:
         return fallback
@@ -251,6 +252,7 @@ def ai_caption(product):
 
 สินค้า: {product['name']}
 ราคา: {price_text}
+หมวดหลัก: {product['hot_category']}
 
 เงื่อนไข:
 - สั้น
@@ -262,8 +264,8 @@ def ai_caption(product):
 - ห้ามบอกว่าขายได้กี่ชิ้น
 - ห้ามใส่ hashtag ShopeeAffiliate
 - ห้ามใส่ลิงก์ในคำตอบ
-- เน้นโทนของใช้ไฟฟ้า / เครื่องมือ / ของใช้ในบ้าน
-- ใส่ hashtag เกี่ยวกับเพจ 3-4 อัน
+- เน้นให้ตรงกับหมวด {product['hot_category']}
+- ใส่ hashtag 3-4 อันที่เกี่ยวกับเพจ
 """.strip()
 
     headers = {
@@ -273,9 +275,7 @@ def ai_caption(product):
 
     data = {
         "model": "gpt-4.1-mini",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
+        "messages": [{"role": "user", "content": prompt}]
     }
 
     try:
@@ -294,7 +294,6 @@ def ai_caption(product):
 
 def build_caption(product):
     base = ai_caption(product).strip()
-
     return f"""{base}
 
 🛒 สั่งซื้อสินค้า
@@ -305,7 +304,6 @@ def post_facebook(product, caption):
     print("STEP: facebook post", flush=True)
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
-
     payload = {
         "url": product["image"],
         "caption": caption,
@@ -314,7 +312,6 @@ def post_facebook(product, caption):
 
     r = requests.post(url, data=payload, timeout=30)
     data = r.json()
-
     print("POST RESPONSE:", data, flush=True)
     return data
 
@@ -323,7 +320,6 @@ def comment_link(post_id, link):
     print("STEP: comment affiliate", flush=True)
 
     url = f"https://graph.facebook.com/v25.0/{post_id}/comments"
-
     payload = {
         "message": f"🛒 สั่งซื้อสินค้า\n{link}",
         "access_token": PAGE_TOKEN
@@ -339,17 +335,18 @@ def comment_link(post_id, link):
 def pick_product(products):
     posted = load_posted()
 
-    candidates = [
-        p for p in products
-        if p["link"] not in posted
-    ]
+    lighting = [p for p in products if p["hot_category"] == "lighting" and p["link"] not in posted]
+    power = [p for p in products if p["hot_category"] == "power" and p["link"] not in posted]
+    tools = [p for p in products if p["hot_category"] == "tools" and p["link"] not in posted]
 
-    if not candidates:
+    buckets = [b for b in [lighting[:15], power[:15], tools[:15]] if b]
+
+    if not buckets:
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    pool = candidates[:30] if len(candidates) >= 30 else candidates
-    return random.choice(pool)
+    chosen_bucket = random.choice(buckets)
+    return random.choice(chosen_bucket)
 
 
 def run():
@@ -360,7 +357,6 @@ def run():
         return
 
     product = pick_product(products)
-
     if not product:
         return
 
@@ -368,7 +364,6 @@ def run():
     res = post_facebook(product, caption)
 
     post_id = res.get("post_id") or res.get("id")
-
     if not post_id:
         print("POST FAIL", res, flush=True)
         return
