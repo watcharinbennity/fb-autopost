@@ -46,7 +46,10 @@ def save_posted(data):
 
 def parse_float(v):
     try:
-        return float(str(v).replace(",", ""))
+        s = str(v).replace(",", "").strip()
+        if not s:
+            return 0
+        return float(s)
     except Exception:
         return 0
 
@@ -59,6 +62,30 @@ def format_price(v):
         return f"{p:,.0f} บาท"
     except Exception:
         return ""
+
+
+def get_best_price(row):
+    candidate_keys = [
+        "sale_price",
+        "discount_price",
+        "final_price",
+        "current_price",
+        "promo_price",
+        "price_min",
+        "price",
+    ]
+
+    values = []
+
+    for key in candidate_keys:
+        v = parse_float(row.get(key))
+        if v > 0:
+            values.append(v)
+
+    if not values:
+        return 0
+
+    return min(values)
 
 
 def get_category_text(row):
@@ -135,7 +162,7 @@ def load_csv_products():
             or ""
         ).strip()
 
-        price = parse_float(row.get("price") or 0)
+        price = get_best_price(row)
         rating = parse_float(row.get("item_rating") or 0)
         sold = parse_float(row.get("item_sold") or 0)
 
