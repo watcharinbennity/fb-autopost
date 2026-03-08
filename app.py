@@ -59,6 +59,7 @@ def load_csv_products():
 
         lines.append(line)
 
+        # อ่านแค่ช่วงต้นของไฟล์พอ
         if len(lines) > 1000:
             break
 
@@ -73,7 +74,6 @@ def load_csv_products():
         # ใช้ short link ก่อนเสมอ
         link = (
             row.get("product_short link")
-            or row.get("product_link")
             or ""
         ).strip()
 
@@ -93,9 +93,15 @@ def load_csv_products():
             continue
         if not image:
             continue
-        if rating < 4:
+
+        # AI v3 filter
+        if rating < 4.5:
             continue
-        if sold < 10:
+
+        if sold < 50:
+            continue
+
+        if price < 50 or price > 1500:
             continue
 
         products.append({
@@ -115,30 +121,36 @@ def load_csv_products():
 def ai_caption(product):
     price_text = format_price(product["price"])
 
-    fallback = f"""🔥 {product['name']}
+    fallback = f"""🔥 ของใช้ในบ้านที่กำลังฮิต
+
+{product['name']}
 
 💰 ราคา {price_text}
 
-ของน่าใช้สำหรับบ้านและงานไฟฟ้า
-ดูสินค้าได้ที่ลิงก์ด้านล่าง 👇"""
+เหมาะกับบ้าน งานช่าง งานไฟฟ้า
+ใช้งานง่าย ประหยัดพื้นที่
+
+กดดูสินค้า / โค้ดส่วนลดได้ที่ลิงก์ด้านล่าง 👇
+
+#BENHomeElectrical #ของใช้ในบ้าน #อุปกรณ์ไฟฟ้า #ShopeeAffiliate"""
 
     if not OPENAI_KEY:
         return fallback
 
     prompt = f"""
-เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
+เขียนโพสต์ขายของ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า: {product['name']}
 ราคา: {price_text}
 
 เงื่อนไข:
-- โพสต์สั้น
+- สั้น
 - อ่านง่าย
 - น่าซื้อ
+- แนวรีวิวสินค้า
 - ใส่ราคาได้
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
-- โทนเหมือนแนะนำของใช้ไฟฟ้าและของใช้ในบ้าน
 """.strip()
 
     headers = {
