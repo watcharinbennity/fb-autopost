@@ -47,16 +47,6 @@ def parse_int(v):
         return 0
 
 
-def format_price(v):
-    try:
-        p = float(v)
-        if p <= 0:
-            return ""
-        return f"{p:,.0f} บาท"
-    except Exception:
-        return ""
-
-
 def is_match(name, row):
     text = " ".join([
         (name or "").lower(),
@@ -122,14 +112,10 @@ def load_csv_products():
 
 
 def ai_caption(product):
-    price_text = format_price(product["price"])
-
     fallback = f"""🔥 {product['name']}
 
-💰 ราคา {price_text}
-
 ของน่าใช้สำหรับบ้านและงานไฟฟ้า
-ดูสินค้าได้ที่ลิงก์ด้านล่าง 👇"""
+เช็กราคาล่าสุดได้ที่ลิงก์ด้านล่าง 👇"""
 
     if not OPENAI_KEY:
         return fallback
@@ -138,15 +124,15 @@ def ai_caption(product):
 เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า: {product['name']}
-ราคา: {price_text}
 
 เงื่อนไข:
 - สั้น
 - อ่านง่าย
 - น่าซื้อ
-- ใส่ราคาได้
+- ห้ามใส่ราคา
 - ห้ามพูดยอดขาย
 - โทนเหมือนแนะนำของใช้ไฟฟ้าและเครื่องมือช่าง
+- ให้ชวนคนไปเช็กราคาล่าสุดที่ลิงก์
 """.strip()
 
     try:
