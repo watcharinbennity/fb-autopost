@@ -5,6 +5,8 @@ import random
 import requests
 from datetime import datetime, timedelta, timezone
 
+from video_generator import create_product_reel
+
 PAGE_ID = os.environ["PAGE_ID"]
 PAGE_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
 CSV_URL = os.environ["SHOPEE_CSV_URL"]
@@ -15,7 +17,6 @@ LOG_FILE = "post_log.json"
 
 TH_TZ = timezone(timedelta(hours=7))
 
-# คัดให้ตรงธีม BEN Home & Electrical
 CATEGORY_KEYWORDS = [
     "ไฟ", "หลอดไฟ", "led", "โคมไฟ", "ไฟโซล่า", "solar",
     "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "สายไฟ", "สวิตช์", "เบรกเกอร์",
@@ -107,7 +108,6 @@ def log_post(post_type, content, post_id=""):
     if isinstance(content, dict):
         row.update({
             "name": content.get("name", ""),
-            "price": content.get("price", 0),
             "link": content.get("link", ""),
             "rating": content.get("rating", 0),
             "sold": content.get("sold", 0),
@@ -132,9 +132,8 @@ def get_mode():
     if 18 * 60 + 30 <= hm < 19 * 60 + 30:
         return "product"
     if 21 * 60 <= hm < 22 * 60:
-        return "product"
+        return "reels"
 
-    # manual run
     return "product"
 
 
@@ -165,7 +164,6 @@ def load_csv_products(max_scan_rows=20000, max_candidates=300):
             if scanned > max_scan_rows:
                 break
 
-            # ใช้หัวคอลัมน์จริงของไฟล์ Shopee ตัวอย่างที่คุณอัปมา
             name = (row.get("title") or "").strip()
             link = (
                 row.get("product_short link")
@@ -178,7 +176,6 @@ def load_csv_products(max_scan_rows=20000, max_candidates=300):
                 or ""
             ).strip()
 
-            price = parse_float(row.get("price") or 0)
             rating = parse_float(row.get("item_rating") or 0)
             sold = parse_int(row.get("item_sold") or 0)
             stock = parse_int(row.get("stock") or 0)
@@ -198,7 +195,6 @@ def load_csv_products(max_scan_rows=20000, max_candidates=300):
                 "name": name,
                 "link": link,
                 "image": image,
-                "price": price,
                 "rating": rating,
                 "sold": sold
             })
@@ -223,7 +219,6 @@ def pick_product(products):
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    # เน้นสินค้าที่คะแนนดี / ยอดดี
     candidates.sort(
         key=lambda x: (
             parse_float(x.get("rating", 0)),
@@ -295,7 +290,6 @@ def build_product_caption(product):
 
 def build_viral_caption():
     topic = random.choice(VIRAL_TOPICS)
-
     fallback = f"""⚡ {topic}
 
 ใครใช้อยู่บ้าง มาแชร์กันหน่อย 👇"""
@@ -317,7 +311,6 @@ def build_viral_caption():
 
 def build_engage_caption():
     topic = random.choice(ENGAGE_TOPICS)
-
     fallback = f"""{topic}
 
 คอมเมนต์กันหน่อย 👇"""
@@ -332,6 +325,30 @@ def build_engage_caption():
 - ชวนคนตอบ
 - กันเอง
 - ไม่ขายของ
+""".strip()
+
+    return ai_text(prompt, fallback)
+
+
+def build_reels_caption(product):
+    fallback = f"""🔥 {product['name']}
+
+เช็กราคาล่าสุดที่ลิงก์ด้านล่าง 👇
+
+🛒 สั่งซื้อสินค้า
+{product['link']}"""
+
+    prompt = f"""
+เขียน caption Reels ภาษาไทย สำหรับเพจ BEN Home & Electrical
+
+สินค้า: {product['name']}
+
+เงื่อนไข:
+- สั้น
+- ดูเป็นคลิปแนะนำสินค้า
+- ห้ามใส่ราคา
+- ห้ามพูดยอดขาย
+- ปิดท้ายชวนเช็กราคาล่าสุดที่ลิงก์
 """.strip()
 
     return ai_text(prompt, fallback)
@@ -380,6 +397,63 @@ def post_text_only(caption):
     return data
 
 
+def upload_reel(product):
+    print("STEP: create reel video", flush=True)
+    video_path = create_product_reel(product["image"], product["name"], "reel.mp4")
+
+    # Step 1: start upload session
+    start_url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/video_reels"
+    start_res = requests.post(
+        start_url,
+        data={
+            "upload_phase": "start",
+            "access_token": PAGE_TOKEN
+        },
+        timeout=30
+    ).json()
+
+    print("REEL START:", start_res, flush=True)
+
+    video_id = start_res.get("video_id")
+    upload_url = start_res.get("upload_url")
+
+    if not video_id or not upload_url:
+        return {}
+
+    # Step 2: upload binary
+    with open(video_path, "rb") as f:
+        upload_res = requests.post(
+            upload_url,
+            data=f,
+            headers={"Authorization": f"OAuth {PAGE_TOKEN}"},
+            timeout=120
+        )
+
+    print("REEL UPLOAD:", upload_res.text, flush=True)
+
+    # Step 3: finish/publish
+    finish_res = requests.post(
+        start_url,
+        data={
+            "upload_phase": "finish",
+            "video_id": video_id,
+            "video_state": "PUBLISHED",
+            "description": build_reels_caption(product),
+            "access_token": PAGE_TOKEN
+        },
+        timeout=30
+    )
+
+    try:
+        data = finish_res.json()
+    except Exception:
+        print("REEL FINISH RAW:", finish_res.text, flush=True)
+        return {}
+
+    print("REEL FINISH:", data, flush=True)
+    return {"id": video_id, **data}
+
+
 def comment_link(post_id, link):
     print("STEP: comment affiliate", flush=True)
 
@@ -424,7 +498,6 @@ def run_product():
 def run_viral():
     caption = build_viral_caption()
     res = post_text_only(caption)
-
     post_id = res.get("id") or ""
     log_post("viral", caption, post_id)
     print("POST SUCCESS", flush=True)
@@ -433,10 +506,28 @@ def run_viral():
 def run_engage():
     caption = build_engage_caption()
     res = post_text_only(caption)
-
     post_id = res.get("id") or ""
     log_post("engage", caption, post_id)
     print("POST SUCCESS", flush=True)
+
+
+def run_reels():
+    products = load_csv_products()
+
+    if not products:
+        print("NO PRODUCTS", flush=True)
+        return
+
+    product = pick_product(products)
+    if not product:
+        return
+
+    res = upload_reel(product)
+    reel_id = res.get("id") or res.get("video_id") or ""
+
+    save_posted_link(product["link"])
+    log_post("reels", product, reel_id)
+    print("REEL SUCCESS", flush=True)
 
 
 def run():
@@ -449,6 +540,10 @@ def run():
 
     if mode == "engage":
         run_engage()
+        return
+
+    if mode == "reels":
+        run_reels()
         return
 
     run_product()
