@@ -14,7 +14,7 @@ permissions:
 jobs:
   runbot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -36,12 +36,16 @@ jobs:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
         run: python -u app.py
 
       - name: Save logs
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add posted.json || true
+
+          git add posted_products.json || true
+          git add post_log.json || true
+
           git diff --cached --quiet || git commit -m "update bot logs"
           git push || echo "no change"
