@@ -4,65 +4,89 @@ import io
 import json
 import random
 import requests
-from openai import OpenAI
+from datetime import datetime, timedelta, timezone
 
 PAGE_ID = os.environ["PAGE_ID"]
 PAGE_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
 CSV_URL = os.environ["SHOPEE_CSV_URL"]
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 
-client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
+POSTED_FILE = "posted_products.json"
+LOG_FILE = "post_log.json"
 
-POST_DB = "posted.json"
-
-HOT_CATEGORIES = {
-    "lighting": [
-        "led", "light", "lamp", "lighting", "solar", "solar light",
-        "โซล่า", "โซลาร์เซลล์", "หลอดไฟ", "โคมไฟ", "ไฟ", "ไฟ led"
-    ],
-    "power": [
-        "plug", "socket", "adapter", "charger", "usb charger", "power strip",
-        "extension", "cable", "wire", "battery", "switch", "breaker",
-        "ปลั๊ก", "ปลั๊กไฟ", "สายไฟ", "สายชาร์จ", "เบรกเกอร์", "สวิตช์",
-        "อุปกรณ์ไฟฟ้า", "เครื่องใช้ไฟฟ้า"
-    ],
-    "tools": [
-        "tool", "tools", "hardware", "tester", "multimeter", "drill",
-        "screwdriver", "plier", "wrench",
-        "เครื่องมือ", "เครื่องมือช่าง", "ไขควง", "สว่าน", "คีม", "ประแจ", "มิเตอร์",
-        "เชื่อม", "หน้ากากเชื่อม", "welder", "welding"
-    ],
-}
-
-BLOCK_KEYWORDS = [
-    "car", "automotive", "motor", "bike", "brake", "steering",
-    "รถ", "รถยนต์", "มอเตอร์ไซค์", "อะไหล่รถ", "แต่งรถ", "พวงมาลัย", "ผ้าเบรค",
-    "fashion", "cosmetic", "beauty", "supplement",
-    "เสื้อ", "กางเกง", "เครื่องสำอาง", "อาหารเสริม",
-    "toy", "pet", "baby", "ของเล่น", "สัตว์เลี้ยง", "เด็กอ่อน"
-]
+TH_TZ = timezone(timedelta(hours=7))
 
 
-def load_posted():
-    if os.path.exists(POST_DB):
-        with open(POST_DB, "r", encoding="utf-8") as f:
+def load_json(path, default=None):
+    if default is None:
+        default = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return []
+    except Exception:
+        return default
 
 
-def save_posted(data):
-    with open(POST_DB, "w", encoding="utf-8") as f:
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def parse_float(v):
+def normalize_posted(raw):
+    cleaned = []
+    if not isinstance(raw, list):
+        return cleaned
+
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            cleaned.append(item.strip())
+        elif isinstance(item, dict):
+            link = item.get("link")
+            if isinstance(link, str) and link.strip():
+                cleaned.append(link.strip())
+
+    return list(dict.fromkeys(cleaned))
+
+
+def log_post(post_type, product=None, post_id=None):
+    logs = load_json(LOG_FILE, [])
+    if not isinstance(logs, list):
+        logs = []
+
+    row = {
+        "time": str(datetime.now(TH_TZ)),
+        "type": post_type,
+        "post_id": post_id or ""
+    }
+
+    if isinstance(product, dict):
+        row.update({
+            "name": product.get("name", ""),
+            "price": product.get("price", 0),
+            "rating": product.get("rating", 0),
+            "link": product.get("link", "")
+        })
+
+    logs.append(row)
+    save_json(LOG_FILE, logs)
+
+
+def parse_float(v, default=0.0):
     try:
-        s = str(v).replace(",", "").replace("฿", "").strip()
-        if not s:
-            return 0
-        return float(s)
+        if v is None or str(v).strip() == "":
+            return default
+        return float(str(v).replace(",", ""))
     except Exception:
-        return 0
+        return default
+
+
+def parse_int(v, default=0):
+    try:
+        if v is None or str(v).strip() == "":
+            return default
+        return int(float(str(v).replace(",", "")))
+    except Exception:
+        return default
 
 
 def format_price(v):
@@ -75,261 +99,161 @@ def format_price(v):
         return ""
 
 
-def get_price_candidates(row):
-    candidate_keys = [
-        "sale_price",
-        "discount_price",
-        "final_price",
-        "current_price",
-        "promo_price",
-        "price_min",
-        "price_max",
-        "price",
+def is_relevant_product(row, name):
+    # ใช้หมวดจริงจากไฟล์ตัวอย่าง
+    c1 = (row.get("global_category1") or "").strip().lower()
+    c2 = (row.get("global_category2") or "").strip().lower()
+    c3 = (row.get("global_category3") or "").strip().lower()
+    text = f"{c1} {c2} {c3} {name.lower()}"
+
+    allow_keywords = [
+        "home", "living", "tools", "accessories", "charger", "chargers",
+        "cable", "cables", "lighting", "electrical", "led", "plug",
+        "solar", "lamp", "light", "socket", "adapter", "power",
+        "drill", "screwdriver", "plier", "wrench", "tool", "เครื่องมือ",
+        "ไฟ", "ปลั๊ก", "โคม", "สายไฟ", "ไฟฟ้า", "หลอด", "ชาร์จ"
     ]
 
-    values = []
-    for key in candidate_keys:
-        v = parse_float(row.get(key))
-        if v > 0:
-            values.append(v)
-
-    return sorted(set(values))
+    return any(k in text for k in allow_keywords)
 
 
-def get_price_info(row, name=""):
-    values = get_price_candidates(row)
-
-    if not values:
-        return {
-            "price": 0,
-            "price_text": "",
-            "is_range": False
-        }
-
-    low = min(values)
-    high = max(values)
-
-    variant_hint = False
-    name_l = (name or "").lower()
-
-    if "/" in name_l or "รุ่น" in name_l or "model" in name_l:
-        variant_hint = True
-
-    if high > low:
-        variant_hint = True
-
-    if variant_hint:
-        return {
-            "price": low,
-            "price_text": f"เริ่มต้น {low:,.0f} บาท",
-            "is_range": True
-        }
-
-    return {
-        "price": low,
-        "price_text": f"{low:,.0f} บาท",
-        "is_range": False
-    }
-
-
-def get_search_text(row, name):
-    cat1 = (row.get("global_category1") or "").strip().lower()
-    cat2 = (row.get("global_category2") or "").strip().lower()
-    cat3 = (row.get("global_category3") or "").strip().lower()
-    shop_name = (row.get("shop_name") or "").strip().lower()
-    seller_name = (row.get("seller_name") or "").strip().lower()
-    return f"{name} {cat1} {cat2} {cat3} {shop_name} {seller_name}".lower()
-
-
-def detect_hot_category(row, name):
-    text = get_search_text(row, name)
-
-    if any(b in text for b in BLOCK_KEYWORDS):
-        return None
-
-    scores = {}
-    for cat, words in HOT_CATEGORIES.items():
-        hits = sum(1 for w in words if w in text)
-        scores[cat] = hits
-
-    best = max(scores, key=scores.get)
-    if scores[best] <= 0:
-        return None
-
-    return best
-
-
-def score_product(price, rating, sold, category):
-    category_bonus = {
-        "lighting": 45,
-        "power": 40,
-        "tools": 42,
-    }.get(category, 0)
-
-    if 79 <= price <= 499:
-        price_score = 4
-    elif 500 <= price <= 999:
-        price_score = 3
-    elif 1000 <= price <= 2000:
-        price_score = 2
-    else:
-        price_score = 1
-
-    sold_score = min(sold, 500) / 40
-    rating_score = rating * 6
-
-    return category_bonus + price_score + sold_score + rating_score
-
-
-def load_products():
+def load_csv_products(max_scan_rows=100000, max_candidates=500):
     print("STEP: load csv", flush=True)
 
-    r = requests.get(CSV_URL, stream=True, timeout=60)
-    r.raise_for_status()
+    try:
+        r = requests.get(CSV_URL, stream=True, timeout=(15, 60))
+        r.raise_for_status()
 
-    lines = []
+        decoded_lines = (
+            line.decode("utf-8", errors="ignore")
+            for line in r.iter_lines()
+            if line
+        )
 
-    for line in r.iter_lines():
-        if not line:
-            continue
+        reader = csv.DictReader(decoded_lines)
+        print("CSV HEADERS:", reader.fieldnames, flush=True)
 
-        if isinstance(line, bytes):
-            line = line.decode("utf-8", errors="ignore")
+        products = []
+        scanned = 0
 
-        lines.append(line)
+        for row in reader:
+            scanned += 1
+            if scanned > max_scan_rows:
+                break
 
-        if len(lines) > 20000:
-            break
+            # ใช้หัวคอลัมน์จริงจากไฟล์ตัวอย่างของคุณ
+            name = (row.get("title") or "").strip()
 
-    text = "\n".join(lines)
-    reader = csv.DictReader(io.StringIO(text))
+            link = (
+                row.get("product_short link")
+                or row.get("product_link")
+                or ""
+            ).strip()
 
-    products = []
+            image = (
+                row.get("image_link")
+                or row.get("additional_image_link")
+                or ""
+            ).strip()
 
-    for row in reader:
-        name = (row.get("title") or "").strip()
-        link = (row.get("product_short link") or "").strip()
-        image = (
-            row.get("image_link")
-            or row.get("additional_image_link")
-            or ""
-        ).strip()
+            price = parse_float(row.get("price") or 0)
+            rating = parse_float(row.get("item_rating") or 0)
+            sold = parse_int(row.get("item_sold") or 0)
+            stock = parse_int(row.get("stock") or 0)
 
-        price_info = get_price_info(row, name)
-        price = price_info["price"]
-        price_text = price_info["price_text"]
+            if not name or not link or not image:
+                continue
 
-        rating = parse_float(row.get("item_rating") or 0)
-        sold = parse_float(row.get("item_sold") or 0)
+            if stock <= 0:
+                continue
 
-        if not name or not link or not image:
-            continue
-        if rating < 4.2:
-            continue
-        if sold < 10:
-            continue
-        if price < 50 or price > 3000:
-            continue
+            if rating < 4:
+                continue
 
-        category = detect_hot_category(row, name)
-        if not category:
-            continue
+            if sold < 10:
+                continue
 
-        score = score_product(price, rating, sold, category)
+            if not is_relevant_product(row, name):
+                continue
 
-        products.append({
-            "name": name,
-            "link": link,
-            "image": image,
-            "price": price,
-            "price_text": price_text,
-            "rating": rating,
-            "sold": sold,
-            "category": category,
-            "score": score
-        })
+            products.append({
+                "name": name,
+                "link": link,
+                "image": image,
+                "price": price,
+                "rating": rating,
+                "sold": sold
+            })
 
-    products.sort(key=lambda x: x["score"], reverse=True)
-    print("CSV PRODUCTS:", len(products), flush=True)
-    return products[:500]
+            if len(products) >= max_candidates:
+                break
 
+        print(f"CSV SCANNED: {scanned}", flush=True)
+        print(f"CSV PRODUCTS: {len(products)}", flush=True)
+        return products
 
-def fallback_caption(product):
-    price_text = product.get("price_text") or format_price(product["price"])
-
-    by_cat = {
-        "lighting": f"""🔥 ของใช้ไฟฟ้าน่าใช้สำหรับบ้าน
-
-{product['name']}
-
-💰 ราคา {price_text}
-
-เหมาะกับงานแสงสว่างและใช้งานในบ้าน
-กดดูสินค้าได้ที่ลิงก์ด้านล่าง 👇
-
-#BENHomeElectrical #ไฟLED #โคมไฟ #ของใช้ในบ้าน""",
-
-        "power": f"""⚡ ไอเทมน่าใช้สำหรับบ้านและงานไฟฟ้า
-
-{product['name']}
-
-💰 ราคา {price_text}
-
-ใช้งานง่าย น่ามีติดบ้านไว้
-ดูรายละเอียดได้ที่ลิงก์ด้านล่าง 👇
-
-#BENHomeElectrical #อุปกรณ์ไฟฟ้า #ปลั๊กไฟ #ของใช้ในบ้าน""",
-
-        "tools": f"""🛠 ของน่าใช้สำหรับบ้านและงานช่าง
-
-{product['name']}
-
-💰 ราคา {price_text}
-
-ใครกำลังหาอุปกรณ์ดี ๆ ลองดูตัวนี้ได้เลย 👇
-
-#BENHomeElectrical #เครื่องมือช่าง #อุปกรณ์ไฟฟ้า #ของใช้ในบ้าน"""
-    }
-
-    return by_cat.get(product["category"], by_cat["power"])
+    except requests.exceptions.Timeout:
+        print("CSV TIMEOUT", flush=True)
+        return []
+    except Exception as e:
+        print("CSV ERROR:", e, flush=True)
+        return []
 
 
 def ai_caption(product):
-    if not client:
-        return fallback_caption(product)
+    price_text = format_price(product.get("price", 0))
 
-    price_text = product.get("price_text") or format_price(product["price"])
+    fallback = f"""🔥 {product['name']}
+
+💰 ราคา {price_text}
+
+ของน่าใช้สำหรับบ้านและงานไฟฟ้า
+ดูสินค้าได้ที่ลิงก์ด้านล่าง 👇"""
+
+    if not OPENAI_KEY:
+        return fallback
 
     prompt = f"""
 เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า: {product['name']}
 ราคา: {price_text}
-หมวด: {product['category']}
 
 เงื่อนไข:
 - สั้น
 - อ่านง่าย
-- น่าซื้อ
-- โทนแนะนำสินค้าใช้งานจริง
+- น่าคลิก
 - ใส่ราคาได้
-- ถ้าเป็นสินค้าหลายรุ่นให้ใช้คำว่า "ราคาเริ่มต้น"
 - ห้ามพูดถึงยอดขาย
 - ห้ามบอกว่าขายได้กี่ชิ้น
-- ห้ามใส่ hashtag ShopeeAffiliate
-- ห้ามใส่ลิงก์ในคำตอบ
-- ใส่ hashtag 3-4 อันที่เกี่ยวกับเพจ BEN Home & Electrical
+- โทนเหมือนแนะนำของใช้ไฟฟ้า ของใช้ในบ้าน หรือเครื่องมือช่าง
+- ปิดท้ายชวนกดดูสินค้า
 """.strip()
 
+    headers = {
+        "Authorization": f"Bearer {OPENAI_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": "gpt-4.1-mini",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
+
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=20
         )
-        return resp.choices[0].message.content
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
-        return fallback_caption(product)
+        return fallback
 
 
 def build_caption(product):
@@ -344,6 +268,7 @@ def post_facebook(product, caption):
     print("STEP: facebook post", flush=True)
 
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos"
+
     payload = {
         "url": product["image"],
         "caption": caption,
@@ -351,7 +276,12 @@ def post_facebook(product, caption):
     }
 
     r = requests.post(url, data=payload, timeout=30)
-    data = r.json()
+
+    try:
+        data = r.json()
+    except Exception:
+        print("POST RAW:", r.text, flush=True)
+        return {}
 
     print("POST RESPONSE:", data, flush=True)
     return data
@@ -374,30 +304,43 @@ def comment_link(post_id, link):
 
 
 def pick_product(products):
-    posted = load_posted()
+    posted = set(normalize_posted(load_json(POSTED_FILE, [])))
 
-    groups = {
-        "lighting": [p for p in products if p["category"] == "lighting" and p["link"] not in posted],
-        "power": [p for p in products if p["category"] == "power" and p["link"] not in posted],
-        "tools": [p for p in products if p["category"] == "tools" and p["link"] not in posted],
-    }
+    candidates = [p for p in products if p["link"] not in posted]
 
-    non_empty = [g[:15] for g in groups.values() if g]
-    if not non_empty:
+    if not candidates:
         print("NO NEW PRODUCT", flush=True)
         return None
 
-    chosen_group = random.choice(non_empty)
-    return random.choice(chosen_group)
+    # ให้สินค้าที่คะแนนสูง / ยอดดี / ราคาไม่แปลก มีสิทธิ์มากขึ้น
+    candidates.sort(
+        key=lambda x: (
+            parse_float(x.get("rating", 0)),
+            parse_int(x.get("sold", 0)),
+            parse_float(x.get("price", 0))
+        ),
+        reverse=True
+    )
+
+    pool = candidates[:50] if len(candidates) >= 50 else candidates
+    return random.choice(pool)
+
+
+def save_posted_link(link):
+    posted = normalize_posted(load_json(POSTED_FILE, []))
+    posted.append(link)
+    save_json(POSTED_FILE, list(dict.fromkeys(posted)))
 
 
 def run():
-    products = load_products()
+    products = load_csv_products(max_scan_rows=100000, max_candidates=500)
+
     if not products:
         print("NO PRODUCTS", flush=True)
         return
 
     product = pick_product(products)
+
     if not product:
         return
 
@@ -405,15 +348,14 @@ def run():
     res = post_facebook(product, caption)
 
     post_id = res.get("post_id") or res.get("id")
+
     if not post_id:
         print("POST FAIL", res, flush=True)
         return
 
     comment_link(post_id, product["link"])
-
-    posted = load_posted()
-    posted.append(product["link"])
-    save_posted(posted)
+    save_posted_link(product["link"])
+    log_post("product", product=product, post_id=post_id)
 
     print("POST SUCCESS", flush=True)
 
