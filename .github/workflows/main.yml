@@ -7,7 +7,7 @@ on:
     - cron: '0 5 * * *'    # 12:00 product
     - cron: '0 8 * * *'    # 15:00 engage
     - cron: '30 11 * * *'  # 18:30 product
-    - cron: '0 14 * * *'   # 21:00 product
+    - cron: '0 14 * * *'   # 21:00 reels
 
 permissions:
   contents: write
@@ -15,7 +15,7 @@ permissions:
 jobs:
   runbot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
