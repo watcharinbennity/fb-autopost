@@ -1,2 +1,5 @@
 requests
-openai
+moviepy==1.0.3
+Pillow
+imageio-ffmpeg
+numpy
