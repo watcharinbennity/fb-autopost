@@ -1,77 +1,122 @@
 import os
 import textwrap
+import subprocess
 import requests
-from moviepy.editor import ImageClip, ColorClip, CompositeVideoClip, concatenate_videoclips
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 1080
 HEIGHT = 1920
-FPS = 24
 
 
-def _download_image(url: str, path: str) -> str:
+def download_image(url, out_path):
     r = requests.get(url, timeout=30)
     r.raise_for_status()
-    with open(path, "wb") as f:
+    with open(out_path, "wb") as f:
         f.write(r.content)
-    return path
+    return out_path
 
 
-def _make_text_image(text: str, path: str, width: int = WIDTH, height: int = HEIGHT) -> str:
-    img = Image.new("RGB", (width, height), color=(12, 12, 12))
+def make_text_slide(text, out_path, title="BEN Home & Electrical"):
+    img = Image.new("RGB", (WIDTH, HEIGHT), color=(12, 12, 12))
     draw = ImageDraw.Draw(img)
 
-    # ใช้ default font ถ้าไม่มีฟอนต์ไทยใน runner
     try:
-        font = ImageFont.truetype("DejaVuSans.ttf", 62)
+        title_font = ImageFont.truetype("DejaVuSans.ttf", 46)
+        body_font = ImageFont.truetype("DejaVuSans.ttf", 68)
         small_font = ImageFont.truetype("DejaVuSans.ttf", 42)
     except Exception:
-        font = ImageFont.load_default()
+        title_font = ImageFont.load_default()
+        body_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
 
-    title = "BEN Home & Electrical"
-    body = textwrap.fill(text, width=18)
-    footer = "เช็กราคาล่าสุดที่ลิงก์ด้านล่าง"
+    wrapped = textwrap.fill(text, width=18)
 
-    draw.text((60, 120), title, fill=(255, 255, 255), font=small_font)
-    draw.multiline_text((60, 520), body, fill=(255, 255, 255), font=font, spacing=18)
-    draw.text((60, 1600), footer, fill=(255, 220, 80), font=small_font)
+    draw.text((60, 100), title, fill=(255, 255, 255), font=title_font)
+    draw.multiline_text((60, 520), wrapped, fill=(255, 255, 255), font=body_font, spacing=18)
+    draw.text((60, 1650), "เช็กราคาล่าสุดที่ลิงก์ด้านล่าง", fill=(255, 220, 80), font=small_font)
 
-    img.save(path)
-    return path
+    img.save(out_path)
+    return out_path
 
 
-def create_product_reel(image_url: str, product_name: str, output_path: str = "reel.mp4") -> str:
-    product_img = "tmp_product.jpg"
-    intro_img = "tmp_intro.jpg"
-    outro_img = "tmp_outro.jpg"
+def fit_product_image(in_path, out_path):
+    img = Image.open(in_path).convert("RGB")
+    bg = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
 
-    _download_image(image_url, product_img)
-    _make_text_image(product_name, intro_img)
-    _make_text_image("ของน่าใช้สำหรับบ้านและงานไฟฟ้า", outro_img)
+    ratio = min(WIDTH / img.width, HEIGHT / img.height)
+    new_size = (int(img.width * ratio), int(img.height * ratio))
+    img = img.resize(new_size)
 
-    intro = ImageClip(intro_img).set_duration(2.2)
-    product = ImageClip(product_img).resize(height=HEIGHT).set_position("center")
-    bg = ColorClip(size=(WIDTH, HEIGHT), color=(0, 0, 0), duration=4.6)
-    product_scene = CompositeVideoClip([bg, product.set_duration(4.6)], size=(WIDTH, HEIGHT))
-    outro = ImageClip(outro_img).set_duration(2.2)
+    x = (WIDTH - img.width) // 2
+    y = (HEIGHT - img.height) // 2
+    bg.paste(img, (x, y))
+    bg.save(out_path)
+    return out_path
 
-    video = concatenate_videoclips([intro, product_scene, outro], method="compose")
-    video.write_videofile(
-        output_path,
-        fps=FPS,
-        codec="libx264",
-        audio=False,
-        preset="medium",
-        threads=2,
-        logger=None
-    )
 
-    for p in [product_img, intro_img, outro_img]:
+def make_video_from_image(image_path, duration, out_path):
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", image_path,
+        "-t", str(duration),
+        "-vf", f"scale={WIDTH}:{HEIGHT},format=yuv420p",
+        "-r", "24",
+        "-pix_fmt", "yuv420p",
+        out_path
+    ]
+    subprocess.run(cmd, check=True)
+    return out_path
+
+
+def concat_videos(video_list, out_path):
+    list_file = "inputs.txt"
+    with open(list_file, "w", encoding="utf-8") as f:
+        for v in video_list:
+            f.write(f"file '{os.path.abspath(v)}'\n")
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", list_file,
+        "-c", "copy",
+        out_path
+    ]
+    subprocess.run(cmd, check=True)
+    return out_path
+
+
+def create_product_reel(image_url, product_name, out_path="reel.mp4"):
+    raw_img = "product_raw.jpg"
+    product_slide = "product_slide.jpg"
+    intro_slide = "intro.jpg"
+    outro_slide = "outro.jpg"
+
+    intro_video = "intro.mp4"
+    product_video = "product.mp4"
+    outro_video = "outro.mp4"
+
+    download_image(image_url, raw_img)
+    fit_product_image(raw_img, product_slide)
+
+    make_text_slide(product_name, intro_slide, title="BEN Home & Electrical")
+    make_text_slide("ของน่าใช้สำหรับบ้านและงานไฟฟ้า", outro_slide, title="BEN Home & Electrical")
+
+    make_video_from_image(intro_slide, 2, intro_video)
+    make_video_from_image(product_slide, 4, product_video)
+    make_video_from_image(outro_slide, 2, outro_video)
+
+    concat_videos([intro_video, product_video, outro_video], out_path)
+
+    for p in [
+        raw_img, product_slide, intro_slide, outro_slide,
+        intro_video, product_video, outro_video, "inputs.txt"
+    ]:
         if os.path.exists(p):
             try:
                 os.remove(p)
             except Exception:
                 pass
 
-    return output_path
+    return out_path
