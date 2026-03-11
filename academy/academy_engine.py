@@ -17,6 +17,7 @@ def load_state():
     if os.path.exists(STATE_PATH):
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
+
     return {
         "initialized": False,
         "module_index": 0,
@@ -30,6 +31,7 @@ def save_state(data):
 
 
 def openai_chat(prompt: str) -> str:
+
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={
@@ -43,11 +45,14 @@ def openai_chat(prompt: str) -> str:
         },
         timeout=60,
     )
+
     r.raise_for_status()
+
     return r.json()["choices"][0]["message"]["content"]
 
 
-def tts_to_mp3(text: str, out_path: str = "speech.mp3") -> str:
+def tts_to_mp3(text: str):
+
     r = requests.post(
         "https://api.openai.com/v1/audio/speech",
         headers={
@@ -61,13 +66,18 @@ def tts_to_mp3(text: str, out_path: str = "speech.mp3") -> str:
         },
         timeout=180,
     )
+
     r.raise_for_status()
 
-    with open(out_path, "wb") as f:
+    with open("intro.mp3", "wb") as f:
         f.write(r.content)
 
-    return out_path
+    return "intro.mp3"
 
+
+# ---------------------------
+# FACEBOOK REEL UPLOAD
+# ---------------------------
 
 def upload_reel(video_path, caption):
 
@@ -77,24 +87,34 @@ def upload_reel(video_path, caption):
         start_url,
         data={
             "upload_phase": "start",
-            "access_token": PAGE_TOKEN
-        }
-    ).json()
+            "access_token": PAGE_TOKEN,
+        },
+    )
 
-    video_id = start_res["video_id"]
-    upload_url = start_res["upload_url"]
+    start_res.raise_for_status()
+
+    start_data = start_res.json()
+
+    print("REEL START:", start_data, flush=True)
+
+    if "error" in start_data:
+        raise RuntimeError(start_data)
+
+    video_id = start_data["video_id"]
+    upload_url = start_data["upload_url"]
 
     with open(video_path, "rb") as f:
 
         upload_res = requests.post(
             upload_url,
-            files={
-                "file": f
-            },
-            headers={
-                "Authorization": f"OAuth {PAGE_TOKEN}"
-            }
+            files={"file": f},
+            headers={"Authorization": f"OAuth {PAGE_TOKEN}"},
         )
+
+    print("UPLOAD STATUS:", upload_res.status_code, flush=True)
+    print("UPLOAD BODY:", upload_res.text, flush=True)
+
+    upload_res.raise_for_status()
 
     finish_res = requests.post(
         start_url,
@@ -103,14 +123,48 @@ def upload_reel(video_path, caption):
             "video_id": video_id,
             "video_state": "PUBLISHED",
             "description": caption,
-            "access_token": PAGE_TOKEN
-        }
+            "access_token": PAGE_TOKEN,
+        },
     )
 
-    return finish_res.json()
+    print("FINISH STATUS:", finish_res.status_code, flush=True)
+    print("FINISH BODY:", finish_res.text, flush=True)
+
+    finish_res.raise_for_status()
+
+    finish_data = finish_res.json()
+
+    if "error" in finish_data:
+        raise RuntimeError(finish_data)
+
+    print("REEL SUCCESS", flush=True)
+
+    return finish_data
+
+
+# ---------------------------
+# FACEBOOK TEXT POST
+# ---------------------------
+
+def publish_text_post(message):
+
+    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
+
+    res = requests.post(
+        url,
+        data={
+            "message": message,
+            "access_token": PAGE_TOKEN,
+        },
+    )
+
+    res.raise_for_status()
+
+    return res.json()
 
 
 def create_intro_caption():
+
     return (
         "⚡ เปิดตัว BEN Home & Electrical Academy\n\n"
         "สวัสดีครับ ผมช่างเบน\n"
@@ -119,105 +173,124 @@ def create_intro_caption():
     )
 
 
+# ---------------------------
+# FIRST INTRO REEL
+# ---------------------------
+
 def run_first_intro():
+
     narration = (
-        "สวัสดีครับ ผมช่างเบน จาก BEN Home & Electrical. "
-        "จากนี้เราจะเรียนไฟฟ้ากันตั้งแต่พื้นฐาน ไปจนถึงระดับวิศวกร. "
-        "ผมจะสอนแบบเข้าใจง่าย ใช้ได้จริง และเรียนไปด้วยกันครับ"
+        "สวัสดีครับ ผมช่างเบน จาก BEN Home and Electrical "
+        "จากนี้เราจะเรียนไฟฟ้ากันตั้งแต่พื้นฐาน "
+        "จนถึงระดับวิศวกร"
     )
 
-    audio_path = tts_to_mp3(narration, "intro.mp3")
+    audio_path = tts_to_mp3(narration)
+
     video_path = build_intro_reel(
         mascot_path=MASCOT_PATH,
         audio_path=audio_path,
-        out_path="academy_intro_final.mp4",
+        out_path="intro_final.mp4",
     )
 
-    result = upload_reel(video_path, create_intro_caption())
-    print("INTRO REEL RESULT:", result, flush=True)
+    print("VIDEO CREATED:", video_path, flush=True)
 
+    result = upload_reel(video_path, create_intro_caption())
+
+    print("REEL RESULT:", result, flush=True)
+
+
+# ---------------------------
+# NEXT TOPIC
+# ---------------------------
 
 def get_next_topic():
+
     state = load_state()
-    m_idx = state["module_index"]
-    t_idx = state["topic_index"]
 
-    if m_idx >= len(CURRICULUM):
-        m_idx = 0
-        t_idx = 0
+    m = state["module_index"]
+    t = state["topic_index"]
 
-    module = CURRICULUM[m_idx]
-    topics = module["topics"]
+    module = CURRICULUM[m]
+    topic = module["topics"][t]
 
-    if t_idx >= len(topics):
-        m_idx += 1
-        t_idx = 0
-        if m_idx >= len(CURRICULUM):
-            m_idx = 0
-        module = CURRICULUM[m_idx]
-        topics = module["topics"]
+    state["topic_index"] += 1
 
-    topic = topics[t_idx]
+    if state["topic_index"] >= len(module["topics"]):
+        state["topic_index"] = 0
+        state["module_index"] += 1
 
-    # advance pointer
-    state["module_index"] = m_idx
-    state["topic_index"] = t_idx + 1
+    if state["module_index"] >= len(CURRICULUM):
+        state["module_index"] = 0
+
     save_state(state)
 
     return module["module"], topic
 
 
-def generate_knowledge_post(module_name: str, topic: str) -> str:
+# ---------------------------
+# GENERATE KNOWLEDGE POST
+# ---------------------------
+
+def generate_knowledge_post(module_name, topic):
+
     prompt = f"""
-ช่วยเขียนโพสต์ความรู้ไฟฟ้าภาษาไทย สำหรับเพจ BEN Home & Electrical
+เขียนโพสต์ความรู้ไฟฟ้า
 
 หัวข้อ: {topic}
 หมวด: {module_name}
 
-เงื่อนไข:
-- อธิบายละเอียดแบบคนทั่วไปเข้าใจ
-- เริ่มจากนิยามง่าย ๆ
-- ยกตัวอย่างในชีวิตจริง
-- ปิดท้ายด้วยสรุปสั้น ๆ
-- ใช้ภาษาง่าย แต่เนื้อหาแน่น
-- ความยาวประมาณ 250-500 คำ
-- มีชื่อ "ช่างเบน" ในโพสต์
-- จัดรูปแบบให้อ่านง่ายบน Facebook
-
-ขอผลลัพธ์เป็นโพสต์พร้อมลง Facebook ได้ทันที
-""".strip()
-
-    fallback = (
-        f"⚡ {topic}\n\n"
-        f"ช่างเบนจะพาเรียนเรื่อง {topic} ในหมวด {module_name} แบบเข้าใจง่าย\n\n"
-        f"เริ่มจากพื้นฐานก่อน: {topic} เป็นเรื่องสำคัญของงานไฟฟ้า เพราะใช้ต่อยอดไปยังระบบจริงได้\n\n"
-        f"ลองนึกถึงการใช้งานในชีวิตประจำวัน เช่น ปลั๊กไฟ สวิตช์ หลอดไฟ หรือเครื่องใช้ไฟฟ้าในบ้าน "
-        f"ทั้งหมดล้วนเกี่ยวข้องกับหลักการไฟฟ้านี้\n\n"
-        f"สรุป: ถ้าเข้าใจ {topic} ได้ดี จะเรียนเรื่องไฟฟ้าระดับต่อไปง่ายขึ้นมาก\n\n"
-        f"#ช่างเบน #BENHomeAndElectrical #ไฟฟ้า"
-    )
+อธิบายเข้าใจง่าย
+ยกตัวอย่างจริง
+ความยาวประมาณ 300 คำ
+"""
 
     try:
         return openai_chat(prompt)
-    except Exception:
-        return fallback
 
+    except Exception:
+
+        return f"""
+⚡ {topic}
+
+ช่างเบนจะพาเรียนเรื่อง {topic}
+
+เนื้อหานี้เป็นพื้นฐานสำคัญของงานไฟฟ้า
+ถ้าเข้าใจหัวข้อนี้ จะต่อยอดเรื่องอื่นได้ง่าย
+
+#BENHomeAndElectrical
+"""
+
+
+# ---------------------------
+# MAIN
+# ---------------------------
 
 def main():
+
     state = load_state()
 
+    # FIRST RUN
     if not state.get("initialized", False):
+
         run_first_intro()
+
         state["initialized"] = True
         save_state(state)
+
         return
 
-    module_name, topic = get_next_topic()
-    print(f"POST TOPIC: {module_name} - {topic}", flush=True)
+    # NEXT POSTS
 
-    post_text = generate_knowledge_post(module_name, topic)
-    result = publish_text_post(post_text)
-    print("TEXT POST RESULT:", result, flush=True)
+    module_name, topic = get_next_topic()
+
+    print("POST:", module_name, topic, flush=True)
+
+    text = generate_knowledge_post(module_name, topic)
+
+    result = publish_text_post(text)
+
+    print("POST RESULT:", result, flush=True)
 
 
 if __name__ == "__main__":
