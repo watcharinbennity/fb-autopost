@@ -2,51 +2,37 @@ name: FB Auto Post
 
 on:
   workflow_dispatch:
+
   schedule:
-    - cron: '0 2 * * *'    # 09:00 viral
-    - cron: '0 5 * * *'    # 12:00 product
-    - cron: '0 8 * * *'    # 15:00 engage
-    - cron: '30 11 * * *'  # 18:30 product
-    - cron: '0 14 * * *'   # 21:00 reels
+    - cron: '0 2 * * *'     # 09:00 ไทย
+    - cron: '0 5 * * *'     # 12:00 ไทย
+    - cron: '0 8 * * *'     # 15:00 ไทย
+    - cron: '30 11 * * *'   # 18:30 ไทย
+    - cron: '0 14 * * *'    # 21:00 ไทย
 
 permissions:
   contents: write
 
 jobs:
+
   runbot:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - run: pip install requests
 
-      - name: Run bot
+      - name: run bot
         env:
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           PAGE_ID: ${{ secrets.PAGE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-        run: python -u app.py
-
-      - name: Save logs
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-
-          git add posted_products.json || true
-          git add post_log.json || true
-
-          git diff --cached --quiet || git commit -m "update bot logs"
-          git push || echo "no change"
+        run: python app.py
