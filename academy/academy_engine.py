@@ -69,34 +69,32 @@ def tts_to_mp3(text: str, out_path: str = "speech.mp3") -> str:
     return out_path
 
 
-def upload_reel(video_path: str, caption: str):
+def upload_reel(video_path, caption):
+
     start_url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/video_reels"
 
     start_res = requests.post(
         start_url,
         data={
             "upload_phase": "start",
-            "access_token": PAGE_TOKEN,
-        },
-        timeout=30,
-    )
-    start_res.raise_for_status()
-    start_data = start_res.json()
+            "access_token": PAGE_TOKEN
+        }
+    ).json()
 
-    video_id = start_data.get("video_id")
-    upload_url = start_data.get("upload_url")
-
-    if not video_id or not upload_url:
-        raise RuntimeError(f"Reel start failed: {start_data}")
+    video_id = start_res["video_id"]
+    upload_url = start_res["upload_url"]
 
     with open(video_path, "rb") as f:
+
         upload_res = requests.post(
             upload_url,
-            data=f,
-            headers={"Authorization": f"OAuth {PAGE_TOKEN}"},
-            timeout=300,
+            files={
+                "file": f
+            },
+            headers={
+                "Authorization": f"OAuth {PAGE_TOKEN}"
+            }
         )
-    upload_res.raise_for_status()
 
     finish_res = requests.post(
         start_url,
@@ -105,26 +103,11 @@ def upload_reel(video_path: str, caption: str):
             "video_id": video_id,
             "video_state": "PUBLISHED",
             "description": caption,
-            "access_token": PAGE_TOKEN,
-        },
-        timeout=60,
+            "access_token": PAGE_TOKEN
+        }
     )
-    finish_res.raise_for_status()
+
     return finish_res.json()
-
-
-def publish_text_post(message: str):
-    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-    res = requests.post(
-        url,
-        data={
-            "message": message,
-            "access_token": PAGE_TOKEN,
-        },
-        timeout=30,
-    )
-    res.raise_for_status()
-    return res.json()
 
 
 def create_intro_caption():
