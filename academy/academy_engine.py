@@ -95,24 +95,25 @@ def upload_reel(video_path, caption):
 
     start_data = start_res.json()
 
-    print("REEL START:", start_data, flush=True)
-
-    if "error" in start_data:
-        raise RuntimeError(start_data)
+    print("START:", start_data, flush=True)
 
     video_id = start_data["video_id"]
     upload_url = start_data["upload_url"]
 
+    # อ่านไฟล์ video เป็น binary
     with open(video_path, "rb") as f:
+        video_bytes = f.read()
 
-        upload_res = requests.post(
-            upload_url,
-            files={"file": f},
-            headers={"Authorization": f"OAuth {PAGE_TOKEN}"},
-        )
+    upload_res = requests.post(
+        upload_url,
+        data=video_bytes,
+        headers={
+            "Authorization": f"OAuth {PAGE_TOKEN}",
+            "Content-Type": "application/octet-stream",
+        },
+    )
 
-    print("UPLOAD STATUS:", upload_res.status_code, flush=True)
-    print("UPLOAD BODY:", upload_res.text, flush=True)
+    print("UPLOAD:", upload_res.status_code, upload_res.text, flush=True)
 
     upload_res.raise_for_status()
 
@@ -127,41 +128,11 @@ def upload_reel(video_path, caption):
         },
     )
 
-    print("FINISH STATUS:", finish_res.status_code, flush=True)
-    print("FINISH BODY:", finish_res.text, flush=True)
+    print("FINISH:", finish_res.status_code, finish_res.text, flush=True)
 
     finish_res.raise_for_status()
 
-    finish_data = finish_res.json()
-
-    if "error" in finish_data:
-        raise RuntimeError(finish_data)
-
-    print("REEL SUCCESS", flush=True)
-
-    return finish_data
-
-
-# ---------------------------
-# FACEBOOK TEXT POST
-# ---------------------------
-
-def publish_text_post(message):
-
-    url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-
-    res = requests.post(
-        url,
-        data={
-            "message": message,
-            "access_token": PAGE_TOKEN,
-        },
-    )
-
-    res.raise_for_status()
-
-    return res.json()
-
+    return finish_res.json()
 
 def create_intro_caption():
 
