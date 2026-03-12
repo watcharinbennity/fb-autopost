@@ -133,13 +133,13 @@ def build_intro_script():
 
 def build_lesson(topic_obj: dict, episode_no: int) -> dict:
     prompt = f"""
-ช่วยเขียนเนื้อหาสำหรับคลิป/โพสต์สอนไฟฟ้าภาษาไทย
+ช่วยเขียนโพสต์ความรู้ไฟฟ้าภาษาไทย
 
 หัวข้อ: {topic_obj['title']}
 หมวด: {topic_obj['module']}
 ตอนที่: EP{episode_no}
 
-ต้องการผลลัพธ์เป็น JSON เท่านั้น รูปแบบ:
+ตอบเป็น JSON เท่านั้น:
 {{
   "title": "EP{episode_no} ...",
   "hook": "...",
@@ -149,19 +149,18 @@ def build_lesson(topic_obj: dict, episode_no: int) -> dict:
 }}
 
 เงื่อนไข:
-- สอนจากง่ายไปยาก
-- อธิบายให้คนทั่วไปเข้าใจ
+- เรียงจากง่ายไปยาก
+- ภาษาคนทั่วไปเข้าใจ
 - ไม่ใส่ลิงก์ขาย
 - ไม่ใส่ราคา
-- เนื้อหาแน่นแต่กระชับ
-- สรุปท้ายให้จำง่าย
 - ใช้คำว่า ช่างเบน
+- summary ต้องสั้นและจำง่าย
 """
     fallback = {
         "title": f"EP{episode_no} {topic_obj['title']}",
         "hook": f"วันนี้ช่างเบนจะพาเข้าใจเรื่อง {topic_obj['title']} แบบง่าย ๆ",
         "explain": f"{topic_obj['title']} เป็นพื้นฐานสำคัญของงานไฟฟ้า ถ้าเข้าใจเรื่องนี้ จะต่อยอดเรื่องอื่นได้ง่ายขึ้น",
-        "summary": f"สรุปสั้น ๆ: {topic_obj['title']} คือเรื่องสำคัญที่ต้องเข้าใจก่อนขึ้นระดับต่อไป",
+        "summary": f"สรุป: {topic_obj['title']} คือเรื่องสำคัญที่ต้องเข้าใจก่อนขึ้นระดับต่อไป",
         "caption": f"⚡ EP{episode_no} {topic_obj['title']}\nช่างเบนสอนไฟฟ้า | BEN Home & Electrical"
     }
 
