@@ -34,12 +34,15 @@ def _font(size: int):
 
 
 def _base_canvas(title):
-    img = Image.new("RGB", (WIDTH, HEIGHT), (10, 18, 34))
+    img = Image.new("RGB", (WIDTH, HEIGHT), (8, 18, 34))
     draw = ImageDraw.Draw(img)
 
+    # header bar
     draw.rounded_rectangle((40, 40, 1040, 170), radius=26, fill=(18, 34, 58))
-    draw.text((70, 80), "BEN Home & Electrical", fill="white", font=_font(40))
-    draw.text((70, 220), title, fill=(255, 220, 70), font=_font(56))
+    draw.text((70, 78), "BEN Home & Electrical", fill="white", font=_font(40))
+
+    # title
+    draw.text((70, 220), title, fill=(255, 220, 70), font=_font(52))
     return img, draw
 
 
@@ -48,17 +51,63 @@ def _footer(draw):
     draw.text((70, 1790), "ช่างเบนสอนไฟฟ้า", fill=(180, 210, 255), font=_font(34))
 
 
+def _remove_white_bg(mascot):
+    """พยายามลบพื้นขาวของรูปช่างเบนแบบง่าย ๆ"""
+    mascot = mascot.convert("RGBA")
+    datas = mascot.getdata()
+    new_data = []
+    for item in datas:
+        r, g, b, a = item
+        if r > 240 and g > 240 and b > 240:
+            new_data.append((255, 255, 255, 0))
+        else:
+            new_data.append((r, g, b, a))
+    mascot.putdata(new_data)
+    return mascot
+
+
 def _draw_mascot(img):
-    if os.path.exists(MASCOT_PATH):
-        mascot = Image.open(MASCOT_PATH).convert("RGBA")
-        mascot.thumbnail((360, 360))
-        img.paste(mascot, (650, 310), mascot)
+    if not os.path.exists(MASCOT_PATH):
+        return
+
+    mascot = Image.open(MASCOT_PATH).convert("RGBA")
+    mascot = _remove_white_bg(mascot)
+
+    # ขนาดใหญ่ขึ้นและย้ายลงมาด้านขวา ไม่ทับหัวข้อ
+    mascot.thumbnail((300, 300))
+    img.paste(mascot, (720, 330), mascot)
 
 
 def draw_generic(path, title, subtitle="อธิบายพื้นฐานแบบเข้าใจง่าย"):
     img, draw = _base_canvas(title)
-    draw.rounded_rectangle((100, 520, 980, 1500), radius=40, outline="white", width=6)
-    draw.text((180, 920), subtitle, fill="white", font=_font(52))
+
+    draw.rounded_rectangle((110, 520, 970, 1480), radius=40, outline="white", width=6)
+    draw.text((180, 950), subtitle, fill="white", font=_font(50))
+
+    _draw_mascot(img)
+    _footer(draw)
+    img.save(path)
+
+
+def draw_intro(path, title):
+    img, draw = _base_canvas(title)
+
+    # กล่องกลาง
+    draw.rounded_rectangle((90, 470, 990, 1540), radius=46, outline="white", width=6)
+
+    draw.text((160, 620), "สวัสดีครับ ผมช่างเบน", fill="white", font=_font(54))
+    draw.text((160, 730), "เราจะเรียนไฟฟ้าตั้งแต่", fill=(255, 220, 70), font=_font(50))
+    draw.text((160, 810), "พื้นฐาน จนถึงระดับวิศวกร", fill=(255, 220, 70), font=_font(50))
+
+    draw.text((160, 980), "เข้าใจง่าย", fill="white", font=_font(46))
+    draw.text((160, 1050), "ใช้ได้จริง", fill="white", font=_font(46))
+    draw.text((160, 1120), "ค่อย ๆ ไต่ระดับไปด้วยกัน", fill="white", font=_font(46))
+
+    # เพิ่มเส้น/ไอคอนให้ดูเหมือน intro มากขึ้น
+    draw.line((170, 1320, 850, 1320), fill="yellow", width=8)
+    draw.polygon([(770, 1285), (850, 1320), (770, 1355)], fill="red")
+    draw.text((170, 1380), "BEN Home & Electrical Academy", fill=(180, 210, 255), font=_font(34))
+
     _draw_mascot(img)
     _footer(draw)
     img.save(path)
@@ -181,6 +230,8 @@ def draw_transformer(path, title):
 
 
 def draw_for_topic(topic_type, path, title):
+    if title.startswith("เปิดตัว"):
+        return draw_intro(path, title)
     if topic_type == "series":
         return draw_series(path, title)
     if topic_type == "parallel":
