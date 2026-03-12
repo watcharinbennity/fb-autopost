@@ -114,7 +114,6 @@ def build_curriculum():
         {"title": "EV Charger ทำงานยังไง", "type": "industrial"},
     ])
 
-    # ขยายให้ครบ 365 ตอน โดยวนตามลำดับเดิม ไม่สุ่ม
     base = lessons[:]
     while len(lessons) < 365:
         for item in base:
