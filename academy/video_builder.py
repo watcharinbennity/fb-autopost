@@ -1,45 +1,29 @@
-# academy/video_builder.py
-
 import subprocess
-import os
 
-
-def build_video_from_image(image_path: str, video_path: str, duration: int = 18):
-    total_frames = 24 * duration
+def build_video(image, out):
     cmd = [
         "ffmpeg",
         "-y",
-        "-loop", "1",
-        "-i", image_path,
-        "-t", str(duration),
-        "-vf", f"scale=1080:1920,zoompan=z='min(zoom+0.0015,1.10)':d={total_frames}:s=1080x1920,format=yuv420p",
-        "-r", "24",
-        "-pix_fmt", "yuv420p",
-        video_path,
+        "-loop","1",
+        "-i",image,
+        "-t","18",
+        "-vf","scale=1080:1920,zoompan=z='min(zoom+0.0015,1.15)':d=432:s=1080x1920",
+        "-r","24",
+        out
     ]
-    subprocess.run(cmd, check=True)
-    return video_path
+    subprocess.run(cmd,check=True)
 
+def add_audio(video,audio,out):
 
-def merge_audio(video_path: str, audio_path: str, out_path: str):
-    cmd = [
+    cmd=[
         "ffmpeg",
         "-y",
-        "-i", video_path,
-        "-i", audio_path,
-        "-c:v", "copy",
-        "-c:a", "aac",
+        "-i",video,
+        "-i",audio,
         "-shortest",
-        out_path,
+        "-c:v","copy",
+        "-c:a","aac",
+        out
     ]
-    subprocess.run(cmd, check=True)
-    return out_path
 
-
-def cleanup_temp(paths):
-    for p in paths:
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
+    subprocess.run(cmd,check=True)
