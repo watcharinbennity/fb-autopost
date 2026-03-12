@@ -5,13 +5,14 @@ import os
 
 
 def build_video_from_image(image_path: str, video_path: str, duration: int = 18):
+    total_frames = 24 * duration
     cmd = [
         "ffmpeg",
         "-y",
         "-loop", "1",
         "-i", image_path,
         "-t", str(duration),
-        "-vf", "scale=1080:1920,zoompan=z='min(zoom+0.0015,1.12)':d=24*18:s=1080x1920,format=yuv420p",
+        "-vf", f"scale=1080:1920,zoompan=z='min(zoom+0.0015,1.10)':d={total_frames}:s=1080x1920,format=yuv420p",
         "-r", "24",
         "-pix_fmt", "yuv420p",
         video_path,
