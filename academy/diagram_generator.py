@@ -5,6 +5,8 @@ import os
 
 WIDTH = 1080
 HEIGHT = 1920
+BASE_DIR = os.path.dirname(__file__)
+MASCOT_PATH = os.path.join(BASE_DIR, "assets", "chang_ben.png")
 
 
 def _find_font():
@@ -37,7 +39,7 @@ def _base_canvas(title):
 
     draw.rounded_rectangle((40, 40, 1040, 170), radius=26, fill=(18, 34, 58))
     draw.text((70, 80), "BEN Home & Electrical", fill="white", font=_font(40))
-    draw.text((70, 220), title, fill=(255, 220, 70), font=_font(58))
+    draw.text((70, 220), title, fill=(255, 220, 70), font=_font(56))
     return img, draw
 
 
@@ -46,10 +48,18 @@ def _footer(draw):
     draw.text((70, 1790), "ช่างเบนสอนไฟฟ้า", fill=(180, 210, 255), font=_font(34))
 
 
+def _draw_mascot(img):
+    if os.path.exists(MASCOT_PATH):
+        mascot = Image.open(MASCOT_PATH).convert("RGBA")
+        mascot.thumbnail((360, 360))
+        img.paste(mascot, (650, 310), mascot)
+
+
 def draw_generic(path, title, subtitle="อธิบายพื้นฐานแบบเข้าใจง่าย"):
     img, draw = _base_canvas(title)
-    draw.rounded_rectangle((100, 500, 980, 1500), radius=40, outline="white", width=6)
-    draw.text((160, 850), subtitle, fill="white", font=_font(54))
+    draw.rounded_rectangle((100, 520, 980, 1500), radius=40, outline="white", width=6)
+    draw.text((180, 920), subtitle, fill="white", font=_font(52))
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -69,6 +79,7 @@ def draw_series(path, title):
     draw.polygon([(510, 930), (560, 980), (510, 1030)], fill="red")
     draw.text((130, 800), "กระแสไหลผ่านทีละตัว", fill=(255, 220, 70), font=_font(42))
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -91,6 +102,7 @@ def draw_parallel(path, title):
     draw.polygon([(320, 1110), (370, 1150), (320, 1190)], fill="red")
     draw.text((140, 760), "กระแสแยกได้หลายทาง", fill=(255, 220, 70), font=_font(42))
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -104,6 +116,7 @@ def draw_current_flow(path, title):
         draw.polygon([(x, y - 35), (x + 55, y), (x, y + 35)], fill="red")
 
     draw.text((140, 830), "ลูกศรแสดงทิศทางการไหลของกระแส", fill=(255, 220, 70), font=_font(42))
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -117,6 +130,7 @@ def draw_voltage(path, title):
     draw.polygon([(700, 930), (760, 970), (700, 1010)], fill="red")
     draw.text((470, 860), "แรงดันผลักให้กระแสไหล", fill=(255, 220, 70), font=_font(42))
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -132,6 +146,7 @@ def draw_meter(path, title):
     draw.line((300, 1320, 450, 1500), fill="red", width=8)
     draw.line((780, 1320, 630, 1500), fill="black", width=8)
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -145,6 +160,7 @@ def draw_breaker(path, title):
     draw.line((500, 920, 560, 860), fill="red", width=8)
     draw.text((400, 1140), "เบรกเกอร์", fill="white", font=_font(40))
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
@@ -159,6 +175,7 @@ def draw_transformer(path, title):
     draw.line((540, 720, 540, 1200), fill=(255, 220, 70), width=8)
     draw.text((350, 1280), "หม้อแปลงไฟฟ้า", fill="white", font=_font(46))
 
+    _draw_mascot(img)
     _footer(draw)
     img.save(path)
 
