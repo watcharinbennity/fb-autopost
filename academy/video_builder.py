@@ -1,7 +1,7 @@
 import subprocess
 
 
-def image_to_video(image,output):
+def build_video(image,video):
 
     cmd=[
     "ffmpeg",
@@ -11,7 +11,7 @@ def image_to_video(image,output):
     "-t","20",
     "-vf","scale=1080:1920",
     "-pix_fmt","yuv420p",
-    output
+    video
     ]
 
     subprocess.run(cmd,check=True)
