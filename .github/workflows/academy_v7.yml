@@ -1,0 +1,33 @@
+name: academy_v7
+
+on:
+ workflow_dispatch:
+ schedule:
+   - cron: '0 3 * * *'
+   - cron: '30 13 * * *'
+
+jobs:
+ academy:
+
+  runs-on: ubuntu-latest
+
+  steps:
+
+  - uses: actions/checkout@v4
+
+  - uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - run: |
+      sudo apt update
+      sudo apt install ffmpeg -y
+
+  - run: |
+      pip install pillow requests
+
+  - run: python academy/v7_engine.py
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+      PAGE_ID: ${{ secrets.PAGE_ID }}
