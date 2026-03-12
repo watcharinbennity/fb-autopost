@@ -3,15 +3,13 @@ import os
 import requests
 
 from academy_topics import CURRICULUM
-from diagram_generator import *
-from video_builder import image_to_video
-
+from diagram_generator import create_circuit
+from video_builder import build_video
 
 PAGE_ID=os.environ["PAGE_ID"]
-PAGE_TOKEN=os.environ["PAGE_ACCESS_TOKEN"]
+TOKEN=os.environ["PAGE_ACCESS_TOKEN"]
 
 STATE_FILE="academy/state.json"
-
 
 
 def load_state():
@@ -20,44 +18,32 @@ def load_state():
         return json.load(f)
 
 
-
 def save_state(s):
 
     with open(STATE_FILE,"w") as f:
         json.dump(s,f)
 
 
-
-def generate_video(topic):
+def create_video():
 
     img="lesson.png"
-
-    if topic["type"]=="series":
-        create_series_circuit(img)
-
-    elif topic["type"]=="parallel":
-        create_parallel_circuit(img)
-
-    else:
-        create_series_circuit(img)
-
     video="lesson.mp4"
 
-    image_to_video(img,video)
+    create_circuit(img)
+    build_video(img,video)
 
     return video
 
 
-
-def upload(video,title):
+def upload(video,caption):
 
     url=f"https://graph.facebook.com/v25.0/{PAGE_ID}/videos"
 
     files={"source":open(video,"rb")}
 
     data={
-    "description":title,
-    "access_token":PAGE_TOKEN
+    "description":caption,
+    "access_token":TOKEN
     }
 
     r=requests.post(url,files=files,data=data)
@@ -65,41 +51,25 @@ def upload(video,title):
     print(r.text)
 
 
-
 def main():
 
     state=load_state()
 
-    m=state["module_index"]
-    t=state["topic_index"]
+    ep=state["episode"]
 
-    module=CURRICULUM[m]
+    topic=CURRICULUM[ep]
 
-    topic=module["topics"][t]
+    title=f"EP{ep+1} {topic['title']}"
 
-    print("POST:",topic["title"])
+    print("POST:",title)
 
-    video=generate_video(topic)
+    video=create_video()
 
-    upload(video,topic["title"])
+    upload(video,title)
 
-
-    t+=1
-
-    if t>=len(module["topics"]):
-
-        t=0
-        m+=1
-
-        if m>=len(CURRICULUM):
-            m=0
-
-
-    state["module_index"]=m
-    state["topic_index"]=t
+    state["episode"]=ep+1
 
     save_state(state)
-
 
 
 if __name__=="__main__":
