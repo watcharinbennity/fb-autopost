@@ -57,7 +57,7 @@ def tts_to_mp3(text: str, out_path: str = "lesson.mp3") -> str:
             "model": "gpt-4o-mini-tts",
             "voice": "alloy",
             "input": text,
-            "instructions": "พูดภาษาไทยแบบธรรมชาติ ชัดเจน มีพลัง นุ่มลึก สไตล์พากย์หนังจีน จังหวะไม่เร็วเกินไป"
+            "instructions": "พูดภาษาไทยแบบธรรมชาติ ชัดเจน นุ่มลึก มีพลัง สไตล์พากย์หนังจีน จังหวะปานกลาง"
         },
         timeout=180,
     )
@@ -115,7 +115,7 @@ def publish_text_post(message: str):
 
 def build_intro_script():
     return {
-        "title": "EP1 เปิดตัวช่างเบน",
+        "title": "เปิดตัว BEN Home & Electrical Academy",
         "caption": (
             "⚡ เปิดตัว BEN Home & Electrical Academy\n\n"
             "สวัสดีครับ ผมช่างเบน\n"
@@ -123,7 +123,7 @@ def build_intro_script():
             "เรียนแบบเข้าใจง่าย ใช้ได้จริง และค่อย ๆ ไต่ระดับไปด้วยกันครับ"
         ),
         "narration": (
-            "สวัสดีครับ ผมช่างเบน จาก BEN Home and Electrical. "
+            "สวัสดีครับ ผมช่างเบน จาก เบน โฮม แอนด์ อิเล็กทริคอล. "
             "จากนี้เราจะเรียนไฟฟ้ากัน ตั้งแต่พื้นฐาน ไปจนถึงระดับวิศวกร. "
             "เรียนแบบเข้าใจง่าย ใช้ได้จริง และค่อย ๆ ไต่ระดับไปด้วยกันครับ."
         ),
@@ -133,7 +133,7 @@ def build_intro_script():
 
 def build_lesson(topic_obj: dict, episode_no: int) -> dict:
     prompt = f"""
-ช่วยเขียนเนื้อหาสำหรับคลิปสอนไฟฟ้าภาษาไทย
+ช่วยเขียนเนื้อหาสำหรับคลิป/โพสต์สอนไฟฟ้าภาษาไทย
 
 หัวข้อ: {topic_obj['title']}
 หมวด: {topic_obj['module']}
@@ -198,7 +198,6 @@ def run_lesson(episode_no: int):
     topic = CURRICULUM[episode_no]
     lesson = build_lesson(topic, episode_no + 1)
 
-    # โพสต์ความรู้เป็นข้อความหลังคลิปเปิดตัว
     message = (
         f"{lesson['title']}\n\n"
         f"{lesson['hook']}\n\n"
@@ -212,7 +211,6 @@ def run_lesson(episode_no: int):
 def main():
     state = load_state()
 
-    # ครั้งแรกโพสต์คลิปเปิดตัว
     if not state.get("initialized", False):
         result = run_intro()
         if result.get("id") or result.get("video_id"):
@@ -223,7 +221,6 @@ def main():
             return
         raise RuntimeError(f"Intro post failed: {result}")
 
-    # ครั้งถัดไปโพสต์ความรู้ตามลำดับ
     ep = state.get("episode", 0)
     result = run_lesson(ep)
 
