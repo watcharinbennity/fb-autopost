@@ -7,33 +7,74 @@ WIDTH = 1080
 HEIGHT = 1920
 
 
+def _find_font():
+    candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+FONT_PATH = _find_font()
+
+
 def _font(size: int):
-    try:
-        return ImageFont.truetype("DejaVuSans.ttf", size)
-    except Exception:
-        return ImageFont.load_default()
+    if FONT_PATH:
+        try:
+            return ImageFont.truetype(FONT_PATH, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def _fit_text(text: str, width_chars: int = 18):
+    return textwrap.fill(text, width=width_chars)
 
 
 def make_slide(out_path: str, title: str, body: str, mascot_path: str):
-    canvas = Image.new("RGB", (WIDTH, HEIGHT), (10, 18, 30))
+    canvas = Image.new("RGB", (WIDTH, HEIGHT), (8, 18, 34))
     draw = ImageDraw.Draw(canvas)
 
-    title_font = _font(48)
+    title_font = _font(56)
     body_font = _font(64)
-    footer_font = _font(36)
+    brand_font = _font(40)
+    footer_font = _font(34)
 
+    # กรอบบน
+    draw.rounded_rectangle((40, 40, 1040, 180), radius=28, fill=(18, 34, 58))
+    draw.text((70, 78), "BEN Home & Electrical", fill=(255, 255, 255), font=brand_font)
+
+    # รูปช่างเบน
     if os.path.exists(mascot_path):
         mascot = Image.open(mascot_path).convert("RGBA")
-        mascot.thumbnail((360, 360))
-        canvas.paste(mascot, (60, 100), mascot)
+        mascot.thumbnail((520, 520))
+        mx = (WIDTH - mascot.width) // 2
+        my = 210
+        canvas.paste(mascot, (mx, my), mascot)
+    else:
+        draw.text((80, 250), "ไม่พบไฟล์ chang_ben.png", fill=(255, 120, 120), font=_font(32))
 
-    draw.text((460, 120), "BEN Home & Electrical", fill=(255, 255, 255), font=title_font)
-    draw.text((60, 520), title, fill=(255, 220, 80), font=body_font)
+    # หัวข้อ
+    draw.text((70, 760), title, fill=(255, 210, 70), font=title_font)
 
-    wrapped = textwrap.fill(body, width=18)
-    draw.multiline_text((60, 720), wrapped, fill=(255, 255, 255), font=body_font, spacing=18)
+    # เนื้อหา
+    wrapped = _fit_text(body, width_chars=16)
+    draw.multiline_text(
+        (70, 900),
+        wrapped,
+        fill=(255, 255, 255),
+        font=body_font,
+        spacing=16,
+    )
 
-    draw.text((60, 1760), "ช่างเบนสอนไฟฟ้า", fill=(180, 210, 255), font=footer_font)
+    # footer
+    draw.rounded_rectangle((40, 1760, 1040, 1860), radius=22, fill=(18, 34, 58))
+    draw.text((70, 1790), "ช่างเบนสอนไฟฟ้า", fill=(180, 210, 255), font=footer_font)
+
     canvas.save(out_path)
     return out_path
 
@@ -101,11 +142,11 @@ def build_intro_reel(
     audio_path: str,
     out_path: str = "academy_intro_final.mp4",
 ):
-    total_duration = max(probe_duration(audio_path), 15.0)
+    total_duration = max(probe_duration(audio_path), 18.0)
 
-    d1 = max(3.0, total_duration * 0.28)
-    d2 = max(5.0, total_duration * 0.44)
-    d3 = max(3.0, total_duration - d1 - d2)
+    d1 = max(4.0, total_duration * 0.34)
+    d2 = max(6.0, total_duration * 0.38)
+    d3 = max(4.0, total_duration - d1 - d2)
 
     make_slide("intro1.png", "สวัสดีครับ", "ผมช่างเบน\nจาก BEN Home & Electrical", mascot_path)
     make_slide("intro2.png", "เราจะเรียนไฟฟ้า", "ตั้งแต่พื้นฐาน\nจนถึงระดับวิศวกร", mascot_path)
