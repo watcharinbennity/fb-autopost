@@ -17,7 +17,6 @@ def load_state():
     if os.path.exists(STATE_PATH):
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-
     return {
         "initialized": False,
         "module_index": 0,
@@ -49,17 +48,20 @@ def openai_chat(prompt: str) -> str:
 
 
 def tts_to_mp3(text: str, out_path: str = "intro.mp3") -> str:
+    payload = {
+        "model": "gpt-4o-mini-tts",
+        "voice": "alloy",
+        "input": text,
+        "instructions": "พูดภาษาไทยแบบธรรมชาติ อบอุ่น มั่นใจ ชัดถ้อยชัดคำ เหมือนครูสอนไฟฟ้ามืออาชีพ จังหวะไม่เร็วเกินไป"
+    }
+
     r = requests.post(
         "https://api.openai.com/v1/audio/speech",
         headers={
             "Authorization": f"Bearer {OPENAI_KEY}",
             "Content-Type": "application/json",
         },
-        json={
-            "model": "gpt-4o-mini-tts",
-            "voice": "alloy",
-            "input": text,
-        },
+        json=payload,
         timeout=180,
     )
     r.raise_for_status()
@@ -71,28 +73,20 @@ def tts_to_mp3(text: str, out_path: str = "intro.mp3") -> str:
 
 
 def upload_video_intro(video_path: str, caption: str):
-    """
-    ใช้ Page Videos endpoint แทน video_reels
-    เสถียรกว่าในเคสที่ rupload / video_reels ตอบ 400
-    """
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/videos"
 
     with open(video_path, "rb") as f:
-        files = {
-            "source": f
-        }
+        files = {"source": f}
         data = {
             "description": caption,
             "title": "BEN Home & Electrical Academy",
             "published": "true",
             "access_token": PAGE_TOKEN,
         }
-
         r = requests.post(url, files=files, data=data, timeout=300)
 
     print("VIDEO UPLOAD STATUS:", r.status_code, flush=True)
     print("VIDEO UPLOAD BODY:", r.text, flush=True)
-
     r.raise_for_status()
 
     data = r.json()
@@ -104,7 +98,6 @@ def upload_video_intro(video_path: str, caption: str):
 
 def publish_text_post(message: str):
     url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed"
-
     res = requests.post(
         url,
         data={
@@ -119,10 +112,8 @@ def publish_text_post(message: str):
 
     res.raise_for_status()
     data = res.json()
-
     if "error" in data:
         raise RuntimeError(f"TEXT POST ERROR: {data}")
-
     return data
 
 
@@ -137,13 +128,12 @@ def create_intro_caption():
 
 def run_first_intro():
     narration = (
-        "สวัสดีครับ ผมช่างเบน จาก BEN Home and Electrical. "
-        "จากนี้เราจะเรียนไฟฟ้ากันตั้งแต่พื้นฐาน ไปจนถึงระดับวิศวกร. "
-        "ผมจะสอนแบบเข้าใจง่าย ใช้ได้จริง และเรียนไปด้วยกันครับ"
+        "สวัสดีครับ ผมช่างเบน จาก เบน โฮม แอนด์ อิเล็กทริคอล. "
+        "จากนี้เราจะเรียนไฟฟ้ากัน ตั้งแต่พื้นฐาน ไปจนถึงระดับวิศวกร. "
+        "ผมจะสอนแบบเข้าใจง่าย ใช้ได้จริง และเรียนไปด้วยกันครับ."
     )
 
     audio_path = tts_to_mp3(narration, "intro.mp3")
-
     video_path = build_intro_reel(
         mascot_path=MASCOT_PATH,
         audio_path=audio_path,
@@ -151,6 +141,7 @@ def run_first_intro():
     )
 
     print("VIDEO CREATED:", video_path, flush=True)
+    print("MASCOT EXISTS:", os.path.exists(MASCOT_PATH), MASCOT_PATH, flush=True)
 
     result = upload_video_intro(video_path, create_intro_caption())
     print("INTRO VIDEO RESULT:", result, flush=True)
@@ -238,20 +229,16 @@ def generate_knowledge_post(module_name: str, topic: str) -> str:
 def main():
     state = load_state()
 
-    # ครั้งแรก: โพสต์คลิปเปิดตัวก่อน
     if not state.get("initialized", False):
         result = run_first_intro()
 
-        # เซฟ state เฉพาะเมื่อโพสต์คลิปสำเร็จจริง
         if result.get("id") or result.get("video_id"):
             state["initialized"] = True
             save_state(state)
             print("STATE UPDATED: initialized=True", flush=True)
             return
-        else:
-            raise RuntimeError(f"Intro video did not return publish id: {result}")
+        raise RuntimeError(f"Intro video did not return publish id: {result}")
 
-    # รอบถัดไป: โพสต์ความรู้
     m, t, module_name, topic = get_next_topic_preview(state)
     print(f"POST TOPIC: {module_name} - {topic}", flush=True)
 
@@ -259,7 +246,6 @@ def main():
     result = publish_text_post(post_text)
     print("TEXT POST RESULT:", result, flush=True)
 
-    # เลื่อนไปหัวข้อถัดไปหลังโพสต์สำเร็จเท่านั้น
     if result.get("id"):
         state = advance_topic_pointer(state)
         save_state(state)
