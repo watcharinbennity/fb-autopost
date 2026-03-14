@@ -2,11 +2,10 @@ name: BEN-AI-ENGINE
 
 on:
   schedule:
-    # เวลาไทย
-    - cron: "0 2 * * *"     # 09:00
-    - cron: "0 5 * * *"     # 12:00
-    - cron: "30 11 * * *"   # 18:30
-    - cron: "0 14 * * *"    # 21:00
+    - cron: "0 2 * * *"
+    - cron: "0 5 * * *"
+    - cron: "30 11 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch:
 
 jobs:
@@ -35,6 +34,13 @@ jobs:
           OPENAI_MODEL: "gpt-4o-mini"
         run: python app.py
 
+      - name: Commit posted.json
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add posted.json || true
+          git diff --cached --quiet || git commit -m "update posted history"
+          git push
       - name: Commit posted.json
         run: |
           git config --global user.name "github-actions"
