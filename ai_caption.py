@@ -5,6 +5,7 @@ import requests
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 
 FALLBACK_CAPTIONS = [
     "งานไฟ งานช่าง งานติดตั้ง ต้องมีตัวช่วยดี ๆ 👨‍🔧⚡\n{title}\n\nเหมาะกับสายช่างและคนที่ชอบทำงานเองที่บ้าน\nเช็กรายละเอียดล่าสุดที่ลิงก์ด้านล่าง",
@@ -19,7 +20,7 @@ def fallback_caption(product):
 
 
 def generate_caption_choices(product):
-    if not OPENAI_API_KEY:
+    if not USE_OPENAI or not OPENAI_API_KEY:
         base = fallback_caption(product)
         return [base, base, base]
 
