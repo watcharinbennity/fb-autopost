@@ -36,7 +36,7 @@ def post_product(product, caption):
         res = r.json()
         post_id = res.get("post_id") or res.get("id")
 
-        if post_id:
+        if post_id and product.get("link"):
             comment(post_id, product["link"])
 
         return post_id
