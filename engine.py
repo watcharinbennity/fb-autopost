@@ -2,9 +2,8 @@ import os
 import random
 from datetime import datetime, timedelta, timezone
 
-from utils import load_csv, load_posted, save_posted, log
-from product_filter import filter_products
-from product_ranker import rank_products
+from utils import iter_csv_rows, load_posted, save_posted, log
+from product_filter import build_product, score_product
 from ai_caption import generate_caption
 from facebook_post import post_product
 
@@ -17,7 +16,6 @@ def get_mode() -> str:
     now = datetime.now(TZ_TH)
     hm = now.strftime("%H:%M")
 
-    # เวลาไทย
     if hm == "09:00":
         return "viral"
     if hm == "12:00":
@@ -27,8 +25,29 @@ def get_mode() -> str:
     if hm == "21:00":
         return "engage"
 
-    # manual run หรือ fallback
     return "product"
+
+
+def choose_best_product_stream(csv_url, posted_ids, max_rows=100000):
+    posted_set = set(str(x) for x in posted_ids)
+    candidates = []
+
+    for row in iter_csv_rows(csv_url, max_rows=max_rows):
+        product = build_product(row)
+        if not product:
+            continue
+
+        if product["id"] in posted_set:
+            continue
+
+        candidates.append(product)
+        candidates = sorted(candidates, key=score_product, reverse=True)[:50]
+
+    if not candidates:
+        return None
+
+    top_pool = candidates[:20] if len(candidates) >= 20 else candidates
+    return random.choice(top_pool)
 
 
 def run_engine():
@@ -39,18 +58,12 @@ def run_engine():
         log("รอบนี้ยังเปิดใช้เฉพาะ product mode เป็นหลัก")
         mode = "product"
 
-    rows = load_csv(CSV_URL, MAX_ROWS)
     posted_ids = load_posted()
+    product = choose_best_product_stream(CSV_URL, posted_ids, max_rows=MAX_ROWS)
 
-    products = filter_products(rows, posted_ids)
-    ranked = rank_products(products)
-
-    if not ranked:
+    if not product:
         log("NO PRODUCT FOUND")
         return
-
-    pool = ranked[:20] if len(ranked) >= 20 else ranked
-    product = random.choice(pool)
 
     caption = generate_caption(product)
     post_id = post_product(product, caption)
