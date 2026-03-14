@@ -15,8 +15,22 @@ FALLBACK_CAPTIONS = [
 ]
 
 
+def append_link(text: str, link: str) -> str:
+    text = str(text).strip()
+    link = str(link).strip()
+
+    if not link:
+        return text
+
+    if link in text:
+        return text
+
+    return f"{text}\n\n🛒 สั่งซื้อสินค้า\n{link}"
+
+
 def fallback_caption(product):
-    return random.choice(FALLBACK_CAPTIONS).format(title=product["title"])
+    base = random.choice(FALLBACK_CAPTIONS).format(title=product["title"])
+    return append_link(base, product.get("link", ""))
 
 
 def generate_caption_choices(product):
@@ -39,6 +53,7 @@ def generate_caption_choices(product):
 - โทนมืออาชีพ อ่านง่าย
 - เหมาะกับสายไฟฟ้า เครื่องมือช่าง งานติดตั้ง
 - ปิดท้ายให้ชวนกดดูรายละเอียดที่ลิงก์ด้านล่าง
+- ห้ามใส่ลิงก์ในข้อความที่สร้าง เพราะระบบจะเติมลิงก์เองภายหลัง
 - ตอบกลับเป็น JSON เท่านั้น
 - รูปแบบ:
 {{"captions":["แบบที่1","แบบที่2","แบบที่3"]}}
@@ -70,11 +85,14 @@ def generate_caption_choices(product):
         captions = obj.get("captions", [])
         captions = [str(x).strip() for x in captions if str(x).strip()]
 
-        if len(captions) >= 3:
-            return captions[:3]
+        if len(captions) < 3:
+            base = random.choice(FALLBACK_CAPTIONS).format(title=product["title"])
+            while len(captions) < 3:
+                captions.append(base)
 
-        base = fallback_caption(product)
-        return captions + [base] * (3 - len(captions))
+        captions = [append_link(c, product.get("link", "")) for c in captions[:3]]
+        return captions
+
     except Exception:
         base = fallback_caption(product)
         return [base, base, base]
