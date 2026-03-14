@@ -1,18 +1,13 @@
 from utils import to_float
 
 ALLOW_KEYWORDS = [
-    # lighting
     "ไฟ", "หลอดไฟ", "โคมไฟ", "โคม", "lamp", "light", "led", "floodlight", "spotlight",
     "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม", "ไฟถนน", "ไฟติดผนัง", "ไฟเพดาน", "ไฟเซ็นเซอร์", "ไฟเซนเซอร์",
     "motion light", "sensor light", "solar light",
-
-    # electrical
     "ไฟฟ้า", "electrical", "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip",
     "adapter", "อะแดปเตอร์", "usb plug", "เต้ารับ", "เบรกเกอร์", "breaker", "mcb", "rcbo",
     "fuse", "สวิตช์", "switch", "สายไฟ", "wire", "cable", "ตู้ไฟ", "consumer unit",
     "voltage tester", "สายชาร์จ", "ปลั๊ก usb", "ปลั๊กยูเอสบี",
-
-    # tools
     "tool", "tools", "เครื่องมือ", "เครื่องมือช่าง", "ช่าง", "ไขควง", "ไขควงวัดไฟ",
     "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill", "มัลติมิเตอร์", "multimeter",
     "tester", "ประแจ", "ประแจเลื่อน", "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร"
@@ -84,27 +79,50 @@ def pick_first(row, keys, default=""):
 
 
 def build_product(row):
-    title = pick_first(row, ["product_name", "title", "name", "ชื่อสินค้า"], "")
+    title = pick_first(
+        row,
+        ["product_name", "product name", "title", "name", "ชื่อสินค้า", "item_name"],
+        ""
+    )
     if not title:
         return None
 
     if not title_allowed(title):
         return None
 
-    rating = to_float(pick_first(row, ["rating", "item_rating", "คะแนน"], "0"))
-    sold = to_float(pick_first(row, ["sold", "historical_sold", "sales", "ขายแล้ว"], "0"))
+    rating = to_float(pick_first(
+        row,
+        ["rating", "item_rating", "คะแนน", "product_rating", "avg_rating"],
+        "0"
+    ))
+    sold = to_float(pick_first(
+        row,
+        ["sold", "historical_sold", "sales", "ขายแล้ว", "sold_count", "item_sold"],
+        "0"
+    ))
 
     if rating < MIN_RATING:
         return None
     if sold < MIN_SOLD:
         return None
 
-    pid = pick_first(row, ["itemid", "item_id", "product_id", "id"], title)
-    image = pick_first(row, ["image", "image_url", "image_url_1", "picture"], "")
+    pid = pick_first(
+        row,
+        ["itemid", "item_id", "product_id", "id", "itemid ", "product id"],
+        title
+    )
+    image = pick_first(
+        row,
+        ["image", "image_url", "image_url_1", "picture", "image link", "image_link", "img_url"],
+        ""
+    )
     link = pick_first(
         row,
-        ["product_short link", "product_short_link", "short_link", "product_link", "product_url", "link"],
-        "",
+        [
+            "product_short link", "product_short_link", "short_link", "short link",
+            "product_link", "product_url", "link", "affiliate_link", "product short link"
+        ],
+        ""
     )
 
     if not image or not link:
