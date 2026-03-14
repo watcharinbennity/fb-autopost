@@ -49,29 +49,29 @@ def choose_best_product_stream(csv_url, posted_data, max_rows=100000):
 
         product["image_key"] = img_key
 
-        # เก็บ candidate ระหว่างอ่าน ไม่กินแรมเกิน
         candidates.append(product)
         candidates = sorted(candidates, key=score_product, reverse=True)[:500]
 
     if not candidates:
         return None
 
-    # เอา top 1%
     elite = rank_top_one_percent(candidates)
     if not elite:
         elite = candidates[:10]
 
-    # เลือกจากกลุ่มบนสุด เพื่อให้ยังมีความหลากหลาย
     top_pool = elite[:20] if len(elite) >= 20 else elite
     return random.choice(top_pool)
 
 
 def run_engine():
-    mode = get_mode()
+    forced_mode = os.getenv("POST_MODE", "").strip().lower()
+    mode = forced_mode or get_mode()
+
     log(f"BEN AI ENGINE START | mode={mode}")
 
+    # ตอนนี้ยังเปิดใช้ product เป็นหลัก
     if mode != "product":
-        log("รอบนี้ยังเปิดใช้เฉพาะ product mode เป็นหลัก")
+        log("รอบนี้ยังใช้ product mode เป็นหลัก")
         mode = "product"
 
     posted_data = load_posted()
