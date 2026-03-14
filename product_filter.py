@@ -1,16 +1,11 @@
 from utils import to_float
 
 ALLOW_KEYWORDS = [
-    # lighting
     "ไฟ", "หลอดไฟ", "โคมไฟ", "โคม", "lamp", "light", "led", "floodlight", "spotlight",
     "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม", "ไฟถนน",
-
-    # electrical
     "ไฟฟ้า", "electrical", "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip",
     "เต้ารับ", "เบรกเกอร์", "breaker", "mcb", "rcbo", "fuse", "สวิตช์", "switch",
     "สายไฟ", "wire", "cable", "ตู้ไฟ", "consumer unit",
-
-    # tools
     "tool", "tools", "เครื่องมือ", "เครื่องมือช่าง", "ช่าง", "ไขควง", "ไขควงวัดไฟ",
     "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill", "มัลติมิเตอร์", "multimeter",
     "tester", "ประแจ", "ค้อน", "เลื่อย", "คัตเตอร์"
@@ -92,18 +87,7 @@ def build_product(row):
     }
 
 
-def filter_products(rows, posted_ids):
-    posted_set = set(str(x) for x in posted_ids)
-    products = []
-
-    for row in rows:
-        p = build_product(row)
-        if not p:
-            continue
-
-        if p["id"] in posted_set:
-            continue
-
-        products.append(p)
-
-    return products
+def score_product(product):
+    sold_score = product["sold"] * 2
+    rating_score = product["rating"] * 10
+    return sold_score + rating_score
