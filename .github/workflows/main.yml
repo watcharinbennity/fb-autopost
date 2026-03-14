@@ -1,21 +1,25 @@
-name: FB Auto Post
+name: fb-autopost
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'     # 09:00 ไทย = viral
-    - cron: '0 5 * * *'     # 12:00 ไทย = product
-    - cron: '0 8 * * *'     # 15:00 ไทย = engage
-    - cron: '30 11 * * *'   # 18:30 ไทย = product
-    - cron: '0 14 * * *'    # 21:00 ไทย = reels
-
-permissions:
-  contents: write
+    # 09:00 ไทย = 02:00 UTC
+    - cron: "0 2 * * *"
+    # 12:00 ไทย = 05:00 UTC
+    - cron: "0 5 * * *"
+    # 18:30 ไทย = 11:30 UTC
+    - cron: "30 11 * * *"
+    # 21:00 ไทย = 14:00 UTC
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      post_mode:
+        description: "Mode to run: viral/product/engage/academy"
+        required: false
+        default: "product"
 
 jobs:
-  runbot:
+  post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -24,34 +28,52 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Install Python packages
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests
+
+      - name: Decide mode from schedule / manual
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "POST_MODE=${{ github.event.inputs.post_mode }}" >> $GITHUB_ENV
+            echo "FORCE_PRODUCT=false" >> $GITHUB_ENV
+          else
+            HOUR_MIN=$(TZ=Asia/Bangkok date +%H:%M)
+            echo "Bangkok time = $HOUR_MIN"
+            if [ "$HOUR_MIN" = "09:00" ]; then
+              echo "POST_MODE=viral" >> $GITHUB_ENV
+            elif [ "$HOUR_MIN" = "12:00" ]; then
+              echo "POST_MODE=product" >> $GITHUB_ENV
+            elif [ "$HOUR_MIN" = "18:30" ]; then
+              echo "POST_MODE=product" >> $GITHUB_ENV
+            elif [ "$HOUR_MIN" = "21:00" ]; then
+              echo "POST_MODE=engage" >> $GITHUB_ENV
+            else
+              echo "POST_MODE=product" >> $GITHUB_ENV
+            fi
+            echo "FORCE_PRODUCT=false" >> $GITHUB_ENV
+          fi
 
       - name: Run bot
         env:
-          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           PAGE_ID: ${{ secrets.PAGE_ID }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          GRAPH_API_VERSION: "v25.0"
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
-        run: python -u app.py
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          USE_OPENAI: "false"
+          POST_MODE: ${{ env.POST_MODE }}
+          FORCE_PRODUCT: ${{ env.FORCE_PRODUCT }}
+        run: python main.py
 
-      - name: Save logs
+      - name: Commit posted.json
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-
-          git add posted_products.json || true
-          git add post_log.json || true
-
-          git diff --cached --quiet || git commit -m "update bot logs"
-          git push || echo "no change"
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add posted.json post_log.txt || true
+          git diff --cached --quiet || git commit -m "update posted log"
+          git push
