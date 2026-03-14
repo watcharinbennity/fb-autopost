@@ -3,17 +3,19 @@ from utils import to_float
 ALLOW_KEYWORDS = [
     # lighting
     "ไฟ", "หลอดไฟ", "โคมไฟ", "โคม", "lamp", "light", "led", "floodlight", "spotlight",
-    "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม", "ไฟถนน",
+    "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม", "ไฟถนน", "ไฟติดผนัง", "ไฟเพดาน", "ไฟเซ็นเซอร์", "ไฟเซนเซอร์",
+    "motion light", "sensor light", "solar light",
 
     # electrical
     "ไฟฟ้า", "electrical", "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip",
-    "เต้ารับ", "เบรกเกอร์", "breaker", "mcb", "rcbo", "fuse", "สวิตช์", "switch",
-    "สายไฟ", "wire", "cable", "ตู้ไฟ", "consumer unit", "voltage tester",
+    "adapter", "อะแดปเตอร์", "usb plug", "เต้ารับ", "เบรกเกอร์", "breaker", "mcb", "rcbo",
+    "fuse", "สวิตช์", "switch", "สายไฟ", "wire", "cable", "ตู้ไฟ", "consumer unit",
+    "voltage tester", "สายชาร์จ", "ปลั๊ก usb", "ปลั๊กยูเอสบี",
 
     # tools
     "tool", "tools", "เครื่องมือ", "เครื่องมือช่าง", "ช่าง", "ไขควง", "ไขควงวัดไฟ",
     "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill", "มัลติมิเตอร์", "multimeter",
-    "tester", "ประแจ", "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร"
+    "tester", "ประแจ", "ประแจเลื่อน", "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร"
 ]
 
 BLOCK_KEYWORDS = [
@@ -47,9 +49,19 @@ def title_allowed(title: str) -> bool:
 def detect_group(title: str) -> str:
     t = normalize(title)
 
-    lighting = ["ไฟ", "หลอดไฟ", "โคม", "lamp", "light", "led", "floodlight", "spotlight"]
-    electrical = ["ไฟฟ้า", "electrical", "ปลั๊ก", "socket", "เบรกเกอร์", "breaker", "สวิตช์", "switch", "สายไฟ", "wire", "cable"]
-    tools = ["tool", "tools", "เครื่องมือ", "ไขควง", "คีม", "สว่าน", "drill", "multimeter", "tester", "ประแจ", "ค้อน"]
+    lighting = [
+        "ไฟ", "หลอดไฟ", "โคม", "lamp", "light", "led",
+        "floodlight", "spotlight", "solar light", "sensor light"
+    ]
+    electrical = [
+        "ไฟฟ้า", "electrical", "ปลั๊ก", "socket", "power strip",
+        "เบรกเกอร์", "breaker", "สวิตช์", "switch", "สายไฟ", "wire", "cable",
+        "adapter", "mcb", "rcbo", "fuse"
+    ]
+    tools = [
+        "tool", "tools", "เครื่องมือ", "ไขควง", "คีม", "สว่าน",
+        "drill", "multimeter", "tester", "ประแจ", "ค้อน"
+    ]
 
     if any(k in t for k in lighting):
         return "lighting"
@@ -110,14 +122,9 @@ def build_product(row):
 
 
 def score_product(product):
-    # คะแนนหลัก
     sold_score = product["sold"] * 2.0
     rating_score = product["rating"] * 10.0
-
-    # bonus สินค้าขายแรง
     viral_bonus = min(product["sold"], 5000) * 0.05
-
-    # bonus ถ้าหมวดตรงชัด
     group_bonus = 8 if product["group"] in {"lighting", "electrical", "tools"} else 0
 
     return sold_score + rating_score + viral_bonus + group_bonus
