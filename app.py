@@ -1,525 +1,494 @@
 import os
-import csv
+import re
+import io
 import json
+import csv
 import random
 import requests
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-from video_generator import create_product_reel
+# =========================
+# CONFIG
+# =========================
+TZ_TH = timezone(timedelta(hours=7))
 
-PAGE_ID = os.environ["PAGE_ID"]
-PAGE_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
-CSV_URL = os.environ["SHOPEE_CSV_URL"]
-OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+PAGE_ID = os.getenv("PAGE_ID", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+GRAPH_API_VERSION = os.getenv("GRAPH_API_VERSION", "v25.0").strip()
 
-POSTED_FILE = "posted_products.json"
-LOG_FILE = "post_log.json"
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()  # optional
+USE_OPENAI = os.getenv("USE_OPENAI", "false").lower() == "true"
 
-THAI_TIME = ZoneInfo("Asia/Bangkok")
+POSTED_JSON_PATH = "posted.json"
+LOG_FILE = "post_log.txt"
 
-CATEGORY_KEYWORDS = [
-    "ไฟ", "หลอดไฟ", "led", "โคมไฟ", "ไฟโซล่า", "solar",
-    "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "สายไฟ", "สวิตช์", "เบรกเกอร์",
-    "ชาร์จ", "charger", "adapter", "power", "battery", "ไฟฉาย",
-    "สว่าน", "ไขควง", "ประแจ", "คีม", "มัลติมิเตอร์",
-    "เครื่องมือ", "tool", "tools", "diy", "ช่าง", "electrical",
-    "socket", "lamp", "light", "home", "living"
+MAX_ROWS = 50000
+MIN_RATING = 4.0
+MIN_SOLD = 10
+
+# schedule mode
+# manual run => PRODUCT
+DEFAULT_MODE = os.getenv("POST_MODE", "").strip().lower()  # viral/product/engage/academy
+FORCE_PRODUCT = os.getenv("FORCE_PRODUCT", "false").lower() == "true"
+
+# =========================
+# CATEGORY LOCK - BEN HOME & ELECTRICAL
+# =========================
+ALLOW_KEYWORDS = [
+    # lighting
+    "ไฟ", "หลอดไฟ", "lamp", "light", "led", "โคม", "โคมไฟ", "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม",
+    "ไฟถนน", "ไฟแต่งบ้าน", "ไฟเพดาน", "ไฟติดผนัง", "ไฟหัวเสา", "สปอตไลท์", "floodlight",
+
+    # electrical
+    "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "power strip", "socket", "เต้ารับ", "เบรกเกอร์", "breaker",
+    "สวิตช์", "สวิตช์ไฟ", "switch", "สายไฟ", "wire", "cable", "สายพ่วง", "ตู้ไฟ", "ตู้คอนซูมเมอร์",
+    "consumer unit", "rcbo", "mcb", "fuse", "คัทเอาท์", "ไฟฟ้า", "electrical", "voltage tester",
+
+    # tools
+    "เครื่องมือ", "tool", "tools", "เครื่องมือช่าง", "ช่าง", "ไขควง", "คีม", "คีมตัด", "คีมปอกสาย",
+    "สว่าน", "drill", "มัลติมิเตอร์", "multimeter", "tester", "ตลับเมตร", "ประแจ", "เลื่อย",
+    "คัตเตอร์", "ค้อน", "ไขควงวัดไฟ", "บล็อก", "ประแจเลื่อน"
 ]
 
-VIRAL_TOPICS = [
-    "ไฟโซล่าดีไหม ใช้ในบ้านคุ้มไหม",
-    "ปลั๊กไฟแบบไหนปลอดภัยสำหรับบ้าน",
-    "5 เครื่องมือช่างที่ควรมีติดบ้าน",
-    "หลอดไฟ LED ประหยัดไฟจริงไหม",
-    "อุปกรณ์ไฟฟ้าที่ควรมีติดบ้าน"
+BLOCK_KEYWORDS = [
+    # obviously off-theme
+    "กระเป๋า", "tote bag", "bag", "แฟชั่น", "dress", "เสื้อผ้า", "beauty", "cosmetic", "ลิป", "ครีม",
+    "รองเท้า", "กระโปรง", "หมวกแฟชั่น", "ตุ๊กตา", "ของเล่น", "เคสมือถือ", "ครัว", "เครื่องสำอาง",
+    "เครื่องนอน", "หมอน", "ผ้า", "แก้วน้ำ", "ขวดน้ำ", "กระโปรง", "กระเป๋าเครื่องสำอาง", "makeup",
+    "โทรศัพท์", "เคส", "เครื่องประดับ", "น้ำหอม", "แม่และเด็ก", "baby", "อาหาร", "snack",
 ]
 
-ENGAGE_TOPICS = [
-    "บ้านคุณใช้ปลั๊กไฟกี่จุด",
-    "เครื่องมือช่างชิ้นแรกที่ควรมีคืออะไร",
-    "ตอนนี้ในบ้านใช้ LED หมดหรือยัง",
-    "เคยใช้ไฟโซล่ารอบบ้านไหม",
-    "ของใช้ไฟฟ้าที่ขาดไม่ได้คืออะไร"
+HOT_GROUPS = {
+    "lighting": [
+        "ไฟ", "หลอดไฟ", "lamp", "light", "led", "โคม", "โคมไฟ", "ไฟฉาย", "ไฟโซล่า", "สปอตไลท์", "floodlight"
+    ],
+    "electrical": [
+        "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "เต้ารับ", "เบรกเกอร์", "breaker", "สวิตช์",
+        "สวิตช์ไฟ", "สายไฟ", "wire", "cable", "ตู้ไฟ", "rcbo", "mcb", "fuse", "ไฟฟ้า", "electrical"
+    ],
+    "tools": [
+        "tool", "tools", "เครื่องมือ", "เครื่องมือช่าง", "ไขควง", "คีม", "สว่าน", "drill",
+        "มัลติมิเตอร์", "multimeter", "tester", "ประแจ", "ค้อน", "เลื่อย", "ไขควงวัดไฟ"
+    ],
+}
+
+ACADEMY_IMAGES_DIR = "academy_assets"
+ENGAGE_IMAGES_DIR = "engage_assets"
+VIRAL_IMAGES_DIR = "viral_assets"
+
+CAPTION_TEMPLATES = [
+    "งานไฟ งานช่าง งานติดตั้ง ต้องมีตัวช่วยดี ๆ 👨‍🔧⚡\n{title}\n\nเหมาะกับสายช่างและคนที่ชอบทำงานเองที่บ้าน\nเช็กรายละเอียดล่าสุดที่ลิงก์ด้านล่าง",
+    "ไอเท็มสายไฟฟ้า/เครื่องมือที่น่าใช้ 🔧⚡\n{title}\n\nใช้งานสะดวก เหมาะทั้งงานบ้านและงานช่าง\nเช็กราคาล่าสุดที่ลิงก์ด้านล่าง",
+    "ของดีสาย BEN Home & Electrical ⚡\n{title}\n\nคัดมาให้แล้วสำหรับสายไฟ สายช่าง สายติดตั้ง\nเช็กราคาล่าสุดที่ลิงก์ด้านล่าง",
+    "ตัวช่วยงานช่างที่น่าสนใจ 👷‍♂️\n{title}\n\nดูใช้งานง่าย น่ามีติดบ้านติดร้านไว้\nเช็กราคาล่าสุดที่ลิงก์ด้านล่าง",
 ]
 
+ENGAGE_CAPTIONS = [
+    "ที่บ้านคุณมีอุปกรณ์ไฟฟ้าหรือเครื่องมือชิ้นไหนที่ขาดไม่ได้บ้างครับ? ⚡🔧",
+    "ถ้าจะเลือกซื้อปลั๊กพ่วงหรือเครื่องมือช่าง 1 ชิ้น คุณดูอะไรเป็นอย่างแรก? 👇",
+    "อยากให้ช่างเบนทำคลิปสอนเรื่องไฟฟ้าหัวข้อไหนต่อ คอมเมนต์มาได้เลยครับ ⚡",
+]
 
-def load_json(path, default):
+ACADEMY_CAPTIONS = [
+    "BEN Home & Electrical Academy ⚡\nเรียนไฟฟ้าแบบเข้าใจง่าย ใช้ได้จริง ค่อย ๆ ไต่ระดับไปด้วยกันครับ",
+    "มาเรียนรู้เรื่องไฟฟ้าไปพร้อมกับช่างเบน ⚡\nเริ่มจากพื้นฐาน แล้วค่อยต่อยอดแบบเป็นขั้นเป็นตอน",
+]
+
+# =========================
+# HELPERS
+# =========================
+def log(msg: str) -> None:
+    line = f"[{datetime.now(TZ_TH).strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    print(line)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def load_posted() -> Dict[str, Any]:
+    if not os.path.exists(POSTED_JSON_PATH):
+        return {"posted_product_ids": [], "posted_titles": []}
+    with open(POSTED_JSON_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_posted(data: Dict[str, Any]) -> None:
+    with open(POSTED_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", str(s).strip().lower())
+
+
+def to_float(v: Any, default: float = 0.0) -> float:
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        s = str(v).replace(",", "").strip()
+        return float(s)
     except Exception:
         return default
 
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def pick_first(row: Dict[str, Any], keys: List[str], default: str = "") -> str:
+    lower_map = {k.lower(): k for k in row.keys()}
+    for key in keys:
+        if key.lower() in lower_map:
+            value = row.get(lower_map[key.lower()], "")
+            if str(value).strip():
+                return str(value).strip()
+    return default
 
 
-def parse_float(v):
-    try:
-        return float(str(v).replace(",", ""))
-    except Exception:
-        return 0.0
+def best_price(row: Dict[str, Any]) -> float:
+    candidates = [
+        "price",
+        "sale price",
+        "price_min",
+        "price max",
+        "final_price",
+        "discount_price",
+        "ราคาขาย",
+        "ราคา",
+    ]
+    vals = []
+    for c in candidates:
+        v = pick_first(row, [c], "")
+        if v:
+            fv = to_float(v, 0.0)
+            if fv > 0:
+                vals.append(fv)
+    return min(vals) if vals else 0.0
 
 
-def parse_int(v):
-    try:
-        return int(float(str(v).replace(",", "")))
-    except Exception:
-        return 0
+def is_blocked_title(title: str) -> bool:
+    t = normalize_text(title)
+    return any(k in t for k in [normalize_text(x) for x in BLOCK_KEYWORDS])
 
 
-def normalize_posted(raw):
-    if not isinstance(raw, list):
-        return []
-
-    out = []
-    for item in raw:
-        if isinstance(item, str) and item.strip():
-            out.append(item.strip())
-        elif isinstance(item, dict):
-            link = item.get("link")
-            if isinstance(link, str) and link.strip():
-                out.append(link.strip())
-
-    return list(dict.fromkeys(out))
+def detect_group(title: str) -> Optional[str]:
+    t = normalize_text(title)
+    for group, kws in HOT_GROUPS.items():
+        for kw in kws:
+            if normalize_text(kw) in t:
+                return group
+    return None
 
 
-def save_posted_link(link):
-    posted = normalize_posted(load_json(POSTED_FILE, []))
-    posted.append(link)
-    save_json(POSTED_FILE, list(dict.fromkeys(posted)))
+def is_allowed_title(title: str) -> bool:
+    t = normalize_text(title)
+    if is_blocked_title(title):
+        return False
+    return any(normalize_text(k) in t for k in ALLOW_KEYWORDS)
 
 
-def log_post(post_type, content, post_id=""):
-    logs = load_json(LOG_FILE, [])
-    if not isinstance(logs, list):
-        logs = []
+def score_product(row: Dict[str, Any]) -> float:
+    title = pick_first(row, ["product_name", "title", "name", "ชื่อสินค้า"], "")
+    sold = to_float(pick_first(row, ["sold", "historical_sold", "sales", "ขายแล้ว"], "0"))
+    rating = to_float(pick_first(row, ["rating", "item_rating", "คะแนน"], "0"))
+    price = best_price(row)
+    score = (rating * 30) + min(sold, 5000) * 0.05
+    if detect_group(title):
+        score += 20
+    if price > 0:
+        score += 5
+    return score
 
-    row = {
-        "time": str(datetime.now(THAI_TIME)),
-        "type": post_type,
-        "post_id": post_id
+
+# =========================
+# FETCH CSV
+# =========================
+def fetch_csv_rows(csv_url: str, max_rows: int = MAX_ROWS) -> List[Dict[str, Any]]:
+    if not csv_url:
+        raise ValueError("Missing SHOPEE_CSV_URL")
+
+    log(f"Downloading CSV from URL... max_rows={max_rows}")
+    r = requests.get(csv_url, timeout=90)
+    r.raise_for_status()
+
+    content = r.content.decode("utf-8-sig", errors="ignore")
+    reader = csv.DictReader(io.StringIO(content))
+
+    rows: List[Dict[str, Any]] = []
+    for i, row in enumerate(reader, start=1):
+        rows.append(row)
+        if i >= max_rows:
+            break
+
+    log(f"Loaded {len(rows)} rows from CSV")
+    return rows
+
+
+# =========================
+# FILTER PRODUCTS
+# =========================
+def extract_product(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    title = pick_first(row, ["product_name", "title", "name", "ชื่อสินค้า"], "")
+    if not title:
+        return None
+
+    if not is_allowed_title(title):
+        return None
+
+    rating = to_float(pick_first(row, ["rating", "item_rating", "คะแนน"], "0"))
+    sold = to_float(pick_first(row, ["sold", "historical_sold", "sales", "ขายแล้ว"], "0"))
+    if rating < MIN_RATING or sold < MIN_SOLD:
+        return None
+
+    short_link = pick_first(
+        row,
+        ["product_short link", "product_short_link", "short_link", "short link", "affiliate_short_link"],
+        "",
+    )
+    product_url = pick_first(
+        row,
+        ["product_link", "product_url", "url", "link", "affiliate_link"],
+        "",
+    )
+    image = pick_first(
+        row,
+        ["image", "image_url", "image link", "image_link", "img_url", "picture"],
+        "",
+    )
+    pid = pick_first(row, ["itemid", "product_id", "item_id", "id"], title)
+
+    return {
+        "id": str(pid).strip(),
+        "title": title.strip(),
+        "rating": rating,
+        "sold": sold,
+        "price": best_price(row),
+        "short_link": short_link.strip() or product_url.strip(),
+        "image": image.strip(),
+        "group": detect_group(title) or "electrical",
+        "score": score_product(row),
     }
 
-    if isinstance(content, dict):
-        row.update({
-            "name": content.get("name", ""),
-            "link": content.get("link", ""),
-            "rating": content.get("rating", 0),
-            "sold": content.get("sold", 0),
-        })
-    else:
-        row["text"] = str(content)
 
-    logs.append(row)
-    save_json(LOG_FILE, logs)
+def choose_best_product(rows: List[Dict[str, Any]], posted: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    posted_ids = set(posted.get("posted_product_ids", []))
+    posted_titles = {normalize_text(x) for x in posted.get("posted_titles", [])}
+
+    candidates: List[Dict[str, Any]] = []
+    for row in rows:
+        p = extract_product(row)
+        if not p:
+            continue
+        if p["id"] in posted_ids:
+            continue
+        if normalize_text(p["title"]) in posted_titles:
+            continue
+        if not p["short_link"]:
+            continue
+        if not p["image"]:
+            continue
+        candidates.append(p)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    top = candidates[:30]
+    chosen = random.choice(top[:10] if len(top) >= 10 else top)
+    log(f"Chosen product => {chosen['title']} | group={chosen['group']} | sold={chosen['sold']} | rating={chosen['rating']}")
+    return chosen
 
 
-def get_mode():
-    now = datetime.now(THAI_TIME)
-    hm = now.hour * 60 + now.minute
+# =========================
+# CAPTIONS
+# =========================
+def generate_product_caption(product: Dict[str, Any]) -> str:
+    template = random.choice(CAPTION_TEMPLATES)
+    return template.format(title=product["title"])
 
-    if 9 * 60 <= hm < 10 * 60:
-        return "viral"
 
-    if 12 * 60 <= hm < 13 * 60:
+def generate_viral_caption() -> str:
+    samples = [
+        "เรื่องไฟฟ้าใกล้ตัวกว่าที่คิด ⚡\nรู้ไว้ ใช้จริง ปลอดภัยกว่าเดิม",
+        "งานไฟ งานช่าง เริ่มจากความเข้าใจพื้นฐานที่ถูกต้อง ⚡",
+        "ถ้าอยากเข้าใจไฟฟ้าแบบง่าย ๆ ติดตามช่างเบนไว้ได้เลยครับ 🔧⚡",
+    ]
+    return random.choice(samples)
+
+
+def generate_engage_caption() -> str:
+    return random.choice(ENGAGE_CAPTIONS)
+
+
+def generate_academy_caption() -> str:
+    return random.choice(ACADEMY_CAPTIONS)
+
+
+# =========================
+# FILE PICKER
+# =========================
+def list_media_files(folder: str) -> List[str]:
+    if not os.path.isdir(folder):
+        return []
+    files = []
+    for name in os.listdir(folder):
+        p = os.path.join(folder, name)
+        if os.path.isfile(p) and name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+            files.append(p)
+    return sorted(files)
+
+
+def choose_local_image(folder: str) -> Optional[str]:
+    files = list_media_files(folder)
+    return random.choice(files) if files else None
+
+
+# =========================
+# FACEBOOK GRAPH API
+# =========================
+def fb_post_photo(image_bytes: bytes, caption: str) -> str:
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{PAGE_ID}/photos"
+    files = {"source": ("image.jpg", image_bytes)}
+    data = {
+        "caption": caption,
+        "published": "true",
+        "access_token": PAGE_ACCESS_TOKEN,
+    }
+    r = requests.post(url, files=files, data=data, timeout=120)
+    r.raise_for_status()
+    result = r.json()
+    post_id = result.get("post_id") or result.get("id", "")
+    log(f"Posted photo successfully => post_id={post_id}")
+    return post_id
+
+
+def fb_comment(post_id: str, message: str) -> None:
+    if not post_id or not message.strip():
+        return
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{post_id}/comments"
+    data = {"message": message, "access_token": PAGE_ACCESS_TOKEN}
+    r = requests.post(url, data=data, timeout=60)
+    r.raise_for_status()
+    log("Comment posted successfully")
+
+
+def download_image_bytes(url: str) -> bytes:
+    r = requests.get(url, timeout=90)
+    r.raise_for_status()
+    return r.content
+
+
+# =========================
+# MODE DECIDER
+# =========================
+def current_mode() -> str:
+    if FORCE_PRODUCT:
         return "product"
+    if DEFAULT_MODE in {"viral", "product", "engage", "academy"}:
+        return DEFAULT_MODE
 
-    if 15 * 60 <= hm < 16 * 60:
+    now = datetime.now(TZ_TH)
+    hm = now.strftime("%H:%M")
+    if hm == "09:00":
+        return "viral"
+    if hm == "12:00":
+        return "product"
+    if hm == "18:30":
+        return "product"
+    if hm == "21:00":
         return "engage"
 
-    if 18 * 60 + 30 <= hm < 19 * 60 + 30:
-        return "product"
-
-    if 21 * 60 <= hm < 22 * 60:
-        return "reels"
-
+    # fallback
     return "product"
 
 
-def is_match(name, row):
-    text = " ".join([
-        (name or "").lower(),
-        str(row.get("global_category1", "")).lower(),
-        str(row.get("global_category2", "")).lower(),
-        str(row.get("global_category3", "")).lower(),
-    ])
-    return any(k.lower() in text for k in CATEGORY_KEYWORDS)
-
-
-def load_csv_products():
-    print("STEP: load csv", flush=True)
-
-    r = requests.get(CSV_URL, stream=True, timeout=(20, 90))
-    r.raise_for_status()
-
-    reader = csv.DictReader(
-        (line.decode("utf-8", errors="ignore") for line in r.iter_lines() if line)
-    )
-
-    products = []
-    scanned = 0
-
-    for row in reader:
-        scanned += 1
-        if scanned > 20000:
-            break
-
-        name = (row.get("title") or "").strip()
-        link = (row.get("product_short link") or row.get("product_link") or "").strip()
-        image = (row.get("image_link") or row.get("additional_image_link") or "").strip()
-        rating = parse_float(row.get("item_rating"))
-        sold = parse_int(row.get("item_sold"))
-        stock = parse_int(row.get("stock"))
-
-        if not name or not link or not image:
-            continue
-        if stock <= 0:
-            continue
-        if rating < 4:
-            continue
-        if sold < 10:
-            continue
-        if not is_match(name, row):
-            continue
-
-        products.append({
-            "name": name,
-            "link": link,
-            "image": image,
-            "rating": rating,
-            "sold": sold
-        })
-
-        if len(products) >= 300:
-            break
-
-    print("CSV SCANNED:", scanned, flush=True)
-    print("CSV PRODUCTS:", len(products), flush=True)
-    return products
-
-
-def pick_product(products):
-    posted = set(normalize_posted(load_json(POSTED_FILE, [])))
-    candidates = [p for p in products if p["link"] not in posted]
-
-    if not candidates:
-        print("NO NEW PRODUCT", flush=True)
-        return None
-
-    candidates.sort(key=lambda x: (x["rating"], x["sold"]), reverse=True)
-    top = candidates[:40] if len(candidates) >= 40 else candidates
-    return random.choice(top)
-
-
-def ai_text(prompt, fallback):
-    if not OPENAI_KEY:
-        return fallback
-
-    try:
-        r = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "gpt-4.1-mini",
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=30
-        )
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        print("OPENAI ERROR:", e, flush=True)
-        return fallback
-
-
-def build_product_caption(product):
-    fallback = f"""🔥 {product['name']}
-
-ของน่าใช้สำหรับบ้านและงานไฟฟ้า
-เช็กราคาล่าสุดที่ลิงก์ด้านล่าง 👇"""
-
-    prompt = f"""
-เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
-
-สินค้า: {product['name']}
-
-เงื่อนไข:
-- สั้น
-- อ่านง่าย
-- น่าคลิก
-- ห้ามใส่ราคา
-- ห้ามพูดยอดขาย
-- โทนเหมือนแนะนำของใช้ไฟฟ้าและเครื่องมือช่าง
-- ให้ชวนคนไปเช็กราคาล่าสุดที่ลิงก์
-""".strip()
-
-    text = ai_text(prompt, fallback).strip()
-
-    return f"""{text}
-
-🛒 สั่งซื้อสินค้า
-{product['link']}"""
-
-
-def build_viral():
-    topic = random.choice(VIRAL_TOPICS)
-    fallback = f"""⚡ {topic}
-
-ใครเคยใช้บ้าง มาแชร์กัน 👇"""
-
-    prompt = f"""
-เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
-
-หัวข้อ: {topic}
-
-เงื่อนไข:
-- สั้น
-- ชวนคอมเมนต์
-- ไม่ขายของ
-- แนวให้ความรู้เรื่องไฟฟ้าและของใช้ในบ้าน
-""".strip()
-
-    return ai_text(prompt, fallback)
-
-
-def build_engage():
-    topic = random.choice(ENGAGE_TOPICS)
-    fallback = f"""{topic}
-
-คอมเมนต์กันหน่อย 👇"""
-
-    prompt = f"""
-เขียนโพสต์ Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
-
-หัวข้อ: {topic}
-
-เงื่อนไข:
-- สั้น
-- ชวนคนตอบ
-- กันเอง
-- ไม่ขายของ
-""".strip()
-
-    return ai_text(prompt, fallback)
-
-
-def build_reels_caption(product):
-    fallback = f"""🔥 {product['name']}
-
-เช็กราคาล่าสุดที่ลิงก์ด้านล่าง 👇
-
-🛒 สั่งซื้อสินค้า
-{product['link']}"""
-
-    prompt = f"""
-เขียน caption Reels ภาษาไทย สำหรับเพจ BEN Home & Electrical
-
-สินค้า: {product['name']}
-
-เงื่อนไข:
-- สั้น
-- ดูเป็นคลิปแนะนำสินค้า
-- ห้ามใส่ราคา
-- ห้ามพูดยอดขาย
-- ปิดท้ายชวนเช็กราคาล่าสุดที่ลิงก์
-""".strip()
-
-    return ai_text(prompt, fallback)
-
-
-def post_photo(image, caption):
-    print("STEP: facebook photo post", flush=True)
-
-    r = requests.post(
-        f"https://graph.facebook.com/v25.0/{PAGE_ID}/photos",
-        data={
-            "url": image,
-            "caption": caption,
-            "access_token": PAGE_TOKEN
-        },
-        timeout=30
-    )
-
-    try:
-        data = r.json()
-    except Exception:
-        print("POST RAW:", r.text, flush=True)
-        return {}
-
-    print("POST RESPONSE:", data, flush=True)
-    return data
-
-
-def post_text(message):
-    print("STEP: facebook text post", flush=True)
-
-    r = requests.post(
-        f"https://graph.facebook.com/v25.0/{PAGE_ID}/feed",
-        data={
-            "message": message,
-            "access_token": PAGE_TOKEN
-        },
-        timeout=30
-    )
-
-    try:
-        data = r.json()
-    except Exception:
-        print("POST RAW:", r.text, flush=True)
-        return {}
-
-    print("POST RESPONSE:", data, flush=True)
-    return data
-
-
-def comment_link(post_id, link):
-    print("STEP: comment affiliate", flush=True)
-
-    r = requests.post(
-        f"https://graph.facebook.com/v25.0/{post_id}/comments",
-        data={
-            "message": f"🛒 สั่งซื้อสินค้า\n{link}",
-            "access_token": PAGE_TOKEN
-        },
-        timeout=20
-    )
-
-    print("COMMENT:", r.text, flush=True)
-
-
-def upload_reel(product):
-    print("STEP: create reel video", flush=True)
-    video_path = create_product_reel(product["image"], product["name"], "reel.mp4")
-
-    start_url = f"https://graph.facebook.com/v25.0/{PAGE_ID}/video_reels"
-
-    start_res = requests.post(
-        start_url,
-        data={
-            "upload_phase": "start",
-            "access_token": PAGE_TOKEN
-        },
-        timeout=30
-    ).json()
-
-    print("REEL START:", start_res, flush=True)
-
-    video_id = start_res.get("video_id")
-    upload_url = start_res.get("upload_url")
-
-    if not video_id or not upload_url:
-        return {}
-
-    with open(video_path, "rb") as f:
-        upload_res = requests.post(
-            upload_url,
-            data=f,
-            headers={"Authorization": f"OAuth {PAGE_TOKEN}"},
-            timeout=120
-        )
-
-    print("REEL UPLOAD:", upload_res.text, flush=True)
-
-    finish_res = requests.post(
-        start_url,
-        data={
-            "upload_phase": "finish",
-            "video_id": video_id,
-            "video_state": "PUBLISHED",
-            "description": build_reels_caption(product),
-            "access_token": PAGE_TOKEN
-        },
-        timeout=30
-    )
-
-    try:
-        data = finish_res.json()
-    except Exception:
-        print("REEL FINISH RAW:", finish_res.text, flush=True)
-        return {}
-
-    print("REEL FINISH:", data, flush=True)
-    return {"id": video_id, **data}
-
-
-def run_product():
-    products = load_csv_products()
-    if not products:
-        return
-
-    product = pick_product(products)
+# =========================
+# POST FLOWS
+# =========================
+def post_product_flow() -> None:
+    posted = load_posted()
+    rows = fetch_csv_rows(SHOPEE_CSV_URL, max_rows=MAX_ROWS)
+    product = choose_best_product(rows, posted)
     if not product:
-        return
+        raise RuntimeError("No valid product found after strict BEN filter")
 
-    res = post_photo(product["image"], build_product_caption(product))
-    post_id = res.get("post_id") or res.get("id")
+    caption = generate_product_caption(product)
+    image_bytes = download_image_bytes(product["image"])
+    post_id = fb_post_photo(image_bytes, caption)
 
-    if not post_id:
-        return
+    comment_msg = f"🛒 สั่งซื้อสินค้า\n{product['short_link']}"
+    fb_comment(post_id, comment_msg)
 
-    comment_link(post_id, product["link"])
-    save_posted_link(product["link"])
-    log_post("product", product, post_id)
-    print("POST SUCCESS", flush=True)
-
-
-def run_viral():
-    res = post_text(build_viral())
-    post_id = res.get("id") or ""
-    log_post("viral", "viral", post_id)
-    print("POST SUCCESS", flush=True)
+    posted["posted_product_ids"].append(product["id"])
+    posted["posted_titles"].append(product["title"])
+    posted["posted_product_ids"] = posted["posted_product_ids"][-5000:]
+    posted["posted_titles"] = posted["posted_titles"][-5000:]
+    save_posted(posted)
 
 
-def run_engage():
-    res = post_text(build_engage())
-    post_id = res.get("id") or ""
-    log_post("engage", "engage", post_id)
-    print("POST SUCCESS", flush=True)
+def post_viral_flow() -> None:
+    image_path = choose_local_image(VIRAL_IMAGES_DIR)
+    if not image_path:
+        raise RuntimeError("No viral image found in viral_assets")
+
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    caption = generate_viral_caption()
+    fb_post_photo(image_bytes, caption)
 
 
-def run_reels():
-    products = load_csv_products()
-    if not products:
-        return
+def post_engage_flow() -> None:
+    image_path = choose_local_image(ENGAGE_IMAGES_DIR)
+    if not image_path:
+        raise RuntimeError("No engage image found in engage_assets")
 
-    product = pick_product(products)
-    if not product:
-        return
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
 
-    res = upload_reel(product)
-    reel_id = res.get("id") or res.get("video_id") or ""
-
-    if reel_id:
-        save_posted_link(product["link"])
-        log_post("reels", product, reel_id)
-        print("REEL SUCCESS", flush=True)
+    caption = generate_engage_caption()
+    fb_post_photo(image_bytes, caption)
 
 
-def run():
-    mode = get_mode()
-    print("MODE:", mode, flush=True)
+def post_academy_flow() -> None:
+    image_path = choose_local_image(ACADEMY_IMAGES_DIR)
+    if not image_path:
+        raise RuntimeError("No academy image found in academy_assets")
 
-    if mode == "viral":
-        run_viral()
-        return
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
 
-    if mode == "engage":
-        run_engage()
-        return
+    caption = generate_academy_caption()
+    fb_post_photo(image_bytes, caption)
 
-    if mode == "reels":
-        run_reels()
-        return
 
-    run_product()
+# =========================
+# MAIN
+# =========================
+def validate_env() -> None:
+    missing = []
+    for k, v in {
+        "PAGE_ID": PAGE_ID,
+        "PAGE_ACCESS_TOKEN": PAGE_ACCESS_TOKEN,
+        "GRAPH_API_VERSION": GRAPH_API_VERSION,
+    }.items():
+        if not v:
+            missing.append(k)
+    if missing:
+        raise ValueError(f"Missing env vars: {', '.join(missing)}")
+
+
+def main() -> None:
+    validate_env()
+    mode = current_mode()
+    log(f"Running mode => {mode}")
+
+    if mode == "product":
+        post_product_flow()
+    elif mode == "viral":
+        post_viral_flow()
+    elif mode == "engage":
+        post_engage_flow()
+    elif mode == "academy":
+        post_academy_flow()
+    else:
+        raise RuntimeError(f"Unsupported mode: {mode}")
 
 
 if __name__ == "__main__":
-    run()
+    main()
