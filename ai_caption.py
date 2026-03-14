@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import requests
 
@@ -17,23 +18,29 @@ def fallback_caption(product):
     return random.choice(FALLBACK_CAPTIONS).format(title=product["title"])
 
 
-def generate_caption(product):
+def generate_caption_choices(product):
     if not OPENAI_API_KEY:
-        return fallback_caption(product)
+        base = fallback_caption(product)
+        return [base, base, base]
 
     prompt = f"""
 เขียนแคปชัน Facebook ภาษาไทย สำหรับเพจ BEN Home & Electrical
 
 สินค้า:
 {product['title']}
+หมวด:
+{product.get('group', 'electrical')}
 
 เงื่อนไข:
+- เขียน 3 แบบ
 - ไม่ใส่ราคาตัวเลข
-- ความยาว 3-5 บรรทัด
+- ความยาว 3-5 บรรทัดต่อแบบ
 - โทนมืออาชีพ อ่านง่าย
 - เหมาะกับสายไฟฟ้า เครื่องมือช่าง งานติดตั้ง
 - ปิดท้ายให้ชวนกดดูรายละเอียดที่ลิงก์ด้านล่าง
-- ขอแค่ข้อความแคปชันอย่างเดียว
+- ตอบกลับเป็น JSON เท่านั้น
+- รูปแบบ:
+{{"captions":["แบบที่1","แบบที่2","แบบที่3"]}}
 """.strip()
 
     try:
@@ -49,12 +56,29 @@ def generate_caption(product):
                     {"role": "system", "content": "คุณเป็นนักเขียนแคปชันขายของภาษาไทยเก่งด้านสินค้าไฟฟ้าและเครื่องมือช่าง"},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.9,
+                "temperature": 0.95,
+                "response_format": {"type": "json_object"},
             },
             timeout=90,
         )
         r.raise_for_status()
         data = r.json()
-        return data["choices"][0]["message"]["content"].strip()
+        content = data["choices"][0]["message"]["content"].strip()
+        obj = json.loads(content)
+
+        captions = obj.get("captions", [])
+        captions = [str(x).strip() for x in captions if str(x).strip()]
+
+        if len(captions) >= 3:
+            return captions[:3]
+
+        base = fallback_caption(product)
+        return captions + [base] * (3 - len(captions))
     except Exception:
-        return fallback_caption(product)
+        base = fallback_caption(product)
+        return [base, base, base]
+
+
+def generate_caption(product):
+    choices = generate_caption_choices(product)
+    return random.choice(choices)
