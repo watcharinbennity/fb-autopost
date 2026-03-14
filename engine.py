@@ -35,22 +35,42 @@ def choose_best_product_stream(csv_url, posted_data, max_rows=100000):
 
     candidates = []
 
+    stats = {
+        "rows_seen": 0,
+        "build_none": 0,
+        "dup_id": 0,
+        "dup_image": 0,
+        "accepted": 0,
+    }
+
     for row in iter_csv_rows(csv_url, max_rows=max_rows):
+        stats["rows_seen"] += 1
+
         product = build_product(row)
         if not product:
+            stats["build_none"] += 1
             continue
 
         if product["id"] in posted_ids:
+            stats["dup_id"] += 1
             continue
 
         img_key = image_key_from_url(product["image"])
         if img_key in posted_images:
+            stats["dup_image"] += 1
             continue
 
         product["image_key"] = img_key
-
         candidates.append(product)
+        stats["accepted"] += 1
+
         candidates = sorted(candidates, key=score_product, reverse=True)[:500]
+
+    log(f"rows_seen={stats['rows_seen']}")
+    log(f"build_none={stats['build_none']}")
+    log(f"dup_id={stats['dup_id']}")
+    log(f"dup_image={stats['dup_image']}")
+    log(f"accepted={stats['accepted']}")
 
     if not candidates:
         return None
@@ -60,7 +80,9 @@ def choose_best_product_stream(csv_url, posted_data, max_rows=100000):
         elite = candidates[:10]
 
     top_pool = elite[:20] if len(elite) >= 20 else elite
-    return random.choice(top_pool)
+    chosen = random.choice(top_pool)
+    log(f"CHOSEN => {chosen['title']} | sold={chosen['sold']} | rating={chosen['rating']} | group={chosen['group']}")
+    return chosen
 
 
 def run_engine():
@@ -69,7 +91,6 @@ def run_engine():
 
     log(f"BEN AI ENGINE START | mode={mode}")
 
-    # ตอนนี้ยังเปิดใช้ product เป็นหลัก
     if mode != "product":
         log("รอบนี้ยังใช้ product mode เป็นหลัก")
         mode = "product"
