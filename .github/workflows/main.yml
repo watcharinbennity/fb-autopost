@@ -2,11 +2,14 @@ name: BEN-AI-ENGINE
 
 on:
   schedule:
-    - cron: "0 2 * * *"
-    - cron: "0 5 * * *"
-    - cron: "30 11 * * *"
-    - cron: "0 14 * * *"
+    - cron: "0 2 * * *"     # 09:00 ไทย
+    - cron: "0 5 * * *"     # 12:00 ไทย
+    - cron: "30 11 * * *"   # 18:30 ไทย
+    - cron: "0 14 * * *"    # 21:00 ไทย
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run:
@@ -32,6 +35,7 @@ jobs:
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: "gpt-4o-mini"
+          USE_OPENAI: "true"
         run: python app.py
 
       - name: Commit posted.json
@@ -40,53 +44,4 @@ jobs:
           git config --global user.email "actions@github.com"
           git add posted.json || true
           git diff --cached --quiet || git commit -m "update posted history"
-          git push
-      - name: Commit posted.json
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add posted.json || true
-          git diff --cached --quiet || git commit -m "update posted history"
-          git push
-      - name: Decide mode from schedule / manual
-        id: mode
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "POST_MODE=${{ github.event.inputs.post_mode }}" >> $GITHUB_ENV
-            echo "FORCE_PRODUCT=false" >> $GITHUB_ENV
-          else
-            HOUR_MIN=$(TZ=Asia/Bangkok date +%H:%M)
-            echo "Bangkok time = $HOUR_MIN"
-            if [ "$HOUR_MIN" = "09:00" ]; then
-              echo "POST_MODE=viral" >> $GITHUB_ENV
-            elif [ "$HOUR_MIN" = "12:00" ]; then
-              echo "POST_MODE=product" >> $GITHUB_ENV
-            elif [ "$HOUR_MIN" = "18:30" ]; then
-              echo "POST_MODE=product" >> $GITHUB_ENV
-            elif [ "$HOUR_MIN" = "21:00" ]; then
-              echo "POST_MODE=engage" >> $GITHUB_ENV
-            else
-              echo "POST_MODE=product" >> $GITHUB_ENV
-            fi
-            echo "FORCE_PRODUCT=false" >> $GITHUB_ENV
-          fi
-
-      - name: Run bot
-        env:
-          PAGE_ID: ${{ secrets.PAGE_ID }}
-          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          GRAPH_API_VERSION: "v25.0"
-          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          USE_OPENAI: "false"
-          POST_MODE: ${{ env.POST_MODE }}
-          FORCE_PRODUCT: ${{ env.FORCE_PRODUCT }}
-        run: python main.py
-
-      - name: Commit posted.json
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add posted.json post_log.txt || true
-          git diff --cached --quiet || git commit -m "update posted log"
           git push
