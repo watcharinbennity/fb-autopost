@@ -1,5 +1,4 @@
 import csv
-import io
 import json
 import os
 import requests
@@ -13,25 +12,27 @@ def log(msg: str):
     print(f"[{datetime.now(TZ_TH).strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 
-def load_csv(url: str, max_rows: int):
+def iter_csv_rows(url: str, max_rows: int):
     if not url:
         raise ValueError("Missing SHOPEE_CSV_URL")
 
-    log(f"Downloading CSV from: {url}")
-    r = requests.get(url, timeout=120)
-    r.raise_for_status()
+    log(f"Streaming CSV from URL... max_rows={max_rows}")
 
-    text = r.content.decode("utf-8-sig", errors="ignore")
-    reader = csv.DictReader(io.StringIO(text))
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
 
-    rows = []
-    for i, row in enumerate(reader, start=1):
-        rows.append(row)
-        if i >= max_rows:
-            break
+        lines = (
+            line.decode("utf-8-sig", errors="ignore")
+            for line in r.iter_lines()
+            if line
+        )
 
-    log(f"Loaded rows: {len(rows)}")
-    return rows
+        reader = csv.DictReader(lines)
+
+        for i, row in enumerate(reader, start=1):
+            yield row
+            if i >= max_rows:
+                break
 
 
 def load_posted():
