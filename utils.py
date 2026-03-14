@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import hashlib
 import requests
 from datetime import datetime, timedelta, timezone
 
@@ -37,14 +38,18 @@ def iter_csv_rows(url: str, max_rows: int):
 
 def load_posted():
     if not os.path.exists(POSTED_FILE):
-        return []
+        return {"ids": [], "image_keys": []}
 
     try:
         with open(POSTED_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, list) else []
+            if not isinstance(data, dict):
+                return {"ids": [], "image_keys": []}
+            data.setdefault("ids", [])
+            data.setdefault("image_keys", [])
+            return data
     except Exception:
-        return []
+        return {"ids": [], "image_keys": []}
 
 
 def save_posted(data):
@@ -57,3 +62,7 @@ def to_float(value):
         return float(str(value).replace(",", "").strip())
     except Exception:
         return 0.0
+
+
+def image_key_from_url(url: str) -> str:
+    return hashlib.md5(str(url).strip().lower().encode("utf-8")).hexdigest()
