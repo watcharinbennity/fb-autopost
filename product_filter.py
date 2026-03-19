@@ -4,18 +4,18 @@ MIN_RATING = 4.0
 MIN_SOLD = 10.0
 MIN_COMMISSION = 50.0
 
-# ต้องตรงอย่างน้อย 1 กลุ่มแบบแรง ๆ
 LIGHTING_KEYWORDS = [
     "โคมไฟ", "หลอดไฟ", "ไฟ led", "ไฟแอลอีดี", "led", "ไฟฉาย", "ไฟโซล่า",
     "solar light", "floodlight", "spotlight", "ไฟติดผนัง", "ไฟเพดาน",
-    "ไฟเซ็นเซอร์", "sensor light", "motion light", "ไฟสนาม", "ไฟถนน"
+    "ไฟเซ็นเซอร์", "ไฟเซนเซอร์", "sensor light", "motion light",
+    "ไฟสนาม", "ไฟถนน", "ไฟดาวน์ไลท์", "downlight"
 ]
 
 ELECTRICAL_KEYWORDS = [
     "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip", "เต้ารับ", "เบรกเกอร์",
     "breaker", "mcb", "rcbo", "fuse", "สวิตช์ไฟ", "switch", "สายไฟ",
     "wire", "cable", "ตู้ไฟ", "consumer unit", "อะแดปเตอร์", "adapter",
-    "voltage tester", "ปลั๊ก usb", "usb plug"
+    "voltage tester", "ปลั๊ก usb", "usb plug", "ปลั๊กยูเอสบี", "สายชาร์จ"
 ]
 
 TOOLS_KEYWORDS = [
@@ -24,7 +24,6 @@ TOOLS_KEYWORDS = [
     "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร", "เครื่องมือช่าง", "tool", "tools"
 ]
 
-# บล็อกหมวดที่ไม่เกี่ยวข้อง
 BLOCK_KEYWORDS = [
     # fashion / beauty
     "fashion", "bag", "tote bag", "beauty", "cosmetic", "makeup", "lip", "lipstick",
@@ -34,7 +33,7 @@ BLOCK_KEYWORDS = [
     # food
     "oats", "rolled oats", "ข้าวโอ๊ต", "อาหาร", "snack", "ของกิน", "เวอรี่นาย",
 
-    # other unrelated
+    # unrelated
     "ของเล่น", "toy", "ตุ๊กตา", "แม่และเด็ก", "baby", "เครื่องประดับ"
 ]
 
@@ -67,17 +66,16 @@ def detect_group(title: str) -> str:
         return "electrical"
     if contains_any(t, TOOLS_KEYWORDS):
         return "tools"
+
     return "other"
 
 
 def title_allowed(title: str) -> bool:
     t = normalize(title)
 
-    # เจอคำต้องห้าม = ตัดทิ้งทันที
     if contains_any(t, BLOCK_KEYWORDS):
         return False
 
-    # ต้องเข้า whitelist แบบชัดเจนเท่านั้น
     if contains_any(t, LIGHTING_KEYWORDS):
         return True
     if contains_any(t, ELECTRICAL_KEYWORDS):
@@ -91,41 +89,63 @@ def title_allowed(title: str) -> bool:
 def calc_commission(row):
     """
     พยายามอ่านค่าคอมจากหลายชื่อคอลัมน์
-    ถ้าไม่มีค่าคอมตรง จะลองคำนวณจาก commission_rate * price
+    ถ้าไม่มีค่าคอมตรง จะคำนวณจาก rate * price
+    ถ้ายังไม่มีอีก จะ fallback ใช้ 10% ของราคา
     """
 
-    commission = to_float(pick_first(row, [
+    lower_map = {k.lower(): k for k in row.keys()}
+
+    def get_any(keys):
+        for k in keys:
+            real = lower_map.get(k.lower())
+            if real:
+                val = row.get(real, "")
+                if str(val).strip():
+                    return to_float(val)
+        return 0.0
+
+    # 1) commission ตรง ๆ
+    commission = get_any([
         "commission",
         "commission_value",
         "estimated_commission",
-        "earn",
         "earning",
+        "earn",
+        "payout",
         "commission baht",
         "ค่าคอม",
         "ค่าคอมมิชชั่น"
-    ], "0"))
-
+    ])
     if commission > 0:
         return commission
 
-    commission_rate = to_float(pick_first(row, [
+    # 2) rate %
+    rate = get_any([
         "commission_rate",
         "commission %",
         "commission_percent",
         "rate",
+        "commission rate",
         "เปอร์เซ็นต์ค่าคอม"
-    ], "0"))
+    ])
 
-    price = to_float(pick_first(row, [
+    # 3) price
+    price = get_any([
         "price",
         "final_price",
         "sale_price",
         "product_price",
+        "price_min",
+        "price_max",
         "ราคาขาย"
-    ], "0"))
+    ])
 
-    if commission_rate > 0 and price > 0:
-        return (commission_rate / 100.0) * price
+    if rate > 0 and price > 0:
+        return (rate / 100.0) * price
+
+    # 4) fallback: สมมุติค่าคอมประมาณ 10%
+    if price > 0:
+        return price * 0.10
 
     return 0.0
 
@@ -155,6 +175,7 @@ def build_product(row):
 
     if rating < MIN_RATING:
         return None
+
     if sold < MIN_SOLD:
         return None
 
@@ -167,16 +188,25 @@ def build_product(row):
         ["itemid", "item_id", "product_id", "id", "itemid ", "product id"],
         title
     )
+
     image = pick_first(
         row,
         ["image", "image_url", "image_url_1", "picture", "image link", "image_link", "img_url"],
         ""
     )
+
     link = pick_first(
         row,
         [
-            "product_short link", "product_short_link", "short_link", "short link",
-            "product_link", "product_url", "link", "affiliate_link", "product short link"
+            "product_short link",
+            "product_short_link",
+            "short_link",
+            "short link",
+            "product_link",
+            "product_url",
+            "link",
+            "affiliate_link",
+            "product short link"
         ],
         ""
     )
@@ -197,4 +227,4 @@ def build_product(row):
         "sold": sold,
         "commission": commission,
         "group": group,
-        }
+    }
