@@ -1,70 +1,46 @@
 from utils import to_float
 
-ALLOW_KEYWORDS = [
-    "ไฟ", "หลอดไฟ", "โคมไฟ", "โคม", "lamp", "light", "led", "floodlight", "spotlight",
-    "ไฟฉาย", "ไฟโซล่า", "ไฟสนาม", "ไฟถนน", "ไฟติดผนัง", "ไฟเพดาน", "ไฟเซ็นเซอร์", "ไฟเซนเซอร์",
-    "motion light", "sensor light", "solar light",
-    "ไฟฟ้า", "electrical", "ปลั๊ก", "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip",
-    "adapter", "อะแดปเตอร์", "usb plug", "เต้ารับ", "เบรกเกอร์", "breaker", "mcb", "rcbo",
-    "fuse", "สวิตช์", "switch", "สายไฟ", "wire", "cable", "ตู้ไฟ", "consumer unit",
-    "voltage tester", "สายชาร์จ", "ปลั๊ก usb", "ปลั๊กยูเอสบี",
-    "tool", "tools", "เครื่องมือ", "เครื่องมือช่าง", "ช่าง", "ไขควง", "ไขควงวัดไฟ",
-    "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill", "มัลติมิเตอร์", "multimeter",
-    "tester", "ประแจ", "ประแจเลื่อน", "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร"
-]
-
-BLOCK_KEYWORDS = [
-    "fashion", "bag", "tote bag", "beauty", "cosmetic", "makeup", "lip", "dress",
-    "เสื้อ", "เสื้อผ้า", "กระเป๋า", "รองเท้า", "น้ำหอม", "ของเล่น", "toy",
-    "ตุ๊กตา", "อาหาร", "snack", "เครื่องประดับ", "แม่และเด็ก", "baby"
-]
-
 MIN_RATING = 4.0
 MIN_SOLD = 10.0
+MIN_COMMISSION = 50.0
+
+# ต้องตรงอย่างน้อย 1 กลุ่มแบบแรง ๆ
+LIGHTING_KEYWORDS = [
+    "โคมไฟ", "หลอดไฟ", "ไฟ led", "ไฟแอลอีดี", "led", "ไฟฉาย", "ไฟโซล่า",
+    "solar light", "floodlight", "spotlight", "ไฟติดผนัง", "ไฟเพดาน",
+    "ไฟเซ็นเซอร์", "sensor light", "motion light", "ไฟสนาม", "ไฟถนน"
+]
+
+ELECTRICAL_KEYWORDS = [
+    "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip", "เต้ารับ", "เบรกเกอร์",
+    "breaker", "mcb", "rcbo", "fuse", "สวิตช์ไฟ", "switch", "สายไฟ",
+    "wire", "cable", "ตู้ไฟ", "consumer unit", "อะแดปเตอร์", "adapter",
+    "voltage tester", "ปลั๊ก usb", "usb plug"
+]
+
+TOOLS_KEYWORDS = [
+    "ไขควง", "ไขควงวัดไฟ", "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill",
+    "มัลติมิเตอร์", "multimeter", "tester", "ประแจ", "ประแจเลื่อน",
+    "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร", "เครื่องมือช่าง", "tool", "tools"
+]
+
+# บล็อกหมวดที่ไม่เกี่ยวข้อง
+BLOCK_KEYWORDS = [
+    # fashion / beauty
+    "fashion", "bag", "tote bag", "beauty", "cosmetic", "makeup", "lip", "lipstick",
+    "micellar", "cleansing", "garnier", "konvy", "serum", "skincare",
+    "เสื้อ", "เสื้อผ้า", "กระเป๋า", "รองเท้า", "น้ำหอม", "เครื่องสำอาง",
+
+    # food
+    "oats", "rolled oats", "ข้าวโอ๊ต", "อาหาร", "snack", "ของกิน", "เวอรี่นาย",
+
+    # other unrelated
+    "ของเล่น", "toy", "ตุ๊กตา", "แม่และเด็ก", "baby", "เครื่องประดับ"
+]
 
 
 def normalize(text: str) -> str:
     return str(text).strip().lower()
-
-
-def title_allowed(title: str) -> bool:
-    t = normalize(title)
-
-    for bad in BLOCK_KEYWORDS:
-        if bad in t:
-            return False
-
-    for good in ALLOW_KEYWORDS:
-        if good in t:
-            return True
-
-    return False
-
-
-def detect_group(title: str) -> str:
-    t = normalize(title)
-
-    lighting = [
-        "ไฟ", "หลอดไฟ", "โคม", "lamp", "light", "led",
-        "floodlight", "spotlight", "solar light", "sensor light"
-    ]
-    electrical = [
-        "ไฟฟ้า", "electrical", "ปลั๊ก", "socket", "power strip",
-        "เบรกเกอร์", "breaker", "สวิตช์", "switch", "สายไฟ", "wire", "cable",
-        "adapter", "mcb", "rcbo", "fuse"
-    ]
-    tools = [
-        "tool", "tools", "เครื่องมือ", "ไขควง", "คีม", "สว่าน",
-        "drill", "multimeter", "tester", "ประแจ", "ค้อน"
-    ]
-
-    if any(k in t for k in lighting):
-        return "lighting"
-    if any(k in t for k in electrical):
-        return "electrical"
-    if any(k in t for k in tools):
-        return "tools"
-    return "other"
 
 
 def pick_first(row, keys, default=""):
@@ -76,6 +52,82 @@ def pick_first(row, keys, default=""):
             if str(value).strip():
                 return str(value).strip()
     return default
+
+
+def contains_any(text: str, keywords):
+    return any(k in text for k in keywords)
+
+
+def detect_group(title: str) -> str:
+    t = normalize(title)
+
+    if contains_any(t, LIGHTING_KEYWORDS):
+        return "lighting"
+    if contains_any(t, ELECTRICAL_KEYWORDS):
+        return "electrical"
+    if contains_any(t, TOOLS_KEYWORDS):
+        return "tools"
+    return "other"
+
+
+def title_allowed(title: str) -> bool:
+    t = normalize(title)
+
+    # เจอคำต้องห้าม = ตัดทิ้งทันที
+    if contains_any(t, BLOCK_KEYWORDS):
+        return False
+
+    # ต้องเข้า whitelist แบบชัดเจนเท่านั้น
+    if contains_any(t, LIGHTING_KEYWORDS):
+        return True
+    if contains_any(t, ELECTRICAL_KEYWORDS):
+        return True
+    if contains_any(t, TOOLS_KEYWORDS):
+        return True
+
+    return False
+
+
+def calc_commission(row):
+    """
+    พยายามอ่านค่าคอมจากหลายชื่อคอลัมน์
+    ถ้าไม่มีค่าคอมตรง จะลองคำนวณจาก commission_rate * price
+    """
+
+    commission = to_float(pick_first(row, [
+        "commission",
+        "commission_value",
+        "estimated_commission",
+        "earn",
+        "earning",
+        "commission baht",
+        "ค่าคอม",
+        "ค่าคอมมิชชั่น"
+    ], "0"))
+
+    if commission > 0:
+        return commission
+
+    commission_rate = to_float(pick_first(row, [
+        "commission_rate",
+        "commission %",
+        "commission_percent",
+        "rate",
+        "เปอร์เซ็นต์ค่าคอม"
+    ], "0"))
+
+    price = to_float(pick_first(row, [
+        "price",
+        "final_price",
+        "sale_price",
+        "product_price",
+        "ราคาขาย"
+    ], "0"))
+
+    if commission_rate > 0 and price > 0:
+        return (commission_rate / 100.0) * price
+
+    return 0.0
 
 
 def build_product(row):
@@ -106,6 +158,10 @@ def build_product(row):
     if sold < MIN_SOLD:
         return None
 
+    commission = calc_commission(row)
+    if commission < MIN_COMMISSION:
+        return None
+
     pid = pick_first(
         row,
         ["itemid", "item_id", "product_id", "id", "itemid ", "product id"],
@@ -128,6 +184,10 @@ def build_product(row):
     if not image or not link:
         return None
 
+    group = detect_group(title)
+    if group == "other":
+        return None
+
     return {
         "id": str(pid).strip(),
         "title": title.strip(),
@@ -135,23 +195,6 @@ def build_product(row):
         "link": link.strip(),
         "rating": rating,
         "sold": sold,
-        "group": detect_group(title),
-    }
-
-
-def score_product(product):
-    sold_score = product["sold"] * 2.0
-    rating_score = product["rating"] * 10.0
-    viral_bonus = min(product["sold"], 5000) * 0.05
-    group_bonus = 8 if product["group"] in {"lighting", "electrical", "tools"} else 0
-
-    return sold_score + rating_score + viral_bonus + group_bonus
-
-
-def top_one_percent(products):
-    if not products:
-        return []
-
-    ranked = sorted(products, key=score_product, reverse=True)
-    keep = max(1, int(len(ranked) * 0.01))
-    return ranked[:keep]
+        "commission": commission,
+        "group": group,
+        }
