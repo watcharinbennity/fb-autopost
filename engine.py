@@ -5,7 +5,7 @@ from product_filter import build_product
 from ai_caption import generate_caption
 from facebook_post import post_product
 
-CSV_URL = os.getenv("SHOPEE_CSV_URL")
+CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
 MAX_ROWS = 200000
 TOP_PERCENT = 0.005
@@ -34,24 +34,33 @@ def choose_product(csv_url, posted_data):
 
     candidates = []
     rows_seen = 0
+    build_none = 0
+    dup_id = 0
+    dup_image = 0
+    accepted = 0
 
     for row in iter_csv_rows(csv_url, max_rows=MAX_ROWS):
         rows_seen += 1
 
         product = build_product(row)
         if not product:
+            build_none += 1
             continue
 
         if product["id"] in posted_ids:
+            dup_id += 1
             continue
 
         img_key = image_key_from_url(product["image"])
         if img_key in posted_images:
+            dup_image += 1
             continue
 
         product["image_key"] = img_key
         candidates.append(product)
+        accepted += 1
 
+        # เก็บเฉพาะตัวคะแนนสูงไว้ก่อน ไม่ให้กินแรมเกิน
         candidates = sorted(
             candidates,
             key=score_product,
@@ -59,6 +68,10 @@ def choose_product(csv_url, posted_data):
         )[:1000]
 
     log(f"rows_seen={rows_seen}")
+    log(f"build_none={build_none}")
+    log(f"dup_id={dup_id}")
+    log(f"dup_image={dup_image}")
+    log(f"accepted={accepted}")
     log(f"candidates={len(candidates)}")
 
     if not candidates:
@@ -95,6 +108,8 @@ def run_engine():
         log("NO PRODUCT FOUND")
         return
 
+    log("READY TO POST PRODUCT NOW")
+
     caption = generate_caption(product)
     post_id = post_product(product, caption)
 
@@ -107,3 +122,5 @@ def run_engine():
 
         save_posted(posted_data)
         log(f"POSTED SUCCESS => {product['title']}")
+    else:
+        log("POST FAILED")
