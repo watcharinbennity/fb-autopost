@@ -5,30 +5,39 @@ MIN_SOLD = 10.0
 MIN_COMMISSION = 50.0
 
 LIGHTING_KEYWORDS = [
-    "โคมไฟ", "หลอดไฟ", "ไฟ led", "ไฟแอลอีดี", "led", "ไฟฉาย", "ไฟโซล่า",
-    "solar light", "floodlight", "spotlight", "ไฟติดผนัง", "ไฟเพดาน",
-    "ไฟเซ็นเซอร์", "ไฟเซนเซอร์", "sensor light", "motion light",
-    "ไฟสนาม", "ไฟถนน", "ไฟดาวน์ไลท์", "downlight"
+    "โคมไฟ", "หลอดไฟ", "ไฟ led", "ไฟแอลอีดี", "led bulb", "light bulb",
+    "ไฟฉาย", "ไฟโซล่า", "solar light", "floodlight", "spotlight",
+    "ไฟติดผนัง", "ไฟเพดาน", "ไฟเซ็นเซอร์", "ไฟเซนเซอร์",
+    "sensor light", "motion light", "ไฟสนาม", "ไฟถนน",
+    "ไฟดาวน์ไลท์", "downlight", "โคม", "lamp", "lighting"
 ]
 
 ELECTRICAL_KEYWORDS = [
-    "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip", "เต้ารับ", "เบรกเกอร์",
-    "breaker", "mcb", "rcbo", "fuse", "สวิตช์ไฟ", "switch", "สายไฟ",
-    "wire", "cable", "ตู้ไฟ", "consumer unit", "อะแดปเตอร์", "adapter",
-    "voltage tester", "ปลั๊ก usb", "usb plug", "ปลั๊กยูเอสบี", "สายชาร์จ"
+    "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip", "เต้ารับ",
+    "เบรกเกอร์", "breaker", "mcb", "rcbo", "fuse",
+    "สวิตช์ไฟ", "switch", "สายไฟ", "wire", "cable",
+    "ตู้ไฟ", "consumer unit", "อะแดปเตอร์", "adapter",
+    "voltage tester", "ปลั๊ก usb", "usb plug", "ปลั๊กยูเอสบี",
+    "สายชาร์จ", "electrical"
 ]
 
 TOOLS_KEYWORDS = [
-    "ไขควง", "ไขควงวัดไฟ", "คีม", "คีมตัด", "คีมปอกสาย", "สว่าน", "drill",
-    "มัลติมิเตอร์", "multimeter", "tester", "ประแจ", "ประแจเลื่อน",
-    "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร", "เครื่องมือช่าง", "tool", "tools"
+    "ไขควง", "ไขควงวัดไฟ", "คีม", "คีมตัด", "คีมปอกสาย",
+    "สว่าน", "drill", "มัลติมิเตอร์", "multimeter", "tester",
+    "ประแจ", "ประแจเลื่อน", "ค้อน", "เลื่อย", "คัตเตอร์",
+    "ตลับเมตร", "เครื่องมือช่าง", "tool", "tools"
 ]
 
 BLOCK_KEYWORDS = [
-    # fashion / beauty
-    "fashion", "bag", "tote bag", "beauty", "cosmetic", "makeup", "lip", "lipstick",
+    # beauty / skincare
+    "beauty", "cosmetic", "makeup", "lip", "lipstick",
     "micellar", "cleansing", "garnier", "konvy", "serum", "skincare",
-    "เสื้อ", "เสื้อผ้า", "กระเป๋า", "รองเท้า", "น้ำหอม", "เครื่องสำอาง",
+    "facial", "face", "หน้ากาก", "mask", "หน้า", "ผิว",
+    "บำรุงผิว", "สกินแคร์", "ความงาม", "ครีม", "led mask", "nir",
+
+    # fashion
+    "fashion", "bag", "tote bag", "เสื้อ", "เสื้อผ้า", "กระเป๋า", "รองเท้า",
+    "น้ำหอม", "เครื่องสำอาง",
 
     # food
     "oats", "rolled oats", "ข้าวโอ๊ต", "อาหาร", "snack", "ของกิน", "เวอรี่นาย",
@@ -59,6 +68,10 @@ def contains_any(text: str, keywords):
 
 def detect_group(title: str) -> str:
     t = normalize(title)
+
+    # เจอคำต้องห้ามก่อน = blocked ทันที
+    if contains_any(t, BLOCK_KEYWORDS):
+        return "blocked"
 
     if contains_any(t, LIGHTING_KEYWORDS):
         return "lighting"
@@ -92,7 +105,6 @@ def calc_commission(row):
     ถ้าไม่มีค่าคอมตรง จะคำนวณจาก rate * price
     ถ้ายังไม่มีอีก จะ fallback ใช้ 10% ของราคา
     """
-
     lower_map = {k.lower(): k for k in row.keys()}
 
     def get_any(keys):
@@ -104,7 +116,6 @@ def calc_commission(row):
                     return to_float(val)
         return 0.0
 
-    # 1) commission ตรง ๆ
     commission = get_any([
         "commission",
         "commission_value",
@@ -119,7 +130,6 @@ def calc_commission(row):
     if commission > 0:
         return commission
 
-    # 2) rate %
     rate = get_any([
         "commission_rate",
         "commission %",
@@ -129,7 +139,6 @@ def calc_commission(row):
         "เปอร์เซ็นต์ค่าคอม"
     ])
 
-    # 3) price
     price = get_any([
         "price",
         "final_price",
@@ -143,7 +152,7 @@ def calc_commission(row):
     if rate > 0 and price > 0:
         return (rate / 100.0) * price
 
-    # 4) fallback: สมมุติค่าคอมประมาณ 10%
+    # fallback
     if price > 0:
         return price * 0.10
 
@@ -215,7 +224,7 @@ def build_product(row):
         return None
 
     group = detect_group(title)
-    if group == "other":
+    if group in ["other", "blocked"]:
         return None
 
     return {
