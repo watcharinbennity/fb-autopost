@@ -21,8 +21,6 @@ def score_product(product):
     trend_bonus = min(sold, 5000) * 0.05
     hot_bonus = 20 if sold > 1000 else 0
     category_boost = 10 if product["group"] in ["lighting", "electrical", "tools"] else 0
-
-    # เพิ่มน้ำหนักค่าคอม
     commission_bonus = commission * 0.8
 
     return sold_score + rating_score + trend_bonus + hot_bonus + category_boost + commission_bonus
@@ -60,7 +58,6 @@ def choose_product(csv_url, posted_data):
         candidates.append(product)
         accepted += 1
 
-        # เก็บเฉพาะตัวคะแนนสูงไว้ก่อน ไม่ให้กินแรมเกิน
         candidates = sorted(
             candidates,
             key=score_product,
