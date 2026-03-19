@@ -4,32 +4,34 @@ MIN_RATING = 4.0
 MIN_SOLD = 10.0
 MIN_COMMISSION = 50.0
 
-LIGHTING_KEYWORDS = [
-    "โคมไฟ", "หลอดไฟ", "ไฟ led", "ไฟแอลอีดี", "led bulb", "light bulb",
-    "ไฟฉาย", "ไฟโซล่า", "solar light", "floodlight", "spotlight",
-    "ไฟติดผนัง", "ไฟเพดาน", "ไฟเซ็นเซอร์", "ไฟเซนเซอร์",
-    "sensor light", "motion light", "ไฟสนาม", "ไฟถนน",
-    "ไฟดาวน์ไลท์", "downlight", "โคม", "lamp", "lighting"
-]
-
+# ✅ ไฟฟ้า + อุปกรณ์ช่าง เท่านั้น
 ELECTRICAL_KEYWORDS = [
-    "ปลั๊กไฟ", "ปลั๊กพ่วง", "socket", "power strip", "เต้ารับ",
+    "หลอดไฟ", "โคมไฟ", "ไฟ led", "ไฟแอลอีดี", "led bulb",
+    "downlight", "ไฟดาวน์ไลท์", "spotlight", "floodlight",
+    "ไฟเพดาน", "ไฟติดผนัง", "ไฟสนาม", "ไฟถนน",
+    "ปลั๊กไฟ", "ปลั๊กพ่วง", "เต้ารับ", "socket", "power strip",
     "เบรกเกอร์", "breaker", "mcb", "rcbo", "fuse",
     "สวิตช์ไฟ", "switch", "สายไฟ", "wire", "cable",
-    "ตู้ไฟ", "consumer unit", "อะแดปเตอร์", "adapter",
-    "voltage tester", "ปลั๊ก usb", "usb plug", "ปลั๊กยูเอสบี",
-    "สายชาร์จ", "electrical"
+    "ตู้ไฟ", "consumer unit", "adapter", "อะแดปเตอร์",
+    "usb plug", "ปลั๊ก usb", "ปลั๊กยูเอสบี",
+    "voltage tester", "ไฟฉาย", "ไฟฉุกเฉิน"
 ]
 
 TOOLS_KEYWORDS = [
-    "ไขควง", "ไขควงวัดไฟ", "คีม", "คีมตัด", "คีมปอกสาย",
-    "สว่าน", "drill", "มัลติมิเตอร์", "multimeter", "tester",
-    "ประแจ", "ประแจเลื่อน", "ค้อน", "เลื่อย", "คัตเตอร์",
-    "ตลับเมตร", "เครื่องมือช่าง", "tool", "tools"
+    "เครื่องมือช่าง", "tool", "tools",
+    "ไขควง", "ไขควงแฉก", "ไขควงปากแบน", "ไขควงวัดไฟ",
+    "คีม", "คีมตัด", "คีมปอกสาย", "คีมย้ำหางปลา",
+    "ประแจ", "ประแจเลื่อน", "ประแจแหวน", "บล็อกขันน็อต",
+    "ค้อน", "เลื่อย", "คัตเตอร์", "ตลับเมตร",
+    "สว่าน", "drill", "สว่านไฟฟ้า", "สว่านไร้สาย",
+    "multimeter", "มัลติมิเตอร์", "tester",
+    "ลูกบล็อก", "บ๊อก", "ไขควงไฟฟ้า", "เครื่องเจียร", "ลูกหมู",
+    "grinder", "ปืนกาว", "ปืนลม", "เครื่องเป่าลม"
 ]
 
+# ❌ ของที่ไม่เกี่ยวกับเพจ
 BLOCK_KEYWORDS = [
-    # beauty / skincare
+    # beauty
     "beauty", "cosmetic", "makeup", "lip", "lipstick",
     "micellar", "cleansing", "garnier", "konvy", "serum", "skincare",
     "facial", "face", "หน้ากาก", "mask", "หน้า", "ผิว",
@@ -42,8 +44,12 @@ BLOCK_KEYWORDS = [
     # food
     "oats", "rolled oats", "ข้าวโอ๊ต", "อาหาร", "snack", "ของกิน", "เวอรี่นาย",
 
+    # camping / outdoor
+    "tent", "เต็นท์", "camping", "แคมป์", "glamping",
+    "เต็นท์สนาม", "เต็นท์กาง", "โต๊ะแคมป์", "เก้าอี้แคมป์",
+
     # unrelated
-    "ของเล่น", "toy", "ตุ๊กตา", "แม่และเด็ก", "baby", "เครื่องประดับ"
+    "toy", "ของเล่น", "baby", "เด็ก", "เครื่องประดับ", "pet", "สัตว์เลี้ยง"
 ]
 
 
@@ -51,60 +57,22 @@ def normalize(text: str) -> str:
     return str(text).strip().lower()
 
 
+def contains_any(text, keywords):
+    return any(k in text for k in keywords)
+
+
 def pick_first(row, keys, default=""):
     lower_map = {k.lower(): k for k in row.keys()}
     for key in keys:
         real = lower_map.get(key.lower())
         if real:
-            value = row.get(real, "")
-            if str(value).strip():
-                return str(value).strip()
+            val = row.get(real, "")
+            if str(val).strip():
+                return str(val).strip()
     return default
 
 
-def contains_any(text: str, keywords):
-    return any(k in text for k in keywords)
-
-
-def detect_group(title: str) -> str:
-    t = normalize(title)
-
-    # เจอคำต้องห้ามก่อน = blocked ทันที
-    if contains_any(t, BLOCK_KEYWORDS):
-        return "blocked"
-
-    if contains_any(t, LIGHTING_KEYWORDS):
-        return "lighting"
-    if contains_any(t, ELECTRICAL_KEYWORDS):
-        return "electrical"
-    if contains_any(t, TOOLS_KEYWORDS):
-        return "tools"
-
-    return "other"
-
-
-def title_allowed(title: str) -> bool:
-    t = normalize(title)
-
-    if contains_any(t, BLOCK_KEYWORDS):
-        return False
-
-    if contains_any(t, LIGHTING_KEYWORDS):
-        return True
-    if contains_any(t, ELECTRICAL_KEYWORDS):
-        return True
-    if contains_any(t, TOOLS_KEYWORDS):
-        return True
-
-    return False
-
-
 def calc_commission(row):
-    """
-    พยายามอ่านค่าคอมจากหลายชื่อคอลัมน์
-    ถ้าไม่มีค่าคอมตรง จะคำนวณจาก rate * price
-    ถ้ายังไม่มีอีก จะ fallback ใช้ 10% ของราคา
-    """
     lower_map = {k.lower(): k for k in row.keys()}
 
     def get_any(keys):
@@ -152,23 +120,40 @@ def calc_commission(row):
     if rate > 0 and price > 0:
         return (rate / 100.0) * price
 
-    # fallback
     if price > 0:
         return price * 0.10
 
     return 0.0
 
 
+def detect_group(title: str) -> str:
+    t = normalize(title)
+
+    if contains_any(t, BLOCK_KEYWORDS):
+        return "blocked"
+
+    if contains_any(t, ELECTRICAL_KEYWORDS):
+        return "electrical"
+
+    if contains_any(t, TOOLS_KEYWORDS):
+        return "tools"
+
+    return "other"
+
+
 def build_product(row):
     title = pick_first(
         row,
-        ["product_name", "product name", "title", "name", "ชื่อสินค้า", "item_name"],
+        ["product_name", "title", "name", "item_name", "ชื่อสินค้า"],
         ""
     )
     if not title:
         return None
 
-    if not title_allowed(title):
+    t = normalize(title)
+
+    group = detect_group(t)
+    if group in ["blocked", "other"]:
         return None
 
     rating = to_float(pick_first(
@@ -176,6 +161,7 @@ def build_product(row):
         ["rating", "item_rating", "คะแนน", "product_rating", "avg_rating"],
         "0"
     ))
+
     sold = to_float(pick_first(
         row,
         ["sold", "historical_sold", "sales", "ขายแล้ว", "sold_count", "item_sold"],
@@ -221,10 +207,6 @@ def build_product(row):
     )
 
     if not image or not link:
-        return None
-
-    group = detect_group(title)
-    if group in ["other", "blocked"]:
         return None
 
     return {
