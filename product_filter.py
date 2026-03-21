@@ -4,7 +4,9 @@ MIN_RATING = 4.0
 MIN_SOLD = 10.0
 MIN_COMMISSION = 50.0
 
-# ✅ ไฟฟ้า + อุปกรณ์ช่าง เท่านั้น
+MAX_PRICE_ELECTRICAL = 3000.0
+MAX_PRICE_TOOLS = 50000.0
+
 ELECTRICAL_KEYWORDS = [
     "หลอดไฟ", "โคมไฟ", "ไฟ led", "ไฟแอลอีดี", "led bulb",
     "downlight", "ไฟดาวน์ไลท์", "spotlight", "floodlight",
@@ -14,7 +16,7 @@ ELECTRICAL_KEYWORDS = [
     "สวิตช์ไฟ", "switch", "สายไฟ", "wire", "cable",
     "ตู้ไฟ", "consumer unit", "adapter", "อะแดปเตอร์",
     "usb plug", "ปลั๊ก usb", "ปลั๊กยูเอสบี",
-    "voltage tester", "ไฟฉาย", "ไฟฉุกเฉิน"
+    "voltage tester", "ไฟฉาย", "ไฟฉุกเฉิน", "electrical"
 ]
 
 TOOLS_KEYWORDS = [
@@ -26,12 +28,18 @@ TOOLS_KEYWORDS = [
     "สว่าน", "drill", "สว่านไฟฟ้า", "สว่านไร้สาย",
     "multimeter", "มัลติมิเตอร์", "tester",
     "ลูกบล็อก", "บ๊อก", "ไขควงไฟฟ้า", "เครื่องเจียร", "ลูกหมู",
-    "grinder", "ปืนกาว", "ปืนลม", "เครื่องเป่าลม"
+    "grinder", "ปืนกาว", "ปืนลม", "เครื่องเป่าลม",
+    "สว่านกระแทก", "เลื่อยวงเดือน", "ตู้เชื่อม", "เครื่องเชื่อม",
+    "ปั๊มน้ำ", "เครื่องฉีดน้ำ", "สกัดไฟฟ้า"
 ]
 
-# ❌ ของที่ไม่เกี่ยวกับเพจ
 BLOCK_KEYWORDS = [
-    # beauty
+    # apple / gadget / mobile
+    "apple", "iphone", "ipad", "apple watch", "watch series", "airpods",
+    "macbook", "imac", "istudio", "copperwired", "โทรศัพท์", "สมาร์ทโฟน",
+    "มือถือ", "แท็บเล็ต", "นาฬิกาอัจฉริยะ", "smartwatch", "smart watch",
+
+    # beauty / skincare
     "beauty", "cosmetic", "makeup", "lip", "lipstick",
     "micellar", "cleansing", "garnier", "konvy", "serum", "skincare",
     "facial", "face", "หน้ากาก", "mask", "หน้า", "ผิว",
@@ -72,6 +80,29 @@ def pick_first(row, keys, default=""):
     return default
 
 
+def get_price(row):
+    lower_map = {k.lower(): k for k in row.keys()}
+
+    def get_any(keys):
+        for k in keys:
+            real = lower_map.get(k.lower())
+            if real:
+                val = row.get(real, "")
+                if str(val).strip():
+                    return to_float(val)
+        return 0.0
+
+    return get_any([
+        "price",
+        "final_price",
+        "sale_price",
+        "product_price",
+        "price_min",
+        "price_max",
+        "ราคาขาย"
+    ])
+
+
 def calc_commission(row):
     lower_map = {k.lower(): k for k in row.keys()}
 
@@ -107,15 +138,7 @@ def calc_commission(row):
         "เปอร์เซ็นต์ค่าคอม"
     ])
 
-    price = get_any([
-        "price",
-        "final_price",
-        "sale_price",
-        "product_price",
-        "price_min",
-        "price_max",
-        "ราคาขาย"
-    ])
+    price = get_price(row)
 
     if rate > 0 and price > 0:
         return (rate / 100.0) * price
@@ -150,9 +173,7 @@ def build_product(row):
     if not title:
         return None
 
-    t = normalize(title)
-
-    group = detect_group(t)
+    group = detect_group(title)
     if group in ["blocked", "other"]:
         return None
 
@@ -176,6 +197,16 @@ def build_product(row):
 
     commission = calc_commission(row)
     if commission < MIN_COMMISSION:
+        return None
+
+    price = get_price(row)
+    if price <= 0:
+        return None
+
+    if group == "electrical" and price > MAX_PRICE_ELECTRICAL:
+        return None
+
+    if group == "tools" and price > MAX_PRICE_TOOLS:
         return None
 
     pid = pick_first(
@@ -217,5 +248,6 @@ def build_product(row):
         "rating": rating,
         "sold": sold,
         "commission": commission,
+        "price": price,
         "group": group,
     }
