@@ -6,7 +6,7 @@ from ai_caption import generate_caption, generate_comment_text
 from facebook_post import post_product
 
 CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
-MAX_ROWS = 150000
+MAX_ROWS = 100000
 TOP_KEEP = 1200
 TOP_POOL = 20
 
