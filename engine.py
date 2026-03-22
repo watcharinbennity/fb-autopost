@@ -174,4 +174,4 @@ def run_all_pages():
         page_id=page_id_smart,
         access_token=token_smart,
         posted_path="posted_smart.json",
-    )
+        )
