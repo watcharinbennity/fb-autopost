@@ -2,7 +2,7 @@ import os
 import random
 from utils import iter_csv_rows, load_posted, save_posted, log, image_key_from_url
 from product_filter import build_product
-from ai_caption import generate_caption
+from ai_caption import generate_caption, generate_comment_text
 from facebook_post import post_product
 
 CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
@@ -12,18 +12,48 @@ TOP_PERCENT = 0.005
 
 
 def score_product(product):
-    sold = product["sold"]
-    rating = product["rating"]
-    commission = product.get("commission", 0.0)
+    sold = float(product["sold"])
+    rating = float(product["rating"])
+    commission = float(product.get("commission", 0.0))
+    price = float(product.get("price", 0.0))
+    group = product.get("group", "")
 
-    sold_score = sold * 2
-    rating_score = rating * 10
-    trend_bonus = min(sold, 5000) * 0.05
-    hot_bonus = 20 if sold > 1000 else 0
-    category_boost = 10 if product["group"] in ["lighting", "electrical", "tools"] else 0
-    commission_bonus = commission * 0.8
+    sold_score = sold * 2.2
+    rating_score = rating * 14.0
+    commission_score = commission * 1.0
 
-    return sold_score + rating_score + trend_bonus + hot_bonus + category_boost + commission_bonus
+    hot_bonus = 40 if sold >= 1000 else 0
+    social_bonus = 20 if sold >= 300 else 0
+
+    # เน้นของราคากลางๆ ขายง่าย
+    if group == "electrical":
+        if 150 <= price <= 1500:
+            price_bonus = 25
+        elif 1500 < price <= 3000:
+            price_bonus = 8
+        else:
+            price_bonus = 0
+    elif group == "tools":
+        if 300 <= price <= 5000:
+            price_bonus = 25
+        elif 5000 < price <= 15000:
+            price_bonus = 10
+        else:
+            price_bonus = 0
+    else:
+        price_bonus = 0
+
+    group_bonus = 15 if group in ["electrical", "tools"] else 0
+
+    return (
+        sold_score
+        + rating_score
+        + commission_score
+        + hot_bonus
+        + social_bonus
+        + price_bonus
+        + group_bonus
+    )
 
 
 def choose_product(csv_url, posted_data):
@@ -55,14 +85,12 @@ def choose_product(csv_url, posted_data):
             continue
 
         product["image_key"] = img_key
+        product["score"] = score_product(product)
         candidates.append(product)
         accepted += 1
 
-        candidates = sorted(
-            candidates,
-            key=score_product,
-            reverse=True
-        )[:1000]
+        # เก็บเฉพาะตัวเด่น ลดแรม
+        candidates = sorted(candidates, key=lambda x: x["score"], reverse=True)[:1200]
 
     log(f"rows_seen={rows_seen}")
     log(f"build_none={build_none}")
@@ -75,12 +103,9 @@ def choose_product(csv_url, posted_data):
         return None
 
     elite_size = max(1, int(len(candidates) * TOP_PERCENT))
-    elite = sorted(
-        candidates,
-        key=score_product,
-        reverse=True
-    )[:elite_size]
+    elite = sorted(candidates, key=lambda x: x["score"], reverse=True)[:elite_size]
 
+    # สุ่มในกลุ่มท็อป เพื่อไม่ซ้ำแนวเกินไป
     top_pool = elite[:20] if len(elite) >= 20 else elite
     chosen = random.choice(top_pool)
 
@@ -88,15 +113,18 @@ def choose_product(csv_url, posted_data):
         f"CHOSEN => {chosen['title']} "
         f"| sold={chosen['sold']} "
         f"| rating={chosen['rating']} "
+        f"| price={chosen['price']:.2f} "
         f"| commission={chosen['commission']:.2f} "
-        f"| group={chosen['group']}"
+        f"| group={chosen['group']} "
+        f"| score={chosen['score']:.2f}"
     )
 
     return chosen
 
 
 def run_engine():
-    log("BEN AI ENGINE V80 START")
+    forced_mode = os.getenv("POST_MODE", "").strip().lower()
+    log(f"BEN AI ENGINE V200 START | POST_MODE={forced_mode or 'auto'}")
 
     posted_data = load_posted()
     product = choose_product(CSV_URL, posted_data)
@@ -108,7 +136,8 @@ def run_engine():
     log("READY TO POST PRODUCT NOW")
 
     caption = generate_caption(product)
-    post_id = post_product(product, caption)
+    comment_text = generate_comment_text(product)
+    post_id = post_product(product, caption, comment_text=comment_text)
 
     if post_id:
         posted_data["ids"].append(product["id"])
