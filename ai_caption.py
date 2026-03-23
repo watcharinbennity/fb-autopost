@@ -104,7 +104,7 @@ def generate_caption(product, page_mode="ben"):
                 "temperature": 0.95,
                 "response_format": {"type": "json_object"},
             },
-            timeout=90,
+            timeout=45,
         )
         r.raise_for_status()
         data = r.json()
@@ -114,7 +114,8 @@ def generate_caption(product, page_mode="ben"):
         if not captions:
             return fallback_caption(product, page_mode)
         return append_link(random.choice(captions[:10]), product.get("link", ""))
-    except Exception:
+    except Exception as e:
+        print(f"OpenAI fallback: {e}", flush=True)
         return fallback_caption(product, page_mode)
 
 
