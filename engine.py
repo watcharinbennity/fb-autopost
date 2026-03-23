@@ -8,12 +8,12 @@ MAX_ROWS = 100000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
 
 PAGE_ID_2 = os.getenv("PAGE_ID_2", "").strip()
-TOKEN_2 = os.getenv("PAGE_ACCESS_TOKEN_2", "").strip()
+PAGE_ACCESS_TOKEN_2 = os.getenv("PAGE_ACCESS_TOKEN_2", "").strip()
 
-CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
+SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
@@ -22,7 +22,9 @@ USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 POSTED_FILE = "posted.json"
 
 
-# ---------------- STORAGE ----------------
+# ---------------------------
+# storage
+# ---------------------------
 def load_posted():
     if not os.path.exists(POSTED_FILE):
         return set()
@@ -38,7 +40,23 @@ def save_posted(data):
         json.dump(list(data), f, ensure_ascii=False)
 
 
-# ---------------- CSV STREAM ----------------
+# ---------------------------
+# helpers
+# ---------------------------
+def to_float(v):
+    try:
+        return float(str(v).replace(",", "").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def norm_text(v):
+    return str(v or "").strip()
+
+
+# ---------------------------
+# csv stream
+# ---------------------------
 def iter_csv_rows(url):
     try:
         print("Streaming CSV...", flush=True)
@@ -68,174 +86,193 @@ def iter_csv_rows(url):
         print("CSV ERROR:", e, flush=True)
 
 
-def pick(row, keys, default=""):
-    lower_map = {str(k).strip().lower(): k for k in row.keys()}
-    for key in keys:
-        real = lower_map.get(key.lower())
-        if real is not None:
-            value = row.get(real, "")
-            if str(value).strip():
-                return str(value).strip()
-    return default
+# ---------------------------
+# product targeting by page
+# ---------------------------
+def is_ben_target(title, cat1, cat2, cat3):
+    text = f"{title} {cat1} {cat2} {cat3}".lower()
 
-
-def to_float(value):
-    try:
-        return float(str(value).replace(",", "").strip() or 0)
-    except Exception:
-        return 0.0
-
-
-# ---------------- TARGET FILTER ----------------
-def is_target_product(name):
-    n = name.lower()
-
-    camera_keywords = [
-        "camera", "กล้อง", "cctv", "ip camera", "wifi camera", "security camera"
-    ]
-    robot_keywords = [
-        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "robot mop"
-    ]
-    plug_keywords = [
-        "smart plug", "wifi plug", "ปลั๊ก", "ปลั๊กอัจฉริยะ"
+    allow_keywords = [
+        "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
+        "ปลั๊ก", "plug", "socket", "multimeter", "tester", "ไฟ", "led",
+        "switch", "สายไฟ", "cable", "extension", "charger", "converter"
     ]
 
-    if any(k in n for k in camera_keywords):
-        return "camera"
+    block_keywords = [
+        "beauty", "สบู่", "soap", "ครีม", "skincare", "camping", "เต็นท์",
+        "food", "อาหาร", "fashion", "เสื้อ", "รองเท้า", "watch band",
+        "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant"
+    ]
 
-    if any(k in n for k in robot_keywords):
-        return "robot"
+    if any(k in text for k in block_keywords):
+        return False
 
-    if any(k in n for k in plug_keywords):
-        return "plug"
-
-    return None
+    return any(k in text for k in allow_keywords)
 
 
-# ---------------- SELECT PRODUCT ----------------
-def choose_product():
+def is_smarthome_target(title, cat1, cat2, cat3):
+    text = f"{title} {cat1} {cat2} {cat3}".lower()
+
+    allow_keywords = [
+        "camera", "cctv", "ip camera", "security camera", "กล้อง",
+        "smart plug", "wifi plug", "ปลั๊กอัจฉริยะ", "smart bulb", "smart light",
+        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "smart home",
+        "router", "wifi", "mesh", "smart switch"
+    ]
+
+    block_keywords = [
+        "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
+        "garden", "gardening", "food", "อาหาร", "charger cable", "watch band",
+        "สายนาฬิกา"
+    ]
+
+    if any(k in text for k in block_keywords):
+        return False
+
+    return any(k in text for k in allow_keywords)
+
+
+# ---------------------------
+# choose product
+# ---------------------------
+def choose_product(page_mode):
     posted = load_posted()
+
     best = None
     best_score = -1
     count = 0
 
-    for row in iter_csv_rows(CSV_URL):
+    for row in iter_csv_rows(SHOPEE_CSV_URL):
         try:
-            name = pick(row, [
-                "product_name", "item_name", "name", "title"
-            ])
-            image = pick(row, [
-                "image_url", "image", "main_image", "product_image"
-            ])
-            sold = to_float(pick(row, [
-                "historical_sold", "sold", "sales"
-            ], "0"))
-            rating = to_float(pick(row, [
-                "rating", "item_rating", "product_rating", "avg_rating"
-            ], "0"))
-            price = to_float(pick(row, [
-                "price", "final_price", "product_price", "sale_price"
-            ], "0"))
-            commission = to_float(pick(row, [
-                "commission", "commission_value", "est_commission", "estimated_commission"
-            ], "0"))
-            link = pick(row, [
-                "product_short link", "product_short_link",
-                "short_link", "affiliate_link", "link", "product_link"
-            ])
-            pid = pick(row, [
-                "itemid", "item_id", "product_id", "id"
-            ], name)
+            title = norm_text(row.get("title"))
+            image = norm_text(row.get("image_link"))
+            sold = to_float(row.get("item_sold"))
+            rating = to_float(row.get("item_rating"))
+            price = to_float(row.get("sale_price"))
+            product_link = norm_text(row.get("product_link"))
+            short_link = norm_text(row.get("product_short link"))
+            itemid = norm_text(row.get("itemid"))
+
+            cat1 = norm_text(row.get("global_category1"))
+            cat2 = norm_text(row.get("global_category2"))
+            cat3 = norm_text(row.get("global_category3"))
 
             count += 1
 
-            if not name or not image or not link:
+            if not title or not itemid:
                 continue
 
-            group = is_target_product(name)
-            if not group:
+            if not image:
+                continue
+
+            if not short_link and not product_link:
                 continue
 
             if rating < 4.0:
                 continue
 
-            if pid in posted:
+            if sold < 20:
                 continue
 
-            # filter แบบไม่โหดเกิน
-            if group == "camera" and sold < 100:
-                continue
-            if group == "robot" and sold < 30:
-                continue
-            if group == "plug" and sold < 200:
+            post_key = f"{page_mode}:{itemid}"
+            if post_key in posted:
                 continue
 
-            # ถ้ามีค่าคอม ให้ใช้ ถ้าไม่มีก็ยังไม่ตัดทิ้ง
-            score = (sold * 2) + (rating * 100) + (commission * 5)
+            if page_mode == "ben":
+                if not is_ben_target(title, cat1, cat2, cat3):
+                    continue
+            elif page_mode == "smart":
+                if not is_smarthome_target(title, cat1, cat2, cat3):
+                    continue
+
+            # score แบบนิ่ง ๆ
+            score = (sold * 2.0) + (rating * 100.0)
+
+            # ชอบสินค้าราคากลางมากกว่า
+            if 80 <= price <= 3000:
+                score += 25
 
             if score > best_score:
                 best_score = score
                 best = {
-                    "id": pid,
-                    "name": name,
+                    "post_key": post_key,
+                    "itemid": itemid,
+                    "title": title,
                     "image": image,
                     "sold": sold,
                     "rating": rating,
                     "price": price,
-                    "commission": commission,
-                    "link": link,
-                    "group": group,
+                    "link": short_link or product_link,
+                    "cat1": cat1,
+                    "cat2": cat2,
+                    "cat3": cat3,
                 }
 
         except Exception:
             continue
 
-    print("SCAN DONE:", count, flush=True)
+    print(f"SCAN DONE ({page_mode}): {count}", flush=True)
 
     if best:
-        posted.add(best["id"])
+        posted.add(best["post_key"])
         save_posted(posted)
 
     return best
 
 
-# ---------------- OPENAI CAPTION ----------------
-def fallback_caption(p):
-    return f"""🔥 ของมันต้องมี!
+# ---------------------------
+# openai caption
+# ---------------------------
+def fallback_caption(product, page_mode):
+    if page_mode == "smart":
+        return f"""🔥 ของมันต้องมี!
 
-{p['name']}
+{product['title']}
 
-⭐ {p['rating']} | ขายแล้ว {int(p['sold'])}
-💸 คุ้มสุดตอนนี้!
+⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
+🏠 ตัวช่วยเพิ่มความสะดวกให้บ้านของคุณ
+
+👉 เช็กราคาล่าสุดที่ลิงก์ด้านล่าง
+
+#Shopee #SmartHome"""
+    else:
+        return f"""🔥 ของมันต้องมี!
+
+{product['title']}
+
+⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
+🛠 ของดีน่าใช้สำหรับงานช่างและงานไฟฟ้า
 
 👉 เช็กราคาล่าสุดที่ลิงก์ด้านล่าง
 
 #Shopee #ของดีบอกต่อ"""
 
 
-def generate_caption(p):
+def generate_caption(product, page_mode):
     if not USE_OPENAI or not OPENAI_API_KEY:
-        return fallback_caption(p)
+        return fallback_caption(product, page_mode)
+
+    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและไฟฟ้า"
 
     prompt = f"""
-เขียนแคปชัน Facebook ภาษาไทย สำหรับขายสินค้า
+เขียนแคปชัน Facebook ภาษาไทย สำหรับ {page_desc}
 
 สินค้า:
-{p['name']}
+{product['title']}
 
 ข้อมูล:
-- rating: {p['rating']}
-- sold: {int(p['sold'])}
-- group: {p['group']}
+- rating: {product['rating']}
+- sold: {int(product['sold'])}
+- หมวด: {product['cat1']} / {product['cat2']} / {product['cat3']}
 
 เงื่อนไข:
-- เขียนให้กระชับ น่าอ่าน
+- สั้น กระชับ น่าอ่าน
+- 5-7 บรรทัด
 - แนวขายจริง ไม่เวอร์เกินไป
+- ไม่ใส่ลิงก์เอง
 - ไม่ใส่ราคาตัวเลข
-- 4-6 บรรทัด
-- ปิดท้ายด้วยชวนกดดูรายละเอียดที่ลิงก์ด้านล่าง
-- ห้ามใส่ลิงก์เอง
-""".strip()
+- ปิดท้ายชวนกดดูรายละเอียดที่ลิงก์ด้านล่าง
+"""
 
     try:
         res = requests.post(
@@ -250,24 +287,22 @@ def generate_caption(p):
                     {"role": "system", "content": "คุณเป็นนักเขียนแคปชันขายของภาษาไทย"},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.9,
+                "temperature": 0.8,
             },
             timeout=45,
         )
         res.raise_for_status()
         data = res.json()
-        text = data["choices"][0]["message"]["content"].strip()
-
-        if not text:
-            return fallback_caption(p)
-
-        return text
+        content = data["choices"][0]["message"]["content"].strip()
+        return content if content else fallback_caption(product, page_mode)
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
-        return fallback_caption(p)
+        return fallback_caption(product, page_mode)
 
 
-# ---------------- IMAGE ----------------
+# ---------------------------
+# posting
+# ---------------------------
 def download_image(url):
     try:
         r = requests.get(url, timeout=TIMEOUT)
@@ -278,11 +313,10 @@ def download_image(url):
     return None
 
 
-# ---------------- POST ----------------
-def post_image(page_id, token, image_url, caption):
+def post_product(page_id, access_token, product, caption):
     print("Posting to:", page_id, flush=True)
 
-    img = download_image(image_url)
+    img = download_image(product["image"])
 
     if img:
         try:
@@ -291,7 +325,7 @@ def post_image(page_id, token, image_url, caption):
                 files={"source": ("img.jpg", img, "image/jpeg")},
                 data={
                     "caption": caption,
-                    "access_token": token
+                    "access_token": access_token
                 },
                 timeout=TIMEOUT
             )
@@ -314,29 +348,25 @@ def post_image(page_id, token, image_url, caption):
             f"https://graph.facebook.com/v25.0/{page_id}/feed",
             data={
                 "message": caption,
-                "access_token": token
+                "access_token": access_token
             },
             timeout=TIMEOUT
         )
-
         data = res.json()
         print("POST TEXT:", data, flush=True)
-
         return data.get("id")
     except Exception as e:
         print("POST TEXT ERROR:", e, flush=True)
+        return None
 
-    return None
 
-
-# ---------------- COMMENT ----------------
-def comment_link(post_id, token, link):
+def comment_link(post_id, access_token, link):
     try:
         requests.post(
             f"https://graph.facebook.com/v25.0/{post_id}/comments",
             data={
                 "message": f"🛒 สั่งซื้อ 👉 {link}",
-                "access_token": token
+                "access_token": access_token
             },
             timeout=TIMEOUT
         )
@@ -344,31 +374,34 @@ def comment_link(post_id, token, link):
         print("COMMENT ERROR:", e, flush=True)
 
 
-# ---------------- RUN ----------------
-def run_page(page_id, token):
-    print("RUN PAGE:", page_id, flush=True)
+# ---------------------------
+# run pages
+# ---------------------------
+def run_page(page_mode, page_id, access_token):
+    if not page_id or not access_token:
+        print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
+        return
 
-    product = choose_product()
+    print("RUN PAGE:", page_mode, page_id, flush=True)
+
+    product = choose_product(page_mode)
 
     if not product:
         print("❌ No product", flush=True)
         return
 
-    print("✅ CHOSEN:", product["name"], flush=True)
+    print("✅ CHOSEN:", product["title"], flush=True)
     print("IMAGE URL:", product["image"], flush=True)
     print("LINK:", product["link"], flush=True)
 
-    caption = generate_caption(product)
-
-    post_id = post_image(page_id, token, product["image"], caption)
+    caption = generate_caption(product, page_mode)
+    post_id = post_product(page_id, access_token, product, caption)
 
     if post_id:
         time.sleep(3)
-        comment_link(post_id, token, product["link"])
+        comment_link(post_id, access_token, product["link"])
 
 
 def run_all_pages():
-    run_page(PAGE_ID, TOKEN)
-
-    if PAGE_ID_2 and TOKEN_2:
-        run_page(PAGE_ID_2, TOKEN_2)
+    run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
+    run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
