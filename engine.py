@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 200000
+MAX_ROWS = 60000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
@@ -121,6 +121,7 @@ def get_commission_value(row):
         "est_commission",
         "affiliate_commission",
         "earnings",
+        "commission_value",
     ]
 
     for field in possible_amount_fields:
@@ -230,14 +231,57 @@ def is_smarthome_target(title, cat1, cat2, cat3):
 
 
 # ---------------------------
+# product builder
+# ---------------------------
+def make_product(row, commission):
+    title = norm_text(row.get("title"))
+    image = norm_text(row.get("image_link"))
+    sold = to_float(row.get("item_sold"))
+    rating = to_float(row.get("item_rating"))
+    price = to_float(row.get("sale_price"))
+    product_link = norm_text(row.get("product_link"))
+    short_link = norm_text(row.get("product_short link"))
+    itemid = norm_text(row.get("itemid"))
+
+    cat1 = norm_text(row.get("global_category1"))
+    cat2 = norm_text(row.get("global_category2"))
+    cat3 = norm_text(row.get("global_category3"))
+
+    return {
+        "itemid": itemid,
+        "title": title,
+        "image": image,
+        "image_key": normalize_image_key(image),
+        "sold": sold,
+        "rating": rating,
+        "price": price,
+        "commission": commission,
+        "link": short_link or product_link,
+        "cat1": cat1,
+        "cat2": cat2,
+        "cat3": cat3,
+    }
+
+
+# ---------------------------
 # choose product
+# priority:
+# 1) commission >= 50
+# 2) commission >= 20
+# 3) fallback to best general item
 # ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
     page_history = posted[page_mode]
 
-    best = None
-    best_score = -1
+    best_50 = None
+    best_20 = None
+    best_any = None
+
+    score_50 = -1
+    score_20 = -1
+    score_any = -1
+
     count = 0
 
     for row in iter_csv_rows(SHOPEE_CSV_URL):
@@ -272,12 +316,7 @@ def choose_product(page_mode):
             if sold < 20:
                 continue
 
-            # คัดเฉพาะค่าคอม 50 บาทขึ้นไป
-            if commission < 50:
-                continue
-
             image_key = normalize_image_key(image)
-
             if is_duplicate(page_history, itemid, image_key, title):
                 continue
 
@@ -288,40 +327,42 @@ def choose_product(page_mode):
                 if not is_smarthome_target(title, cat1, cat2, cat3):
                     continue
 
-            # ค่าคอมมีผลกับการเลือก แต่ไม่โพสต์ลงเพจ
-            score = (sold * 3.0) + (rating * 120.0) + (commission * 5.0)
+            base_score = (sold * 3.0) + (rating * 120.0)
 
             if 80 <= price <= 3000:
-                score += 25
+                base_score += 25
 
-            if score > best_score:
-                best_score = score
-                best = {
-                    "itemid": itemid,
-                    "title": title,
-                    "image": image,
-                    "image_key": image_key,
-                    "sold": sold,
-                    "rating": rating,
-                    "price": price,
-                    "commission": commission,
-                    "link": link,
-                    "cat1": cat1,
-                    "cat2": cat2,
-                    "cat3": cat3,
-                }
+            if commission >= 50:
+                score = base_score + (commission * 5.0)
+                if score > score_50:
+                    score_50 = score
+                    best_50 = make_product(row, commission)
+                    if score > 1300:
+                        break
 
-                if score > 1000:
-                    break
+            elif commission >= 20:
+                score = base_score + (commission * 3.0)
+                if score > score_20:
+                    score_20 = score
+                    best_20 = make_product(row, commission)
+
+            else:
+                score = base_score
+                if score > score_any:
+                    score_any = score
+                    best_any = make_product(row, commission)
 
         except Exception:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
 
+    best = best_50 or best_20 or best_any
+
     if best:
+        level = "50+" if best["commission"] >= 50 else "20+" if best["commission"] >= 20 else "fallback"
         print(
-            f"✅ CHOSEN: {best['title']} | sold={best['sold']} | "
+            f"✅ CHOSEN ({level}): {best['title']} | sold={best['sold']} | "
             f"rating={best['rating']} | commission={best['commission']}",
             flush=True
         )
@@ -454,7 +495,6 @@ def post_product(page_id, access_token, product, caption):
 
             if "post_id" in data:
                 return data["post_id"]
-
             if "id" in data:
                 return data["id"]
 
