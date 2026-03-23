@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 100000
+MAX_ROWS = 200000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
@@ -26,18 +26,59 @@ POSTED_FILE = "posted.json"
 # storage
 # ---------------------------
 def load_posted():
+    """
+    โครงสร้างใหม่:
+    {
+      "ben": {
+        "items": ["12345", "67890"],
+        "images": ["imgkey1", "imgkey2"]
+      },
+      "smart": {
+        "items": [],
+        "images": []
+      }
+    }
+    """
+    default_data = {
+        "ben": {"items": [], "images": []},
+        "smart": {"items": [], "images": []},
+    }
+
     if not os.path.exists(POSTED_FILE):
-        return set()
+        return default_data
+
     try:
         with open(POSTED_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
+            raw = json.load(f)
+
+        # รองรับไฟล์เก่าแบบ list
+        if isinstance(raw, list):
+            return default_data
+
+        # กัน key หาย
+        for mode in ["ben", "smart"]:
+            raw.setdefault(mode, {})
+            raw[mode].setdefault("items", [])
+            raw[mode].setdefault("images", [])
+
+        return raw
+
     except Exception:
-        return set()
+        return default_data
 
 
 def save_posted(data):
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(data), f, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def normalize_image_key(image_url: str) -> str:
+    """
+    ใช้กันโพสต์ซ้ำกรณี itemid เปลี่ยนแต่รูปเดิม
+    """
+    if not image_url:
+        return ""
+    return image_url.strip().split("/")[-1].split("?")[0].lower()
 
 
 # ---------------------------
@@ -95,7 +136,8 @@ def is_ben_target(title, cat1, cat2, cat3):
     allow_keywords = [
         "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
         "ปลั๊ก", "plug", "socket", "multimeter", "tester", "ไฟ", "led",
-        "switch", "สายไฟ", "cable", "extension", "charger", "converter"
+        "switch", "สายไฟ", "cable", "extension", "charger", "converter",
+        "usb socket", "power socket", "ปลั๊กไฟ", "พ่วง", "รางปลั๊ก"
     ]
 
     block_keywords = [
@@ -117,7 +159,7 @@ def is_smarthome_target(title, cat1, cat2, cat3):
         "camera", "cctv", "ip camera", "security camera", "กล้อง",
         "smart plug", "wifi plug", "ปลั๊กอัจฉริยะ", "smart bulb", "smart light",
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "smart home",
-        "router", "wifi", "mesh", "smart switch"
+        "router", "wifi", "mesh", "smart switch", "socket", "usb socket"
     ]
 
     block_keywords = [
@@ -137,6 +179,8 @@ def is_smarthome_target(title, cat1, cat2, cat3):
 # ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
+    posted_items = set(posted[page_mode]["items"])
+    posted_images = set(posted[page_mode]["images"])
 
     best = None
     best_score = -1
@@ -159,13 +203,11 @@ def choose_product(page_mode):
 
             count += 1
 
-            if not title or not itemid:
+            if not title or not itemid or not image:
                 continue
 
-            if not image:
-                continue
-
-            if not short_link and not product_link:
+            link = short_link or product_link
+            if not link:
                 continue
 
             if rating < 4.0:
@@ -174,8 +216,14 @@ def choose_product(page_mode):
             if sold < 20:
                 continue
 
-            post_key = f"{page_mode}:{itemid}"
-            if post_key in posted:
+            image_key = normalize_image_key(image)
+
+            # กันโพสต์ซ้ำหลัก
+            if itemid in posted_items:
+                continue
+
+            # กันโพสต์ซ้ำสำรอง เผื่อ itemid เปลี่ยนแต่รูปเดิม
+            if image_key and image_key in posted_images:
                 continue
 
             if page_mode == "ben":
@@ -185,24 +233,22 @@ def choose_product(page_mode):
                 if not is_smarthome_target(title, cat1, cat2, cat3):
                     continue
 
-            # score แบบนิ่ง ๆ
             score = (sold * 2.0) + (rating * 100.0)
 
-            # ชอบสินค้าราคากลางมากกว่า
             if 80 <= price <= 3000:
                 score += 25
 
             if score > best_score:
                 best_score = score
                 best = {
-                    "post_key": post_key,
                     "itemid": itemid,
                     "title": title,
                     "image": image,
+                    "image_key": image_key,
                     "sold": sold,
                     "rating": rating,
                     "price": price,
-                    "link": short_link or product_link,
+                    "link": link,
                     "cat1": cat1,
                     "cat2": cat2,
                     "cat3": cat3,
@@ -212,12 +258,19 @@ def choose_product(page_mode):
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
-
-    if best:
-        posted.add(best["post_key"])
-        save_posted(posted)
-
     return best
+
+
+def mark_as_posted(page_mode, itemid, image_key):
+    posted = load_posted()
+
+    if itemid and itemid not in posted[page_mode]["items"]:
+        posted[page_mode]["items"].append(itemid)
+
+    if image_key and image_key not in posted[page_mode]["images"]:
+        posted[page_mode]["images"].append(image_key)
+
+    save_posted(posted)
 
 
 # ---------------------------
@@ -342,7 +395,6 @@ def post_product(page_id, access_token, product, caption):
         except Exception as e:
             print("POST IMAGE ERROR:", e, flush=True)
 
-    # fallback text
     try:
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{page_id}/feed",
@@ -398,6 +450,7 @@ def run_page(page_mode, page_id, access_token):
     post_id = post_product(page_id, access_token, product, caption)
 
     if post_id:
+        mark_as_posted(page_mode, product["itemid"], product["image_key"])
         time.sleep(3)
         comment_link(post_id, access_token, product["link"])
 
