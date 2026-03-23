@@ -205,6 +205,7 @@ def choose_product(page_mode):
 
             image_key = normalize_image_key(image)
 
+            # กันซ้ำในเพจเดียวกัน
             if itemid in posted_items:
                 continue
 
@@ -453,8 +454,5 @@ def run_page(page_mode, page_id, access_token):
 
 
 def run_all_pages():
-    ben_product = run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
-
-    smart_product = run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
-
-    return ben_product, smart_product
+    run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
+    run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
