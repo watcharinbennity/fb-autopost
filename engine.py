@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 200000
+MAX_ROWS = 60000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
@@ -22,13 +22,10 @@ USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 POSTED_FILE = "posted.json"
 
 
-# ---------------------------
-# storage
-# ---------------------------
 def load_posted():
     default_data = {
-        "ben": {"items": [], "images": []},
-        "smart": {"items": [], "images": []},
+        "ben": {"items": [], "images": [], "titles": []},
+        "smart": {"items": [], "images": [], "titles": []},
     }
 
     if not os.path.exists(POSTED_FILE):
@@ -45,6 +42,7 @@ def load_posted():
             raw.setdefault(mode, {})
             raw[mode].setdefault("items", [])
             raw[mode].setdefault("images", [])
+            raw[mode].setdefault("titles", [])
 
         return raw
 
@@ -63,9 +61,37 @@ def normalize_image_key(image_url: str) -> str:
     return image_url.strip().split("/")[-1].split("?")[0].lower()
 
 
-# ---------------------------
-# helpers
-# ---------------------------
+def is_duplicate(posted_page_data, product_id, image_key, title):
+    if product_id in posted_page_data["items"]:
+        return True
+
+    if image_key and image_key in posted_page_data["images"]:
+        return True
+
+    title_head = title[:60].strip().lower()
+    for old_title in posted_page_data["titles"]:
+        if title_head and title_head == old_title[:60].strip().lower():
+            return True
+
+    return False
+
+
+def mark_as_posted(page_mode, itemid, image_key, title):
+    posted = load_posted()
+
+    if itemid and itemid not in posted[page_mode]["items"]:
+        posted[page_mode]["items"].append(itemid)
+
+    if image_key and image_key not in posted[page_mode]["images"]:
+        posted[page_mode]["images"].append(image_key)
+
+    short_title = title[:100].strip()
+    if short_title and short_title not in posted[page_mode]["titles"]:
+        posted[page_mode]["titles"].append(short_title)
+
+    save_posted(posted)
+
+
 def to_float(v):
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -77,9 +103,6 @@ def norm_text(v):
     return str(v or "").strip()
 
 
-# ---------------------------
-# csv stream
-# ---------------------------
 def iter_csv_rows(url):
     try:
         print("Streaming CSV...", flush=True)
@@ -109,9 +132,6 @@ def iter_csv_rows(url):
         print("CSV ERROR:", e, flush=True)
 
 
-# ---------------------------
-# product targeting by page
-# ---------------------------
 def is_ben_target(title, cat1, cat2, cat3):
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -123,7 +143,7 @@ def is_ben_target(title, cat1, cat2, cat3):
     ]
 
     block_keywords = [
-        "smart", "smart home", "wifi", "camera", "cctv", "ip camera",
+        "smart home", "camera", "cctv", "ip camera", "security camera",
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell",
         "smart plug", "smart bulb", "smart switch", "mesh", "router",
         "beauty", "สบู่", "soap", "ครีม", "skincare", "camping", "เต็นท์",
@@ -161,13 +181,9 @@ def is_smarthome_target(title, cat1, cat2, cat3):
     return any(k in text for k in allow_keywords)
 
 
-# ---------------------------
-# choose product
-# ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
-    posted_items = set(posted[page_mode]["items"])
-    posted_images = set(posted[page_mode]["images"])
+    page_history = posted[page_mode]
 
     best = None
     best_score = -1
@@ -205,11 +221,7 @@ def choose_product(page_mode):
 
             image_key = normalize_image_key(image)
 
-            # กันซ้ำในเพจเดียวกัน
-            if itemid in posted_items:
-                continue
-
-            if image_key and image_key in posted_images:
+            if is_duplicate(page_history, itemid, image_key, title):
                 continue
 
             if page_mode == "ben":
@@ -240,6 +252,9 @@ def choose_product(page_mode):
                     "cat3": cat3,
                 }
 
+                if score > 800:
+                    break
+
         except Exception:
             continue
 
@@ -247,21 +262,6 @@ def choose_product(page_mode):
     return best
 
 
-def mark_as_posted(page_mode, itemid, image_key):
-    posted = load_posted()
-
-    if itemid and itemid not in posted[page_mode]["items"]:
-        posted[page_mode]["items"].append(itemid)
-
-    if image_key and image_key not in posted[page_mode]["images"]:
-        posted[page_mode]["images"].append(image_key)
-
-    save_posted(posted)
-
-
-# ---------------------------
-# caption
-# ---------------------------
 def fallback_caption(product, page_mode):
     if page_mode == "smart":
         return f"""🔥 ของมันต้องมี!
@@ -308,7 +308,7 @@ def generate_caption(product, page_mode):
 
 เงื่อนไข:
 - สั้น กระชับ น่าอ่าน
-- 5-7 บรรทัด
+- 4-6 บรรทัด
 - แนวขายจริง ไม่เวอร์เกินไป
 - ไม่ใส่ราคาตัวเลข
 - ห้ามใส่ลิงก์เองในเนื้อหา
@@ -348,9 +348,6 @@ def generate_caption(product, page_mode):
         return fallback_caption(product, page_mode)
 
 
-# ---------------------------
-# posting
-# ---------------------------
 def download_image(url):
     try:
         r = requests.get(url, timeout=TIMEOUT)
@@ -422,9 +419,6 @@ def comment_link(post_id, access_token, link):
         print("COMMENT ERROR:", e, flush=True)
 
 
-# ---------------------------
-# run
-# ---------------------------
 def run_page(page_mode, page_id, access_token):
     if not page_id or not access_token:
         print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
@@ -446,7 +440,7 @@ def run_page(page_mode, page_id, access_token):
     post_id = post_product(page_id, access_token, product, caption)
 
     if post_id:
-        mark_as_posted(page_mode, product["itemid"], product["image_key"])
+        mark_as_posted(page_mode, product["itemid"], product["image_key"], product["title"])
         time.sleep(3)
         comment_link(post_id, access_token, product["link"])
 
