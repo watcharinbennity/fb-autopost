@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +30,7 @@ jobs:
 
       - name: Run ultra bot
         env:
+          TZ: Asia/Bangkok
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
           PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
