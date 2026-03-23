@@ -1,4 +1,10 @@
 {
-  "ben": [],
-  "smart": []
+  "ben": {
+    "items": [],
+    "images": []
+  },
+  "smart": {
+    "items": [],
+    "images": []
+  }
 }
