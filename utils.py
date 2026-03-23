@@ -1,5 +1,4 @@
 import csv
-import io
 import json
 import re
 import requests
@@ -44,18 +43,38 @@ def save_json_file(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def _stream_csv_lines(response):
+    first = True
+    for raw_line in response.iter_lines(decode_unicode=True):
+        if raw_line is None:
+            continue
+
+        line = raw_line
+        if first:
+            line = line.lstrip("\ufeff")
+            first = False
+
+        if line == "":
+            continue
+
+        yield line
+
+
 def iter_csv_rows(csv_url, max_rows=100000):
-    log("Downloading CSV...")
-    r = requests.get(csv_url, timeout=(20, 60))
-    r.raise_for_status()
-    log("CSV downloaded, parsing rows...")
+    log("Streaming CSV from URL...")
 
-    content = r.content.decode("utf-8-sig", errors="ignore")
-    reader = csv.DictReader(io.StringIO(content))
+    with requests.get(csv_url, stream=True, timeout=(20, 120)) as r:
+        r.raise_for_status()
 
-    for i, row in enumerate(reader, start=1):
-        if i % 5000 == 0:
-            log(f"parsed_rows={i}")
-        if i > max_rows:
-            break
-        yield row
+        line_iter = _stream_csv_lines(r)
+        reader = csv.DictReader(line_iter)
+
+        for i, row in enumerate(reader, start=1):
+            if i % 5000 == 0:
+                log(f"streamed_rows={i}")
+
+            if i > max_rows:
+                log(f"Reached max_rows={max_rows}, stop streaming")
+                break
+
+            yield row
