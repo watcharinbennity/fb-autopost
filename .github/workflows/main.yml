@@ -1,4 +1,4 @@
-name: BEN-SMART ULTRA
+name: AUTO-POST
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run bot
+      - name: RUN BOT
         env:
           TZ: Asia/Bangkok
           PAGE_ID: ${{ secrets.PAGE_ID }}
