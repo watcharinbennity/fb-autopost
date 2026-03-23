@@ -15,7 +15,8 @@ def comment(post_id, access_token, message, graph_api_version="v25.0"):
 
 def post_product(page_id, access_token, product, caption, comment_text=None, graph_api_version="v25.0"):
     try:
-        img = requests.get(product["image"], timeout=120)
+        log(f"Downloading image for post: {product['title'][:80]}")
+        img = requests.get(product["image"], timeout=(20, 60))
         img.raise_for_status()
 
         url = f"https://graph.facebook.com/{graph_api_version}/{page_id}/photos"
@@ -26,7 +27,8 @@ def post_product(page_id, access_token, product, caption, comment_text=None, gra
             "access_token": access_token
         }
 
-        r = requests.post(url, files=files, data=data, timeout=120)
+        log(f"Posting to page_id={page_id}")
+        r = requests.post(url, files=files, data=data, timeout=(20, 120))
         r.raise_for_status()
 
         res = r.json()
