@@ -1,3 +1,4 @@
+import csv
 import requests, json, os, time
 
 MAX_ROWS = 100000
@@ -14,70 +15,100 @@ CSV_URL = os.getenv("SHOPEE_CSV_URL")
 POSTED_FILE = "posted.json"
 
 
-# ---------------- STORAGE ----------------
 def load_posted():
     if not os.path.exists(POSTED_FILE):
         return set()
-    return set(json.load(open(POSTED_FILE)))
+    with open(POSTED_FILE, "r", encoding="utf-8") as f:
+        return set(json.load(f))
 
 
 def save_posted(data):
-    json.dump(list(data), open(POSTED_FILE, "w"))
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(data), f, ensure_ascii=False)
 
 
-# ---------------- CSV STREAM ----------------
 def iter_csv_rows(url):
     try:
         print("Streaming CSV...")
         res = requests.get(url, stream=True, timeout=TIMEOUT)
+        res.raise_for_status()
 
-        for i, line in enumerate(res.iter_lines()):
-            if not line:
-                continue
+        lines = (
+            line.decode("utf-8-sig", errors="ignore")
+            for line in res.iter_lines()
+            if line
+        )
 
-            if i == 0:
-                continue  # skip header
+        reader = csv.DictReader(lines)
 
+        for i, row in enumerate(reader, start=1):
             if i > MAX_ROWS:
                 print("Reached MAX_ROWS")
                 break
-
-            try:
-                row = line.decode("utf-8", errors="ignore").split(",")
-                yield row
-            except:
-                continue
+            yield row
 
     except Exception as e:
         print("CSV ERROR:", e)
 
 
-# ---------------- SELECT PRODUCT ----------------
+def pick(row, keys, default=""):
+    lower_map = {str(k).strip().lower(): k for k in row.keys()}
+    for key in keys:
+        real = lower_map.get(key.lower())
+        if real is not None:
+            value = row.get(real, "")
+            if str(value).strip():
+                return str(value).strip()
+    return default
+
+
+def to_float(value):
+    try:
+        return float(str(value).replace(",", "").strip() or 0)
+    except:
+        return 0.0
+
+
 def choose_product():
     posted = load_posted()
 
     best = None
-    best_score = 0
+    best_score = -1
     count = 0
 
     for row in iter_csv_rows(CSV_URL):
         try:
-            if len(row) < 8:
-                continue
-
-            name = row[1]
-            image = row[2]
-            sold = float(row[3] or 0)
-            rating = float(row[4] or 0)
-            price = float(row[5] or 0)
-            com = float(row[6] or 0)
-            link = row[7]
-
-            pid = name  # ใช้ชื่อกันซ้ำ
+            name = pick(row, [
+                "product_name", "item_name", "name", "title"
+            ])
+            image = pick(row, [
+                "image_url", "image", "main_image", "product_image"
+            ])
+            sold = to_float(pick(row, [
+                "historical_sold", "sold", "sales"
+            ], "0"))
+            rating = to_float(pick(row, [
+                "rating", "item_rating", "product_rating"
+            ], "0"))
+            price = to_float(pick(row, [
+                "price", "final_price", "product_price"
+            ], "0"))
+            com = to_float(pick(row, [
+                "commission", "commission_value", "est_commission"
+            ], "0"))
+            link = pick(row, [
+                "product_short link", "product_short_link",
+                "short_link", "affiliate_link", "link", "product_link"
+            ])
+            pid = pick(row, [
+                "itemid", "item_id", "product_id", "id"
+            ], name)
 
             count += 1
 
-            # ✅ filter เบาๆ (ไม่ตันแล้ว)
+            if not name or not image or not link:
+                continue
+
             if rating < 4.0:
                 continue
 
@@ -98,10 +129,11 @@ def choose_product():
                     "sold": sold,
                     "rating": rating,
                     "commission": com,
+                    "price": price,
                     "link": link
                 }
 
-        except:
+        except Exception:
             continue
 
     print("SCAN DONE:", count)
@@ -113,7 +145,6 @@ def choose_product():
     return best
 
 
-# ---------------- CAPTION ----------------
 def generate_caption(p):
     return f"""🔥 ของมันต้องมี!
 
@@ -127,17 +158,16 @@ def generate_caption(p):
 #Shopee #ของดีบอกต่อ"""
 
 
-# ---------------- IMAGE ----------------
 def download_image(url):
     try:
         r = requests.get(url, timeout=TIMEOUT)
-        if r.status_code == 200:
+        if r.status_code == 200 and r.content:
             return r.content
-    except:
-        return None
+    except Exception as e:
+        print("DOWNLOAD IMAGE ERROR:", e)
+    return None
 
 
-# ---------------- POST ----------------
 def post_image(page_id, token, image_url, caption):
     print("Posting to:", page_id)
 
@@ -147,7 +177,7 @@ def post_image(page_id, token, image_url, caption):
         try:
             res = requests.post(
                 f"https://graph.facebook.com/v25.0/{page_id}/photos",
-                files={"source": ("img.jpg", img)},
+                files={"source": ("img.jpg", img, "image/jpeg")},
                 data={
                     "caption": caption,
                     "access_token": token
@@ -161,31 +191,30 @@ def post_image(page_id, token, image_url, caption):
             if "post_id" in data:
                 return data["post_id"]
 
+            if "id" in data:
+                return data["id"]
+
         except Exception as e:
             print("POST IMAGE ERROR:", e)
 
-    # fallback text
     try:
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{page_id}/feed",
             data={
                 "message": caption,
                 "access_token": token
-            }
+            },
+            timeout=TIMEOUT
         )
-
         data = res.json()
         print("POST TEXT:", data)
-
         return data.get("id")
-
     except Exception as e:
         print("POST TEXT ERROR:", e)
 
     return None
 
 
-# ---------------- COMMENT ----------------
 def comment_link(post_id, token, link):
     try:
         requests.post(
@@ -193,13 +222,13 @@ def comment_link(post_id, token, link):
             data={
                 "message": f"🛒 สั่งซื้อ 👉 {link}",
                 "access_token": token
-            }
+            },
+            timeout=TIMEOUT
         )
-    except:
-        pass
+    except Exception as e:
+        print("COMMENT ERROR:", e)
 
 
-# ---------------- RUN ----------------
 def run_page(page_id, token):
     print("RUN PAGE:", page_id)
 
@@ -210,6 +239,8 @@ def run_page(page_id, token):
         return
 
     print("✅ CHOSEN:", product["name"])
+    print("IMAGE URL:", product["image"])
+    print("LINK:", product["link"])
 
     caption = generate_caption(product)
 
