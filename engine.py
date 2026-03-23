@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 600000
+MAX_ROWS = 200000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
