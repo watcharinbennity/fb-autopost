@@ -1,6 +1,6 @@
-import requests, json, os, random, time
+import requests, json, os, time
 
-MAX_ROWS = 120000
+MAX_ROWS = 100000
 TIMEOUT = 15
 
 PAGE_ID = os.getenv("PAGE_ID")
@@ -42,12 +42,27 @@ def iter_csv_rows(url):
         print("CSV ERROR:", e)
 
 
-# ------------------ SCORING ------------------
-def score_product(sold, rating, commission, price):
-    return (sold * 2.5) + (rating * 120) + (commission * 10) - (price * 0.1)
+# ------------------ TARGET FILTER ------------------
+def is_target_product(name):
+    name = name.lower()
+
+    camera = ["camera", "กล้อง", "cctv", "ip camera"]
+    robot = ["robot vacuum", "หุ่นยนต์ดูดฝุ่น"]
+    plug = ["smart plug", "ปลั๊ก", "wifi plug"]
+
+    if any(k in name for k in camera):
+        return "camera"
+
+    if any(k in name for k in robot):
+        return "robot"
+
+    if any(k in name for k in plug):
+        return "plug"
+
+    return None
 
 
-# ------------------ PRODUCT SELECT ------------------
+# ------------------ SELECT PRODUCT ------------------
 def choose_product():
     posted = load_posted()
     best = None
@@ -64,13 +79,29 @@ def choose_product():
             commission = float(row[6])
             link = row[7]
 
+            group = is_target_product(name)
+            if not group:
+                continue
+
             if pid in posted:
                 continue
 
-            if rating < 4 or sold < 10:
+            if rating < 4.5:
                 continue
 
-            score = score_product(sold, rating, commission, price)
+            if group == "camera" and sold < 500:
+                continue
+
+            if group == "robot" and sold < 200:
+                continue
+
+            if group == "plug" and sold < 1000:
+                continue
+
+            if commission < 30:
+                continue
+
+            score = (sold * 2) + (rating * 100) + (commission * 5)
 
             if score > best_score:
                 best_score = score
@@ -80,7 +111,6 @@ def choose_product():
                     "image": image,
                     "sold": sold,
                     "rating": rating,
-                    "price": price,
                     "commission": commission,
                     "link": link
                 }
@@ -97,15 +127,7 @@ def choose_product():
 
 # ------------------ CAPTION ------------------
 def generate_caption(p):
-    hooks = [
-        "🔥 ของมันต้องมี!",
-        "⚡ ลดแรงวันนี้!",
-        "💥 ตัวฮิตขายดี!",
-        "🚀 สายช่างห้ามพลาด!",
-        "🛠️ ของดีใช้จริง!",
-    ]
-
-    return f"""{random.choice(hooks)}
+    return f"""🔥 ของมันต้องมี!
 
 {p['name']}
 
@@ -114,15 +136,15 @@ def generate_caption(p):
 
 👉 เช็กราคาล่าสุดที่ลิงก์ด้านล่าง
 
-#Shopee #ของดีบอกต่อ #เครื่องใช้ไฟฟ้า"""
+#Shopee #ของดีบอกต่อ"""
 
 
 # ------------------ DOWNLOAD IMAGE ------------------
 def download_image(url):
     try:
-        res = requests.get(url, timeout=TIMEOUT)
-        if res.status_code == 200:
-            return res.content
+        r = requests.get(url, timeout=TIMEOUT)
+        if r.status_code == 200:
+            return r.content
     except:
         return None
 
@@ -135,30 +157,26 @@ def post_image(page_id, token, image_url, caption):
         print("Image fail → fallback text")
         return post_text(page_id, token, caption)
 
-    for i in range(3):  # retry
-        try:
-            res = requests.post(
-                f"https://graph.facebook.com/v25.0/{page_id}/photos",
-                files={"source": ("img.jpg", img)},
-                data={
-                    "caption": caption,
-                    "access_token": token
-                },
-                timeout=TIMEOUT
-            )
+    try:
+        res = requests.post(
+            f"https://graph.facebook.com/v25.0/{page_id}/photos",
+            files={"source": ("img.jpg", img)},
+            data={
+                "caption": caption,
+                "access_token": token
+            },
+            timeout=TIMEOUT
+        )
 
-            data = res.json()
-            print("POST:", data)
+        data = res.json()
+        print("POST:", data)
 
-            if "id" in data:
-                return data["post_id"]
+        if "id" in data:
+            return data.get("post_id")
 
-        except Exception as e:
-            print("Retry:", i, e)
+    except Exception as e:
+        print("Post error:", e)
 
-        time.sleep(2)
-
-    print("Image post fail → fallback")
     return post_text(page_id, token, caption)
 
 
@@ -169,8 +187,7 @@ def post_text(page_id, token, caption):
             data={
                 "message": caption,
                 "access_token": token
-            },
-            timeout=TIMEOUT
+            }
         )
         return res.json().get("id")
     except:
@@ -202,6 +219,8 @@ def run_page(page_id, token):
         return
 
     caption = generate_caption(product)
+
+    print("CHOSEN:", product["name"])
 
     post_id = post_image(page_id, token, product["image"], caption)
 
