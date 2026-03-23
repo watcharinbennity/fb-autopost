@@ -66,15 +66,20 @@ def iter_csv_rows(csv_url, max_rows=100000):
     with requests.get(csv_url, stream=True, timeout=(20, 120)) as r:
         r.raise_for_status()
 
-        line_iter = _stream_csv_lines(r)
-        reader = csv.DictReader(line_iter)
+        lines = (
+            line.decode("utf-8-sig", errors="ignore")
+            for line in r.iter_lines()
+            if line  # กัน None / blank
+        )
+
+        reader = csv.DictReader(lines)
 
         for i, row in enumerate(reader, start=1):
             if i % 5000 == 0:
                 log(f"streamed_rows={i}")
 
             if i > max_rows:
-                log(f"Reached max_rows={max_rows}, stop streaming")
+                log(f"Reached max_rows={max_rows}")
                 break
 
             yield row
