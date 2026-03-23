@@ -1,5 +1,8 @@
 import csv
-import requests, json, os, time
+import requests
+import json
+import os
+import time
 
 MAX_ROWS = 100000
 TIMEOUT = 20
@@ -41,10 +44,16 @@ def iter_csv_rows(url):
 
         reader = csv.DictReader(lines)
 
+        first_row = True
         for i, row in enumerate(reader, start=1):
             if i > MAX_ROWS:
                 print("Reached MAX_ROWS")
                 break
+
+            if first_row:
+                print("COLUMNS:", list(row.keys()))
+                first_row = False
+
             yield row
 
     except Exception as e:
@@ -65,7 +74,7 @@ def pick(row, keys, default=""):
 def to_float(value):
     try:
         return float(str(value).replace(",", "").strip() or 0)
-    except:
+    except Exception:
         return 0.0
 
 
@@ -75,30 +84,31 @@ def choose_product():
     best = None
     best_score = -1
     count = 0
+    debug_count = 0
 
     for row in iter_csv_rows(CSV_URL):
         try:
             name = pick(row, [
-                "product_name", "item_name", "name", "title"
+                "product_name", "item_name", "name", "title", "product title", "ชื่อสินค้า"
             ])
             image = pick(row, [
-                "image_url", "image", "main_image", "product_image"
+                "image_url", "image", "main_image", "product_image", "image link", "img_url"
             ])
             sold = to_float(pick(row, [
-                "historical_sold", "sold", "sales"
+                "historical_sold", "sold", "sales", "sold_count", "item_sold"
             ], "0"))
             rating = to_float(pick(row, [
-                "rating", "item_rating", "product_rating"
+                "rating", "item_rating", "product_rating", "avg_rating"
             ], "0"))
             price = to_float(pick(row, [
-                "price", "final_price", "product_price"
+                "price", "final_price", "product_price", "sale_price"
             ], "0"))
             com = to_float(pick(row, [
-                "commission", "commission_value", "est_commission"
+                "commission", "commission_value", "est_commission", "estimated_commission"
             ], "0"))
             link = pick(row, [
                 "product_short link", "product_short_link",
-                "short_link", "affiliate_link", "link", "product_link"
+                "short_link", "affiliate_link", "link", "product_link", "product short link"
             ])
             pid = pick(row, [
                 "itemid", "item_id", "product_id", "id"
@@ -106,17 +116,34 @@ def choose_product():
 
             count += 1
 
+            if debug_count < 10:
+                print(
+                    "DEBUG:",
+                    {
+                        "name": name,
+                        "image": image[:80] if image else "",
+                        "sold": sold,
+                        "rating": rating,
+                        "price": price,
+                        "commission": com,
+                        "link": link[:80] if link else "",
+                        "pid": pid,
+                    }
+                )
+                debug_count += 1
+
             if not name or not image or not link:
-                continue
-
-            if rating < 4.0:
-                continue
-
-            if sold < 50:
                 continue
 
             if pid in posted:
                 continue
+
+            # ปิด filter ชั่วคราวเพื่อตรวจว่าอ่านข้อมูลตรงก่อน
+            # if rating < 4.0:
+            #     continue
+            #
+            # if sold < 50:
+            #     continue
 
             score = (sold * 2) + (rating * 100) + (com * 5)
 
@@ -133,7 +160,8 @@ def choose_product():
                     "link": link
                 }
 
-        except Exception:
+        except Exception as e:
+            print("ROW ERROR:", e)
             continue
 
     print("SCAN DONE:", count)
