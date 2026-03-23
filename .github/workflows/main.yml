@@ -1,15 +1,12 @@
-name: BEN-SMARTHOME-ULTRA
+name: BEN-SMART ULTRA
 
 on:
-  schedule:
-    - cron: "0 2 * * *"      # 09:00 ไทย
-    - cron: "0 5 * * *"      # 12:00 ไทย
-    - cron: "30 11 * * *"    # 18:30 ไทย
-    - cron: "0 14 * * *"     # 21:00 ไทย
   workflow_dispatch:
-
-permissions:
-  contents: write
+  schedule:
+    - cron: '0 2 * * *'
+    - cron: '0 5 * * *'
+    - cron: '30 11 * * *'
+    - cron: '0 14 * * *'
 
 jobs:
   build:
@@ -21,14 +18,11 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+      - run: pip install -r requirements.txt
 
-      - name: Run ultra bot
+      - name: Run bot
         env:
           TZ: Asia/Bangkok
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -36,15 +30,4 @@ jobs:
           PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
           PAGE_ACCESS_TOKEN_2: ${{ secrets.PAGE_ACCESS_TOKEN_2 }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: "gpt-4o-mini"
-          USE_OPENAI: "true"
         run: python app.py
-
-      - name: Commit posted files
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add posted_ben.json posted_smart.json || true
-          git diff --cached --quiet || git commit -m "update posted history"
-          git push
