@@ -3,18 +3,19 @@ import io
 import json
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+THAI_TZ = timezone(timedelta(hours=7))
 
 
 def log(message):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(THAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now}] {message}", flush=True)
 
 
 def to_float(value):
     try:
-        text = str(value).strip()
-        text = text.replace(",", "")
+        text = str(value).strip().replace(",", "")
         match = re.findall(r"-?\d+\.?\d*", text)
         if not match:
             return 0.0
@@ -43,14 +44,18 @@ def save_json_file(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def iter_csv_rows(csv_url, max_rows=200000):
-    r = requests.get(csv_url, timeout=180)
+def iter_csv_rows(csv_url, max_rows=100000):
+    log("Downloading CSV...")
+    r = requests.get(csv_url, timeout=(20, 60))
     r.raise_for_status()
+    log("CSV downloaded, parsing rows...")
 
     content = r.content.decode("utf-8-sig", errors="ignore")
     reader = csv.DictReader(io.StringIO(content))
 
     for i, row in enumerate(reader, start=1):
+        if i % 5000 == 0:
+            log(f"parsed_rows={i}")
         if i > max_rows:
             break
         yield row
