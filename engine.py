@@ -7,7 +7,7 @@ from facebook_post import post_product
 
 CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 MAX_ROWS = 100000
-TOP_KEEP = 1200
+TOP_KEEP = 700
 TOP_POOL = 20
 
 
@@ -43,7 +43,6 @@ def score_product(product, page_mode):
         else:
             price_bonus = 0
     else:
-        # smart home
         if group == "camera":
             price_bonus = 35 if 300 <= price <= 3000 else 10
         elif group == "robot_vacuum":
@@ -70,8 +69,13 @@ def choose_product(csv_url, posted_path, page_mode):
 
     builder = build_ben_product if page_mode == "ben" else build_smart_product
 
+    log(f"[{page_mode}] start scanning CSV...")
+
     for row in iter_csv_rows(csv_url, max_rows=MAX_ROWS):
         rows_seen += 1
+
+        if rows_seen % 5000 == 0:
+            log(f"[{page_mode}] scanning_rows={rows_seen}")
 
         product = builder(row)
         if not product:
@@ -174,4 +178,4 @@ def run_all_pages():
         page_id=page_id_smart,
         access_token=token_smart,
         posted_path="posted_smart.json",
-        )
+            )
