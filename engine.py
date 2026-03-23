@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 600000
+MAX_ROWS = 60000
 TIMEOUT = 20
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
@@ -22,6 +22,9 @@ USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 POSTED_FILE = "posted.json"
 
 
+# ---------------------------
+# storage
+# ---------------------------
 def load_posted():
     default_data = {
         "ben": {"items": [], "images": [], "titles": []},
@@ -92,6 +95,9 @@ def mark_as_posted(page_mode, itemid, image_key, title):
     save_posted(posted)
 
 
+# ---------------------------
+# helpers
+# ---------------------------
 def to_float(v):
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -103,6 +109,45 @@ def norm_text(v):
     return str(v or "").strip()
 
 
+def get_commission_value(row):
+    """
+    คืนค่าคอมเป็น 'บาท'
+    รองรับหลายชื่อคอลัมน์
+    """
+    possible_amount_fields = [
+        "commission",
+        "commission_amount",
+        "estimated_commission",
+        "est_commission",
+        "affiliate_commission",
+        "earnings",
+    ]
+
+    for field in possible_amount_fields:
+        val = to_float(row.get(field))
+        if val > 0:
+            return val
+
+    possible_rate_fields = [
+        "commission_rate",
+        "affiliate_rate",
+        "rate",
+    ]
+
+    price = to_float(row.get("sale_price"))
+    for field in possible_rate_fields:
+        rate = to_float(row.get(field))
+        if rate > 0 and price > 0:
+            if rate > 1:
+                return price * (rate / 100.0)
+            return price * rate
+
+    return 0.0
+
+
+# ---------------------------
+# csv stream
+# ---------------------------
 def iter_csv_rows(url):
     try:
         print("Streaming CSV...", flush=True)
@@ -132,6 +177,9 @@ def iter_csv_rows(url):
         print("CSV ERROR:", e, flush=True)
 
 
+# ---------------------------
+# target filters
+# ---------------------------
 def is_ben_target(title, cat1, cat2, cat3):
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -181,6 +229,9 @@ def is_smarthome_target(title, cat1, cat2, cat3):
     return any(k in text for k in allow_keywords)
 
 
+# ---------------------------
+# choose product
+# ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
     page_history = posted[page_mode]
@@ -204,6 +255,8 @@ def choose_product(page_mode):
             cat2 = norm_text(row.get("global_category2"))
             cat3 = norm_text(row.get("global_category3"))
 
+            commission = get_commission_value(row)
+
             count += 1
 
             if not title or not itemid or not image:
@@ -219,6 +272,10 @@ def choose_product(page_mode):
             if sold < 20:
                 continue
 
+            # คัดเฉพาะค่าคอม 50 บาทขึ้นไป
+            if commission < 50:
+                continue
+
             image_key = normalize_image_key(image)
 
             if is_duplicate(page_history, itemid, image_key, title):
@@ -231,7 +288,8 @@ def choose_product(page_mode):
                 if not is_smarthome_target(title, cat1, cat2, cat3):
                     continue
 
-            score = (sold * 2.0) + (rating * 100.0)
+            # ค่าคอมมีผลกับการเลือก แต่ไม่โพสต์ลงเพจ
+            score = (sold * 3.0) + (rating * 120.0) + (commission * 5.0)
 
             if 80 <= price <= 3000:
                 score += 25
@@ -246,22 +304,34 @@ def choose_product(page_mode):
                     "sold": sold,
                     "rating": rating,
                     "price": price,
+                    "commission": commission,
                     "link": link,
                     "cat1": cat1,
                     "cat2": cat2,
                     "cat3": cat3,
                 }
 
-                if score > 800:
+                if score > 1000:
                     break
 
         except Exception:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
+
+    if best:
+        print(
+            f"✅ CHOSEN: {best['title']} | sold={best['sold']} | "
+            f"rating={best['rating']} | commission={best['commission']}",
+            flush=True
+        )
+
     return best
 
 
+# ---------------------------
+# caption
+# ---------------------------
 def fallback_caption(product, page_mode):
     if page_mode == "smart":
         return f"""🔥 ของมันต้องมี!
@@ -311,6 +381,7 @@ def generate_caption(product, page_mode):
 - 4-6 บรรทัด
 - แนวขายจริง ไม่เวอร์เกินไป
 - ไม่ใส่ราคาตัวเลข
+- ห้ามใส่ค่าคอม
 - ห้ามใส่ลิงก์เองในเนื้อหา
 - เดี๋ยวระบบจะเติมลิงก์ให้ท้ายโพสต์
 """.strip()
@@ -348,6 +419,9 @@ def generate_caption(product, page_mode):
         return fallback_caption(product, page_mode)
 
 
+# ---------------------------
+# posting
+# ---------------------------
 def download_image(url):
     try:
         r = requests.get(url, timeout=TIMEOUT)
@@ -419,6 +493,9 @@ def comment_link(post_id, access_token, link):
         print("COMMENT ERROR:", e, flush=True)
 
 
+# ---------------------------
+# run
+# ---------------------------
 def run_page(page_mode, page_id, access_token):
     if not page_id or not access_token:
         print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
@@ -432,9 +509,9 @@ def run_page(page_mode, page_id, access_token):
         print("❌ No product", flush=True)
         return None
 
-    print("✅ CHOSEN:", product["title"], flush=True)
     print("IMAGE URL:", product["image"], flush=True)
     print("LINK:", product["link"], flush=True)
+    print("COMMISSION:", product["commission"], flush=True)
 
     caption = generate_caption(product, page_mode)
     post_id = post_product(page_id, access_token, product, caption)
