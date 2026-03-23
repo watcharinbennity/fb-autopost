@@ -26,19 +26,6 @@ POSTED_FILE = "posted.json"
 # storage
 # ---------------------------
 def load_posted():
-    """
-    โครงสร้างใหม่:
-    {
-      "ben": {
-        "items": ["12345", "67890"],
-        "images": ["imgkey1", "imgkey2"]
-      },
-      "smart": {
-        "items": [],
-        "images": []
-      }
-    }
-    """
     default_data = {
         "ben": {"items": [], "images": []},
         "smart": {"items": [], "images": []},
@@ -51,11 +38,9 @@ def load_posted():
         with open(POSTED_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        # รองรับไฟล์เก่าแบบ list
         if isinstance(raw, list):
             return default_data
 
-        # กัน key หาย
         for mode in ["ben", "smart"]:
             raw.setdefault(mode, {})
             raw[mode].setdefault("items", [])
@@ -73,9 +58,6 @@ def save_posted(data):
 
 
 def normalize_image_key(image_url: str) -> str:
-    """
-    ใช้กันโพสต์ซ้ำกรณี itemid เปลี่ยนแต่รูปเดิม
-    """
     if not image_url:
         return ""
     return image_url.strip().split("/")[-1].split("?")[0].lower()
@@ -135,12 +117,15 @@ def is_ben_target(title, cat1, cat2, cat3):
 
     allow_keywords = [
         "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
-        "ปลั๊ก", "plug", "socket", "multimeter", "tester", "ไฟ", "led",
-        "switch", "สายไฟ", "cable", "extension", "charger", "converter",
-        "usb socket", "power socket", "ปลั๊กไฟ", "พ่วง", "รางปลั๊ก"
+        "ปลั๊ก", "ปลั๊กไฟ", "power socket", "รางปลั๊ก", "สายไฟ", "cable",
+        "extension", "multimeter", "tester", "switch", "converter", "charger",
+        "usb socket", "socket", "power strip"
     ]
 
     block_keywords = [
+        "smart", "smart home", "wifi", "camera", "cctv", "ip camera",
+        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell",
+        "smart plug", "smart bulb", "smart switch", "mesh", "router",
         "beauty", "สบู่", "soap", "ครีม", "skincare", "camping", "เต็นท์",
         "food", "อาหาร", "fashion", "เสื้อ", "รองเท้า", "watch band",
         "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant"
@@ -156,16 +141,18 @@ def is_smarthome_target(title, cat1, cat2, cat3):
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
     allow_keywords = [
-        "camera", "cctv", "ip camera", "security camera", "กล้อง",
-        "smart plug", "wifi plug", "ปลั๊กอัจฉริยะ", "smart bulb", "smart light",
-        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "smart home",
-        "router", "wifi", "mesh", "smart switch", "socket", "usb socket"
+        "smart", "smart home", "wifi", "camera", "cctv", "ip camera",
+        "security camera", "กล้อง", "smart plug", "wifi plug",
+        "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
+        "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
+        "smart switch"
     ]
 
     block_keywords = [
+        "power socket", "รางปลั๊ก", "ปลั๊กพ่วง", "สายไฟ", "extension cord",
+        "drill", "ไขควง", "สว่าน", "คีม", "tester", "multimeter",
         "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
-        "garden", "gardening", "food", "อาหาร", "charger cable", "watch band",
-        "สายนาฬิกา"
+        "garden", "gardening", "food", "อาหาร", "watch band", "สายนาฬิกา"
     ]
 
     if any(k in text for k in block_keywords):
@@ -218,11 +205,9 @@ def choose_product(page_mode):
 
             image_key = normalize_image_key(image)
 
-            # กันโพสต์ซ้ำหลัก
             if itemid in posted_items:
                 continue
 
-            # กันโพสต์ซ้ำสำรอง เผื่อ itemid เปลี่ยนแต่รูปเดิม
             if image_key and image_key in posted_images:
                 continue
 
@@ -274,7 +259,7 @@ def mark_as_posted(page_mode, itemid, image_key):
 
 
 # ---------------------------
-# openai caption
+# caption
 # ---------------------------
 def fallback_caption(product, page_mode):
     if page_mode == "smart":
@@ -285,7 +270,8 @@ def fallback_caption(product, page_mode):
 ⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
 🏠 ตัวช่วยเพิ่มความสะดวกให้บ้านของคุณ
 
-👉 เช็กราคาล่าสุดที่ลิงก์ด้านล่าง
+👉 เช็กราคาล่าสุด:
+{product['link']}
 
 #Shopee #SmartHome"""
     else:
@@ -296,7 +282,8 @@ def fallback_caption(product, page_mode):
 ⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
 🛠 ของดีน่าใช้สำหรับงานช่างและงานไฟฟ้า
 
-👉 เช็กราคาล่าสุดที่ลิงก์ด้านล่าง
+👉 เช็กราคาล่าสุด:
+{product['link']}
 
 #Shopee #ของดีบอกต่อ"""
 
@@ -322,10 +309,10 @@ def generate_caption(product, page_mode):
 - สั้น กระชับ น่าอ่าน
 - 5-7 บรรทัด
 - แนวขายจริง ไม่เวอร์เกินไป
-- ไม่ใส่ลิงก์เอง
 - ไม่ใส่ราคาตัวเลข
-- ปิดท้ายชวนกดดูรายละเอียดที่ลิงก์ด้านล่าง
-"""
+- ห้ามใส่ลิงก์เองในเนื้อหา
+- เดี๋ยวระบบจะเติมลิงก์ให้ท้ายโพสต์
+""".strip()
 
     try:
         res = requests.post(
@@ -347,7 +334,14 @@ def generate_caption(product, page_mode):
         res.raise_for_status()
         data = res.json()
         content = data["choices"][0]["message"]["content"].strip()
-        return content if content else fallback_caption(product, page_mode)
+
+        if not content:
+            return fallback_caption(product, page_mode)
+
+        return f"""{content}
+
+👉 เช็กราคาล่าสุด:
+{product['link']}"""
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback_caption(product, page_mode)
@@ -414,25 +408,26 @@ def post_product(page_id, access_token, product, caption):
 
 def comment_link(post_id, access_token, link):
     try:
-        requests.post(
+        res = requests.post(
             f"https://graph.facebook.com/v25.0/{post_id}/comments",
             data={
-                "message": f"🛒 สั่งซื้อ 👉 {link}",
+                "message": f"🛒 สั่งซื้อสินค้า\n{link}",
                 "access_token": access_token
             },
             timeout=TIMEOUT
         )
+        print("COMMENT:", res.json(), flush=True)
     except Exception as e:
         print("COMMENT ERROR:", e, flush=True)
 
 
 # ---------------------------
-# run pages
+# run
 # ---------------------------
 def run_page(page_mode, page_id, access_token):
     if not page_id or not access_token:
         print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
-        return
+        return None
 
     print("RUN PAGE:", page_mode, page_id, flush=True)
 
@@ -440,7 +435,7 @@ def run_page(page_mode, page_id, access_token):
 
     if not product:
         print("❌ No product", flush=True)
-        return
+        return None
 
     print("✅ CHOSEN:", product["title"], flush=True)
     print("IMAGE URL:", product["image"], flush=True)
@@ -454,7 +449,12 @@ def run_page(page_mode, page_id, access_token):
         time.sleep(3)
         comment_link(post_id, access_token, product["link"])
 
+    return product
+
 
 def run_all_pages():
-    run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
-    run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
+    ben_product = run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
+
+    smart_product = run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
+
+    return ben_product, smart_product
