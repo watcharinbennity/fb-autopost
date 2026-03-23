@@ -14,7 +14,7 @@ CSV_URL = os.getenv("SHOPEE_CSV_URL")
 POSTED_FILE = "posted.json"
 
 
-# ------------------ STORAGE ------------------
+# ---------------- STORAGE ----------------
 def load_posted():
     if not os.path.exists(POSTED_FILE):
         return set()
@@ -25,7 +25,7 @@ def save_posted(data):
     json.dump(list(data), open(POSTED_FILE, "w"))
 
 
-# ------------------ CSV STREAM ------------------
+# ---------------- CSV STREAM ----------------
 def iter_csv_rows(url):
     try:
         res = requests.get(url, stream=True, timeout=TIMEOUT)
@@ -42,27 +42,23 @@ def iter_csv_rows(url):
         print("CSV ERROR:", e)
 
 
-# ------------------ TARGET FILTER ------------------
+# ---------------- FILTER (ล็อคสินค้า) ----------------
 def is_target_product(name):
     name = name.lower()
 
-    camera = ["camera", "กล้อง", "cctv", "ip camera"]
-    robot = ["robot vacuum", "หุ่นยนต์ดูดฝุ่น"]
-    plug = ["smart plug", "ปลั๊ก", "wifi plug"]
-
-    if any(k in name for k in camera):
+    if any(k in name for k in ["camera", "กล้อง", "cctv"]):
         return "camera"
 
-    if any(k in name for k in robot):
+    if any(k in name for k in ["robot vacuum", "หุ่นยนต์"]):
         return "robot"
 
-    if any(k in name for k in plug):
+    if any(k in name for k in ["plug", "ปลั๊ก"]):
         return "plug"
 
     return None
 
 
-# ------------------ SELECT PRODUCT ------------------
+# ---------------- SELECT ----------------
 def choose_product():
     posted = load_posted()
     best = None
@@ -70,14 +66,11 @@ def choose_product():
 
     for row in iter_csv_rows(CSV_URL):
         try:
-            pid = row[0]
-            name = row[1]
-            image = row[2]
-            sold = float(row[3])
-            rating = float(row[4])
-            price = float(row[5])
-            commission = float(row[6])
-            link = row[7]
+            pid, name, image, sold, rating, price, com, link = row[:8]
+
+            sold = float(sold)
+            rating = float(rating)
+            com = float(com)
 
             group = is_target_product(name)
             if not group:
@@ -98,10 +91,10 @@ def choose_product():
             if group == "plug" and sold < 1000:
                 continue
 
-            if commission < 30:
+            if com < 30:
                 continue
 
-            score = (sold * 2) + (rating * 100) + (commission * 5)
+            score = (sold * 2) + (rating * 100) + (com * 5)
 
             if score > best_score:
                 best_score = score
@@ -111,7 +104,7 @@ def choose_product():
                     "image": image,
                     "sold": sold,
                     "rating": rating,
-                    "commission": commission,
+                    "commission": com,
                     "link": link
                 }
 
@@ -125,7 +118,7 @@ def choose_product():
     return best
 
 
-# ------------------ CAPTION ------------------
+# ---------------- CAPTION ----------------
 def generate_caption(p):
     return f"""🔥 ของมันต้องมี!
 
@@ -139,7 +132,7 @@ def generate_caption(p):
 #Shopee #ของดีบอกต่อ"""
 
 
-# ------------------ DOWNLOAD IMAGE ------------------
+# ---------------- IMAGE ----------------
 def download_image(url):
     try:
         r = requests.get(url, timeout=TIMEOUT)
@@ -149,12 +142,11 @@ def download_image(url):
         return None
 
 
-# ------------------ POST ------------------
+# ---------------- POST ----------------
 def post_image(page_id, token, image_url, caption):
     img = download_image(image_url)
 
     if not img:
-        print("Image fail → fallback text")
         return post_text(page_id, token, caption)
 
     try:
@@ -175,7 +167,7 @@ def post_image(page_id, token, image_url, caption):
             return data.get("post_id")
 
     except Exception as e:
-        print("Post error:", e)
+        print("POST ERROR:", e)
 
     return post_text(page_id, token, caption)
 
@@ -194,7 +186,7 @@ def post_text(page_id, token, caption):
         return None
 
 
-# ------------------ COMMENT ------------------
+# ---------------- COMMENT ----------------
 def comment_link(post_id, token, link):
     try:
         requests.post(
@@ -208,7 +200,7 @@ def comment_link(post_id, token, link):
         pass
 
 
-# ------------------ RUN PAGE ------------------
+# ---------------- RUN ----------------
 def run_page(page_id, token):
     print("RUN:", page_id)
 
@@ -218,9 +210,9 @@ def run_page(page_id, token):
         print("No product")
         return
 
-    caption = generate_caption(product)
-
     print("CHOSEN:", product["name"])
+
+    caption = generate_caption(product)
 
     post_id = post_image(page_id, token, product["image"], caption)
 
@@ -229,7 +221,6 @@ def run_page(page_id, token):
         comment_link(post_id, token, product["link"])
 
 
-# ------------------ MAIN ------------------
 def run_all_pages():
     run_page(PAGE_ID, TOKEN)
 
