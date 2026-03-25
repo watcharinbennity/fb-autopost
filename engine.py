@@ -24,6 +24,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 
 
+# ---------------------------
+# storage
+# ---------------------------
 def load_posted() -> Dict:
     default_data = {
         "ben": {"items": [], "images": [], "titles": []},
@@ -93,6 +96,9 @@ def mark_as_posted(page_mode: str, itemid: str, image_key: str, title: str) -> N
     save_posted(posted)
 
 
+# ---------------------------
+# helpers
+# ---------------------------
 def to_float(v) -> float:
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -105,19 +111,28 @@ def norm_text(v) -> str:
 
 
 def is_valid_shopee_affiliate_link(link: str) -> bool:
+    """
+    ยึดตาม product_short link จาก Shopee Product Feed
+    รับได้ทั้ง short link และ an_redir จาก feed
+    """
     if not link:
         return False
 
     l = link.strip().lower()
+
     valid_prefixes = [
         "https://s.shopee.co.th/",
         "https://shope.ee/",
         "https://shopee.co.th/universal-link/",
     ]
+
     return any(l.startswith(p) for p in valid_prefixes)
 
 
 def get_affiliate_link(row: Dict) -> str:
+    """
+    ใช้เฉพาะ product_short link ตาม Shopee Product Feed
+    """
     short_link = norm_text(row.get("product_short link"))
     if is_valid_shopee_affiliate_link(short_link):
         return short_link
@@ -126,6 +141,7 @@ def get_affiliate_link(row: Dict) -> str:
 
 def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
     print("Streaming CSV...", flush=True)
+
     with requests.get(url, stream=True, timeout=(20, 120)) as res:
         res.raise_for_status()
 
@@ -148,6 +164,9 @@ def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
             yield row
 
 
+# ---------------------------
+# target filters
+# ---------------------------
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -157,7 +176,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "extension", "multimeter", "tester", "switch", "converter", "charger",
         "usb socket", "socket", "power strip", "adapter", "gan", "power bank",
         "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย", "ตะขอ", "กาว", "กาวติดผนัง",
-        "พุก", "น็อต", "สกรู"
+        "พุก", "น็อต", "สกรู", "air purifier filter", "filter"
     ]
 
     block_keywords = [
@@ -186,7 +205,8 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
         "smart switch", "lens protection", "camera lens", "full lens",
-        "watch strap", "watch active", "redmi watch", "ไฟ led", "led"
+        "watch strap", "watch active", "redmi watch", "ไฟ led", "led",
+        "air purifier", "purifier", "filter"
     ]
 
     block_keywords = [
@@ -203,6 +223,9 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     return any(k in text for k in allow_keywords)
 
 
+# ---------------------------
+# product builder
+# ---------------------------
 def build_product(row: Dict) -> Dict:
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
@@ -250,12 +273,12 @@ def score_product(row: Dict, page_mode: str) -> float:
     hot_words = [
         "usb", "gan", "power bank", "adapter", "ปลั๊ก", "wifi",
         "camera", "lens", "full lens", "smart", "switch", "led",
-        "พุก", "กาว", "ตะขอ"
+        "พุก", "กาว", "ตะขอ", "filter"
     ]
     if any(k in title for k in hot_words):
         score += 35
 
-    if page_mode == "smart" and ("camera" in title or "smart" in title or "wifi" in title or "led" in title):
+    if page_mode == "smart" and ("camera" in title or "smart" in title or "wifi" in title or "led" in title or "filter" in title):
         score += 25
 
     if page_mode == "ben" and ("ปลั๊ก" in title or "adapter" in title or "gan" in title or "กาว" in title or "พุก" in title):
@@ -264,6 +287,9 @@ def score_product(row: Dict, page_mode: str) -> float:
     return score
 
 
+# ---------------------------
+# choose product
+# ---------------------------
 def choose_product(page_mode: str) -> Optional[Dict]:
     posted = load_posted()
     page_history = posted[page_mode]
@@ -336,6 +362,9 @@ def choose_product(page_mode: str) -> Optional[Dict]:
     return best
 
 
+# ---------------------------
+# caption
+# ---------------------------
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ คนกำลังมองหาของแนวนี้ กดดูตัวนี้ก่อน",
@@ -433,6 +462,9 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
+# ---------------------------
+# posting
+# ---------------------------
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     try:
         res = requests.post(
@@ -472,6 +504,9 @@ def comment_link(post_id: str, access_token: str, link: str) -> None:
         print("COMMENT ERROR:", e, flush=True)
 
 
+# ---------------------------
+# run
+# ---------------------------
 def run_page(page_mode: str, page_id: str, access_token: str) -> None:
     if not page_id or not access_token:
         print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
