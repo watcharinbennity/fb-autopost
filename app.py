@@ -1,4 +1,4 @@
-from engine import run_all_pages
+from engine import run
 
 if __name__ == "__main__":
-    run_all_pages()
+    run()
