@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import time
+import random
 import requests
 
 MAX_ROWS = 250000
@@ -286,6 +287,12 @@ def choose_product(page_mode):
             if 80 <= price <= 3000:
                 score += 25
 
+            if sold >= 500:
+                score += 80
+
+            if rating >= 4.8:
+                score += 50
+
             if score > best_score:
                 best_score = score
                 best = build_product(row)
@@ -311,60 +318,84 @@ def choose_product(page_mode):
 
 
 # ---------------------------
-# caption
+# CTR caption
 # ---------------------------
+def make_hook(page_mode, product):
+    ben_hooks = [
+        f"⚡ คนใช้ของแบบนี้อยู่ กดดูด่วน!",
+        f"🔌 ของชิ้นนี้กำลังขายดีมากในหมวดงานไฟฟ้า",
+        f"🛠 ใครหาของใช้งานคุ้ม ๆ ตัวนี้น่าดูมาก",
+        f"🔥 ของมันต้องมี สำหรับสายช่างและสายบ้าน",
+        f"⚠ ก่อนซื้อของแนวนี้ ลองดูตัวนี้ก่อน",
+    ]
+
+    smart_hooks = [
+        f"📱 ของชิ้นนี้กำลังฮิตมาก ใครใช้มือถือควรดู",
+        f"🏠 ตัวนี้คนซื้อเยอะมากในหมวด Smart Home",
+        f"🔥 รีวิวพุ่ง ของแนวนี้กำลังมาแรง",
+        f"👀 ใครกำลังหาอุปกรณ์ใช้งานคุ้ม ๆ กดดูเลย",
+        f"⚡ ของชิ้นนี้น่าสนใจมาก คนกดดูเยอะ",
+    ]
+
+    return random.choice(smart_hooks if page_mode == "smart" else ben_hooks)
+
+
 def fallback_caption(product, page_mode):
+    hook = make_hook(page_mode, product)
+    sold_text = f"{int(product['sold']):,}"
+    rating_text = f"{product['rating']:.1f}"
+
     if page_mode == "smart":
-        return f"""🔥 ของมันต้องมี!
+        return f"""{hook}
 
 {product['title']}
 
-⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
-🏠 ตัวช่วยเพิ่มความสะดวกให้บ้านของคุณ
+⭐ รีวิว {rating_text}
+🛒 ขายแล้ว {sold_text} ชิ้น
+📌 คนสนใจเยอะมากช่วงนี้
 
-👉 เช็กราคาล่าสุด:
-{product['link']}
-
-#Shopee #SmartHome"""
+👉 กดดูราคาล่าสุดตรงนี้:
+{product['link']}"""
     else:
-        return f"""🔥 ของมันต้องมี!
+        return f"""{hook}
 
 {product['title']}
 
-⭐ {product['rating']} | ขายแล้ว {int(product['sold'])}
-🛠 ของดีน่าใช้สำหรับงานช่างและงานไฟฟ้า
+⭐ รีวิว {rating_text}
+🛒 ขายแล้ว {sold_text} ชิ้น
+📌 ของใช้งานคุ้ม น่ากดดูมาก
 
-👉 เช็กราคาล่าสุด:
-{product['link']}
-
-#Shopee #ของดีบอกต่อ"""
+👉 กดดูราคาล่าสุดตรงนี้:
+{product['link']}"""
 
 
 def generate_caption(product, page_mode):
     if not USE_OPENAI or not OPENAI_API_KEY:
         return fallback_caption(product, page_mode)
 
-    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและงานไฟฟ้า"
+    page_desc = "เพจเครื่องมือช่างและงานไฟฟ้า" if page_mode == "ben" else "เพจ Smart Home"
+    sold_text = f"{int(product['sold']):,}"
 
     prompt = f"""
-เขียนแคปชัน Facebook ภาษาไทย สำหรับ {page_desc}
+เขียนแคปชัน Facebook ภาษาไทยแบบเพิ่มยอดคลิก สำหรับ {page_desc}
 
 สินค้า:
 {product['title']}
 
 ข้อมูล:
 - rating: {product['rating']}
-- sold: {int(product['sold'])}
+- sold: {sold_text}
 - หมวด: {product['cat1']} / {product['cat2']} / {product['cat3']}
 
 เงื่อนไข:
-- สั้น กระชับ น่าอ่าน
-- 4-6 บรรทัด
-- แนวขายจริง ไม่เวอร์เกินไป
+- เน้นให้คนหยุดอ่านและอยากคลิก
+- เปิดด้วย hook แรง 1 บรรทัด
+- 5-7 บรรทัด
+- ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
-- ห้ามใส่ค่าคอม
-- ห้ามใส่ลิงก์เองในเนื้อหา
-- เดี๋ยวระบบจะเติมลิงก์ให้ท้ายโพสต์
+- ไม่ใส่ค่าคอม
+- ไม่ใส่ลิงก์เองในเนื้อหา
+- บรรทัดสุดท้ายให้ชวนคลิกดูราคา
 """.strip()
 
     try:
@@ -377,10 +408,10 @@ def generate_caption(product, page_mode):
             json={
                 "model": OPENAI_MODEL,
                 "messages": [
-                    {"role": "system", "content": "คุณเป็นนักเขียนแคปชันขายของภาษาไทย"},
+                    {"role": "system", "content": "คุณเป็นนักเขียนแคปชันขายของภาษาไทยที่เน้นยอดคลิก"},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.8,
+                "temperature": 0.9,
             },
             timeout=45,
         )
@@ -393,7 +424,7 @@ def generate_caption(product, page_mode):
 
         return f"""{content}
 
-👉 เช็กราคาล่าสุด:
+👉 กดดูราคาล่าสุดตรงนี้:
 {product['link']}"""
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
@@ -462,7 +493,7 @@ def comment_link(post_id, access_token, link):
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{post_id}/comments",
             data={
-                "message": f"🛒 สั่งซื้อสินค้า\n{link}",
+                "message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}",
                 "access_token": access_token
             },
             timeout=TIMEOUT
