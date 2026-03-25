@@ -4,8 +4,9 @@ import os
 import time
 import requests
 
-MAX_ROWS = 200000
+MAX_ROWS = 60000
 TIMEOUT = 20
+POSTED_FILE = "posted.json"
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
@@ -18,8 +19,6 @@ SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
-
-POSTED_FILE = "posted.json"
 
 
 # ---------------------------
@@ -48,7 +47,6 @@ def load_posted():
             raw[mode].setdefault("titles", [])
 
         return raw
-
     except Exception:
         return default_data
 
@@ -71,9 +69,9 @@ def is_duplicate(posted_page_data, product_id, image_key, title):
     if image_key and image_key in posted_page_data["images"]:
         return True
 
-    title_head = title[:60].strip().lower()
+    head = title[:60].strip().lower()
     for old_title in posted_page_data["titles"]:
-        if title_head and title_head == old_title[:60].strip().lower():
+        if head and head == old_title[:60].strip().lower():
             return True
 
     return False
@@ -111,7 +109,7 @@ def norm_text(v):
 
 def get_commission_value(row):
     """
-    คืนค่าคอมเป็น 'บาท'
+    คืนค่าคอมเป็นบาท
     รองรับหลายชื่อคอลัมน์
     """
     possible_amount_fields = [
@@ -168,7 +166,7 @@ def iter_csv_rows(url):
                 if i % 5000 == 0:
                     print(f"streamed_rows={i}", flush=True)
 
-                if i > MAX_ROWS:
+                if i >= MAX_ROWS:
                     print("Reached MAX_ROWS", flush=True)
                     break
 
@@ -197,7 +195,8 @@ def is_ben_target(title, cat1, cat2, cat3):
         "smart plug", "smart bulb", "smart switch", "mesh", "router",
         "beauty", "สบู่", "soap", "ครีม", "skincare", "camping", "เต็นท์",
         "food", "อาหาร", "fashion", "เสื้อ", "รองเท้า", "watch band",
-        "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant"
+        "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant",
+        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
     ]
 
     if any(k in text for k in block_keywords):
@@ -221,7 +220,8 @@ def is_smarthome_target(title, cat1, cat2, cat3):
         "power socket", "รางปลั๊ก", "ปลั๊กพ่วง", "สายไฟ", "extension cord",
         "drill", "ไขควง", "สว่าน", "คีม", "tester", "multimeter",
         "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
-        "garden", "gardening", "food", "อาหาร", "watch band", "สายนาฬิกา"
+        "garden", "gardening", "food", "อาหาร", "watch band", "สายนาฬิกา",
+        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
     ]
 
     if any(k in text for k in block_keywords):
@@ -233,7 +233,7 @@ def is_smarthome_target(title, cat1, cat2, cat3):
 # ---------------------------
 # product builder
 # ---------------------------
-def make_product(row, commission):
+def build_product(row, commission):
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
     sold = to_float(row.get("item_sold"))
@@ -268,7 +268,7 @@ def make_product(row, commission):
 # priority:
 # 1) commission >= 50
 # 2) commission >= 20
-# 3) fallback to best general item
+# 3) no post
 # ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
@@ -276,11 +276,9 @@ def choose_product(page_mode):
 
     best_50 = None
     best_20 = None
-    best_any = None
 
     score_50 = -1
     score_20 = -1
-    score_any = -1
 
     count = 0
 
@@ -336,7 +334,7 @@ def choose_product(page_mode):
                 score = base_score + (commission * 5.0)
                 if score > score_50:
                     score_50 = score
-                    best_50 = make_product(row, commission)
+                    best_50 = build_product(row, commission)
                     if score > 1300:
                         break
 
@@ -344,28 +342,24 @@ def choose_product(page_mode):
                 score = base_score + (commission * 3.0)
                 if score > score_20:
                     score_20 = score
-                    best_20 = make_product(row, commission)
-
-            else:
-                score = base_score
-                if score > score_any:
-                    score_any = score
-                    best_any = make_product(row, commission)
+                    best_20 = build_product(row, commission)
 
         except Exception:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
 
-    best = best_50 or best_20 or best_any
+    best = best_50 or best_20
 
     if best:
-        level = "50+" if best["commission"] >= 50 else "20+" if best["commission"] >= 20 else "fallback"
+        level = "50+" if best["commission"] >= 50 else "20+"
         print(
             f"✅ CHOSEN ({level}): {best['title']} | sold={best['sold']} | "
             f"rating={best['rating']} | commission={best['commission']}",
             flush=True
         )
+    else:
+        print("❌ No product with commission >= 20", flush=True)
 
     return best
 
@@ -404,7 +398,7 @@ def generate_caption(product, page_mode):
     if not USE_OPENAI or not OPENAI_API_KEY:
         return fallback_caption(product, page_mode)
 
-    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและไฟฟ้า"
+    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและงานไฟฟ้า"
 
     prompt = f"""
 เขียนแคปชัน Facebook ภาษาไทย สำหรับ {page_desc}
@@ -489,7 +483,6 @@ def post_product(page_id, access_token, product, caption):
                 },
                 timeout=TIMEOUT
             )
-
             data = res.json()
             print("POST IMAGE:", data, flush=True)
 
@@ -546,7 +539,6 @@ def run_page(page_mode, page_id, access_token):
     product = choose_product(page_mode)
 
     if not product:
-        print("❌ No product", flush=True)
         return None
 
     print("IMAGE URL:", product["image"], flush=True)
