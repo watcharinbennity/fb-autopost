@@ -35,6 +35,8 @@ jobs:
           PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
           PAGE_ACCESS_TOKEN_2: ${{ secrets.PAGE_ACCESS_TOKEN_2 }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+          SHOPEE_SUB_ID_PREFIX: "fbbot"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: "gpt-4o-mini"
           USE_OPENAI: "true"
