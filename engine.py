@@ -108,10 +108,6 @@ def norm_text(v):
 
 
 def get_commission_value(row):
-    """
-    คืนค่าคอมเป็นบาท
-    รองรับหลายชื่อคอลัมน์
-    """
     possible_amount_fields = [
         "commission",
         "commission_amount",
@@ -186,7 +182,8 @@ def is_ben_target(title, cat1, cat2, cat3):
         "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
         "ปลั๊ก", "ปลั๊กไฟ", "power socket", "รางปลั๊ก", "สายไฟ", "cable",
         "extension", "multimeter", "tester", "switch", "converter", "charger",
-        "usb socket", "socket", "power strip"
+        "usb socket", "socket", "power strip", "adapter", "gaN", "power bank",
+        "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย"
     ]
 
     block_keywords = [
@@ -196,13 +193,14 @@ def is_ben_target(title, cat1, cat2, cat3):
         "beauty", "สบู่", "soap", "ครีม", "skincare", "camping", "เต็นท์",
         "food", "อาหาร", "fashion", "เสื้อ", "รองเท้า", "watch band",
         "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant",
-        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
+        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
+        "iphone case", "lens protection", "watch strap"
     ]
 
-    if any(k in text for k in block_keywords):
+    if any(k.lower() in text for k in block_keywords):
         return False
 
-    return any(k in text for k in allow_keywords)
+    return any(k.lower() in text for k in allow_keywords)
 
 
 def is_smarthome_target(title, cat1, cat2, cat3):
@@ -213,7 +211,7 @@ def is_smarthome_target(title, cat1, cat2, cat3):
         "security camera", "กล้อง", "smart plug", "wifi plug",
         "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
-        "smart switch"
+        "smart switch", "lens protection", "camera lens", "full lens"
     ]
 
     block_keywords = [
@@ -224,10 +222,10 @@ def is_smarthome_target(title, cat1, cat2, cat3):
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
     ]
 
-    if any(k in text for k in block_keywords):
+    if any(k.lower() in text for k in block_keywords):
         return False
 
-    return any(k in text for k in allow_keywords)
+    return any(k.lower() in text for k in allow_keywords)
 
 
 # ---------------------------
@@ -268,7 +266,8 @@ def build_product(row, commission):
 # priority:
 # 1) commission >= 50
 # 2) commission >= 20
-# 3) no post
+# 3) commission >= 10
+# 4) no post
 # ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
@@ -276,9 +275,11 @@ def choose_product(page_mode):
 
     best_50 = None
     best_20 = None
+    best_10 = None
 
     score_50 = -1
     score_20 = -1
+    score_10 = -1
 
     count = 0
 
@@ -344,22 +345,34 @@ def choose_product(page_mode):
                     score_20 = score
                     best_20 = build_product(row, commission)
 
+            elif commission >= 10:
+                score = base_score + (commission * 2.0)
+                if score > score_10:
+                    score_10 = score
+                    best_10 = build_product(row, commission)
+
         except Exception:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
 
-    best = best_50 or best_20
+    best = best_50 or best_20 or best_10
 
     if best:
-        level = "50+" if best["commission"] >= 50 else "20+"
+        if best["commission"] >= 50:
+            level = "50+"
+        elif best["commission"] >= 20:
+            level = "20+"
+        else:
+            level = "10+"
+
         print(
             f"✅ CHOSEN ({level}): {best['title']} | sold={best['sold']} | "
             f"rating={best['rating']} | commission={best['commission']}",
             flush=True
         )
     else:
-        print("❌ No product with commission >= 20", flush=True)
+        print("❌ No product with commission >= 10", flush=True)
 
     return best
 
