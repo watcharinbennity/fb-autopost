@@ -1,50 +1,33 @@
-name: AUTO-POST
+name: fb-autopost
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'
-    - cron: '0 5 * * *'
-    - cron: '30 11 * * *'
-    - cron: '0 14 * * *'
+    - cron: '0 2 * * *'    # 09:00 ไทย
+    - cron: '0 5 * * *'    # 12:00 ไทย
+    - cron: '30 11 * * *'  # 18:30 ไทย
+  workflow_dispatch:
 
 jobs:
-  build:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
+      - name: Install
         run: pip install -r requirements.txt
 
       - name: Run bot
+        run: python app.py
         env:
-          TZ: Asia/Bangkok
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
-          PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
-          PAGE_ACCESS_TOKEN_2: ${{ secrets.PAGE_ACCESS_TOKEN_2 }}
           SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: "gpt-4o-mini"
-          USE_OPENAI: "true"
-          ENABLE_REELS: "false"
-        run: python app.py
 
-      - name: Commit posted history
+      - name: Commit history
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "bot"
+          git config --global user.email "bot@bot.com"
           git add posted.json
-          git diff --cached --quiet || git commit -m "update posted history"
+          git commit -m "update history" || echo "no change"
           git push
