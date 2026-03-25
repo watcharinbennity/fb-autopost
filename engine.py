@@ -120,6 +120,32 @@ def norm_text(v) -> str:
     return str(v or "").strip()
 
 
+def is_valid_shopee_affiliate_link(link: str) -> bool:
+    """
+    ใช้เฉพาะลิงก์ short/affiliate จาก Product Feed
+    """
+    if not link:
+        return False
+
+    l = link.strip().lower()
+    valid_prefixes = [
+        "https://s.shopee.co.th/",
+        "https://shope.ee/",
+        "https://shopee.co.th/universal-link/",
+    ]
+    return any(l.startswith(p) for p in valid_prefixes)
+
+
+def get_affiliate_link(row: Dict) -> str:
+    """
+    ใช้เฉพาะ product_short link ตาม Shopee Product Feed
+    """
+    short_link = norm_text(row.get("product_short link"))
+    if is_valid_shopee_affiliate_link(short_link):
+        return short_link
+    return ""
+
+
 def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
     try:
         print("Streaming CSV...", flush=True)
@@ -160,7 +186,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ปลั๊ก", "ปลั๊กไฟ", "power socket", "รางปลั๊ก", "สายไฟ", "cable",
         "extension", "multimeter", "tester", "switch", "converter", "charger",
         "usb socket", "socket", "power strip", "adapter", "gan", "power bank",
-        "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย"
+        "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย", "ตะขอ", "กาว", "กาวติดผนัง"
     ]
 
     block_keywords = [
@@ -189,7 +215,7 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
         "smart switch", "lens protection", "camera lens", "full lens",
-        "watch strap", "watch active", "redmi watch"
+        "watch strap", "watch active", "redmi watch", "ไฟ led", "led"
     ]
 
     block_keywords = [
@@ -215,8 +241,6 @@ def build_product(row: Dict) -> Dict:
     sold = to_float(row.get("item_sold"))
     rating = to_float(row.get("item_rating"))
     price = to_float(row.get("sale_price"))
-    product_link = norm_text(row.get("product_link"))
-    short_link = norm_text(row.get("product_short link"))
     itemid = norm_text(row.get("itemid"))
 
     cat1 = norm_text(row.get("global_category1"))
@@ -237,7 +261,7 @@ def build_product(row: Dict) -> Dict:
         "sold": sold,
         "rating": rating,
         "price": price,
-        "link": short_link or product_link,
+        "link": get_affiliate_link(row),
         "cat1": cat1,
         "cat2": cat2,
         "cat3": cat3,
@@ -249,6 +273,7 @@ def score_product(row: Dict, page_mode: str) -> float:
     sold = to_float(row.get("item_sold"))
     rating = to_float(row.get("item_rating"))
     price = to_float(row.get("sale_price"))
+    title = norm_text(row.get("title")).lower()
 
     score = (sold * 3.0) + (rating * 120.0)
 
@@ -264,20 +289,17 @@ def score_product(row: Dict, page_mode: str) -> float:
     if rating >= 4.8:
         score += 50
 
-    title = norm_text(row.get("title")).lower()
-
-    # เพิ่มคะแนนให้ของที่ดูกดง่ายขึ้น
     hot_words = [
         "usb", "gan", "power bank", "adapter", "ปลั๊ก", "wifi",
-        "camera", "lens", "full lens", "smart", "switch"
+        "camera", "lens", "full lens", "smart", "switch", "led"
     ]
     if any(k in title for k in hot_words):
         score += 35
 
-    if page_mode == "smart" and ("camera" in title or "smart" in title or "wifi" in title):
+    if page_mode == "smart" and ("camera" in title or "smart" in title or "wifi" in title or "led" in title):
         score += 25
 
-    if page_mode == "ben" and ("ปลั๊ก" in title or "adapter" in title or "gan" in title):
+    if page_mode == "ben" and ("ปลั๊ก" in title or "adapter" in title or "gan" in title or "กาว" in title):
         score += 25
 
     return score
@@ -293,14 +315,13 @@ def choose_product(page_mode: str) -> Optional[Dict]:
     best = None
     best_score = -1
     count = 0
+    no_short_link_count = 0
 
     for row in iter_csv_rows(SHOPEE_CSV_URL):
         try:
             title = norm_text(row.get("title"))
             image = norm_text(row.get("image_link"))
             itemid = norm_text(row.get("itemid"))
-            product_link = norm_text(row.get("product_link"))
-            short_link = norm_text(row.get("product_short link"))
             sold = to_float(row.get("item_sold"))
             rating = to_float(row.get("item_rating"))
 
@@ -313,8 +334,9 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             if not title or not image or not itemid:
                 continue
 
-            link = short_link or product_link
-            if not link:
+            affiliate_link = get_affiliate_link(row)
+            if not affiliate_link:
+                no_short_link_count += 1
                 continue
 
             if rating < 4.0:
@@ -347,6 +369,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
+    print(f"SKIP NO product_short link ({page_mode}): {no_short_link_count}", flush=True)
 
     if best:
         print(
@@ -355,7 +378,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             flush=True
         )
     else:
-        print("❌ No product found", flush=True)
+        print("❌ No product found with valid Shopee affiliate short link", flush=True)
 
     return best
 
@@ -388,7 +411,7 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
     sold_text = f"{int(product['sold']):,}"
     rating_text = f"{product['rating']:.1f}"
 
-    lines = [
+    return "\n".join([
         hook,
         "",
         product["title"],
@@ -399,8 +422,7 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
         "",
         "👉 กดดูราคาล่าสุดตรงนี้:",
         product["link"],
-    ]
-    return "\n".join(lines)
+    ])
 
 
 def generate_caption(product: Dict, page_mode: str) -> str:
@@ -479,7 +501,6 @@ def post_image(page_id: str, access_token: str, product: Dict, caption: str) -> 
     print("Posting to:", page_id, flush=True)
 
     img = download_image(product["image"])
-
     if img:
         try:
             res = requests.post(
@@ -556,7 +577,6 @@ def post_reel_if_possible(page_mode: str, page_id: str, access_token: str, produ
 {product['link']}"""
 
     try:
-        # หมายเหตุ: Reels API อาจต้องใช้ permission เพิ่ม และไฟล์ต้องเป็นวิดีโอจริง
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{page_id}/video_reels",
             data={
@@ -628,9 +648,7 @@ def run_page(page_mode: str, page_id: str, access_token: str) -> Optional[Dict]:
         time.sleep(3)
         comment_link(post_id, access_token, product["link"])
 
-    # โหมด reels จะพยายามโพสต์เฉพาะตอนมี video_url จริง
     post_reel_if_possible(page_mode, page_id, access_token, product)
-
     return product
 
 
