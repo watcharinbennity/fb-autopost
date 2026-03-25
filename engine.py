@@ -107,39 +107,6 @@ def norm_text(v):
     return str(v or "").strip()
 
 
-def get_commission_value(row):
-    possible_amount_fields = [
-        "commission",
-        "commission_amount",
-        "estimated_commission",
-        "est_commission",
-        "affiliate_commission",
-        "earnings",
-        "commission_value",
-    ]
-
-    for field in possible_amount_fields:
-        val = to_float(row.get(field))
-        if val > 0:
-            return val
-
-    possible_rate_fields = [
-        "commission_rate",
-        "affiliate_rate",
-        "rate",
-    ]
-
-    price = to_float(row.get("sale_price"))
-    for field in possible_rate_fields:
-        rate = to_float(row.get(field))
-        if rate > 0 and price > 0:
-            if rate > 1:
-                return price * (rate / 100.0)
-            return price * rate
-
-    return 0.0
-
-
 # ---------------------------
 # csv stream
 # ---------------------------
@@ -182,7 +149,7 @@ def is_ben_target(title, cat1, cat2, cat3):
         "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
         "ปลั๊ก", "ปลั๊กไฟ", "power socket", "รางปลั๊ก", "สายไฟ", "cable",
         "extension", "multimeter", "tester", "switch", "converter", "charger",
-        "usb socket", "socket", "power strip", "adapter", "gaN", "power bank",
+        "usb socket", "socket", "power strip", "adapter", "gan", "power bank",
         "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย"
     ]
 
@@ -194,13 +161,13 @@ def is_ben_target(title, cat1, cat2, cat3):
         "food", "อาหาร", "fashion", "เสื้อ", "รองเท้า", "watch band",
         "สายนาฬิกา", "garden", "gardening", "การเกษตร", "plant",
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
-        "iphone case", "lens protection", "watch strap"
+        "iphone case", "lens protection", "watch strap", "watch active"
     ]
 
-    if any(k.lower() in text for k in block_keywords):
+    if any(k in text for k in block_keywords):
         return False
 
-    return any(k.lower() in text for k in allow_keywords)
+    return any(k in text for k in allow_keywords)
 
 
 def is_smarthome_target(title, cat1, cat2, cat3):
@@ -211,27 +178,28 @@ def is_smarthome_target(title, cat1, cat2, cat3):
         "security camera", "กล้อง", "smart plug", "wifi plug",
         "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
-        "smart switch", "lens protection", "camera lens", "full lens"
+        "smart switch", "lens protection", "camera lens", "full lens",
+        "watch strap", "watch active", "redmi watch"
     ]
 
     block_keywords = [
         "power socket", "รางปลั๊ก", "ปลั๊กพ่วง", "สายไฟ", "extension cord",
         "drill", "ไขควง", "สว่าน", "คีม", "tester", "multimeter",
         "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
-        "garden", "gardening", "food", "อาหาร", "watch band", "สายนาฬิกา",
+        "garden", "gardening", "food", "อาหาร",
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
     ]
 
-    if any(k.lower() in text for k in block_keywords):
+    if any(k in text for k in block_keywords):
         return False
 
-    return any(k.lower() in text for k in allow_keywords)
+    return any(k in text for k in allow_keywords)
 
 
 # ---------------------------
 # product builder
 # ---------------------------
-def build_product(row, commission):
+def build_product(row):
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
     sold = to_float(row.get("item_sold"))
@@ -253,7 +221,6 @@ def build_product(row, commission):
         "sold": sold,
         "rating": rating,
         "price": price,
-        "commission": commission,
         "link": short_link or product_link,
         "cat1": cat1,
         "cat2": cat2,
@@ -263,24 +230,14 @@ def build_product(row, commission):
 
 # ---------------------------
 # choose product
-# priority:
-# 1) commission >= 50
-# 2) commission >= 20
-# 3) commission >= 10
-# 4) no post
+# based on category + sold + rating + price
 # ---------------------------
 def choose_product(page_mode):
     posted = load_posted()
     page_history = posted[page_mode]
 
-    best_50 = None
-    best_20 = None
-    best_10 = None
-
-    score_50 = -1
-    score_20 = -1
-    score_10 = -1
-
+    best = None
+    best_score = -1
     count = 0
 
     for row in iter_csv_rows(SHOPEE_CSV_URL):
@@ -297,8 +254,6 @@ def choose_product(page_mode):
             cat1 = norm_text(row.get("global_category1"))
             cat2 = norm_text(row.get("global_category2"))
             cat3 = norm_text(row.get("global_category3"))
-
-            commission = get_commission_value(row)
 
             count += 1
 
@@ -326,53 +281,31 @@ def choose_product(page_mode):
                 if not is_smarthome_target(title, cat1, cat2, cat3):
                     continue
 
-            base_score = (sold * 3.0) + (rating * 120.0)
+            score = (sold * 3.0) + (rating * 120.0)
 
             if 80 <= price <= 3000:
-                base_score += 25
+                score += 25
 
-            if commission >= 50:
-                score = base_score + (commission * 5.0)
-                if score > score_50:
-                    score_50 = score
-                    best_50 = build_product(row, commission)
-                    if score > 1300:
-                        break
+            if score > best_score:
+                best_score = score
+                best = build_product(row)
 
-            elif commission >= 20:
-                score = base_score + (commission * 3.0)
-                if score > score_20:
-                    score_20 = score
-                    best_20 = build_product(row, commission)
-
-            elif commission >= 10:
-                score = base_score + (commission * 2.0)
-                if score > score_10:
-                    score_10 = score
-                    best_10 = build_product(row, commission)
+                if score > 1800:
+                    break
 
         except Exception:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
 
-    best = best_50 or best_20 or best_10
-
     if best:
-        if best["commission"] >= 50:
-            level = "50+"
-        elif best["commission"] >= 20:
-            level = "20+"
-        else:
-            level = "10+"
-
         print(
-            f"✅ CHOSEN ({level}): {best['title']} | sold={best['sold']} | "
-            f"rating={best['rating']} | commission={best['commission']}",
+            f"✅ CHOSEN: {best['title']} | sold={best['sold']} | "
+            f"rating={best['rating']} | price={best['price']}",
             flush=True
         )
     else:
-        print("❌ No product with commission >= 10", flush=True)
+        print("❌ No product found", flush=True)
 
     return best
 
@@ -556,7 +489,6 @@ def run_page(page_mode, page_id, access_token):
 
     print("IMAGE URL:", product["image"], flush=True)
     print("LINK:", product["link"], flush=True)
-    print("COMMISSION:", product["commission"], flush=True)
 
     caption = generate_caption(product, page_mode)
     post_id = post_product(page_id, access_token, product, caption)
