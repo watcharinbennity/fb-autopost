@@ -4,7 +4,7 @@ import os
 import time
 import requests
 
-MAX_ROWS = 60000
+MAX_ROWS = 250000
 TIMEOUT = 20
 POSTED_FILE = "posted.json"
 
