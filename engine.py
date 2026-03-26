@@ -26,7 +26,15 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 
+SHORTENER_BASE_URL = os.getenv(
+    "SHORTENER_BASE_URL",
+    "https://ben-shortener.bennity.workers.dev"
+).strip()
 
+
+# ---------------------------
+# storage
+# ---------------------------
 def load_posted() -> Dict:
     default_data = {
         "ben": {"items": [], "images": [], "titles": []},
@@ -96,6 +104,9 @@ def mark_as_posted(page_mode: str, itemid: str, image_key: str, title: str) -> N
     save_posted(posted)
 
 
+# ---------------------------
+# helpers
+# ---------------------------
 def to_float(v) -> float:
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -132,21 +143,23 @@ def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
             yield row
 
 
+# ---------------------------
+# shortener
+# ---------------------------
+def wrap_with_shortener(url: str) -> str:
+    if not url:
+        return ""
+    return f"{SHORTENER_BASE_URL.rstrip('/')}/?url={quote(url, safe='')}"
+
+
+# ---------------------------
+# shopee affiliate link
+# ---------------------------
 def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
-    """
-    ทำตามขั้นตอน Shopee:
-    1) ใช้ landing page จาก product_link
-    2) encode ทั้งลิงก์
-    3) ประกอบ an_redir
-    4) เติม affiliate_id + sub_id
-    """
     landing_page = norm_text(row.get("product_link"))
     itemid = norm_text(row.get("itemid"))
 
-    if not landing_page:
-        return ""
-
-    if not SHOPEE_AFFILIATE_ID:
+    if not landing_page or not itemid or not SHOPEE_AFFILIATE_ID:
         return ""
 
     encoded = quote(landing_page, safe="")
@@ -160,32 +173,73 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     )
 
 
+# ---------------------------
+# theme filters
+# ---------------------------
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
     allow_keywords = [
-        "electrical", "tools", "tool", "drill", "ไขควง", "สว่าน", "คีม",
-        "ปลั๊ก", "ปลั๊กไฟ", "power socket", "รางปลั๊ก", "สายไฟ", "cable",
-        "extension", "multimeter", "tester", "switch", "converter", "charger",
-        "usb socket", "socket", "power strip", "adapter", "gan", "power bank",
-        "แบตเตอรี่", "เครื่องมือ", "ไฟฉาย", "ตะขอ", "กาว", "กาวติดผนัง",
-        "พุก", "น็อต", "สกรู", "filter", "air purifier filter"
+        # ไฟฟ้า / ปลั๊ก / สายไฟ
+        "electrical", "electric", "ไฟฟ้า", "อุปกรณ์ไฟฟ้า",
+        "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง", "เต้ารับ", "เต้าเสียบ",
+        "power socket", "socket", "power strip", "extension", "extension cord",
+        "สายไฟ", "cable", "wire", "usb socket", "adapter", "charger", "gan",
+        "converter", "transformer", "เบรกเกอร์", "breaker", "switch", "สวิตช์",
+        "หลอดไฟ", "led", "ไฟฉาย", "โคมไฟ",
+
+        # เครื่องมือช่าง
+        "tools", "tool", "เครื่องมือ", "เครื่องมือช่าง",
+        "drill", "สว่าน", "ไขควง", "คีม", "ประแจ", "ค้อน", "เลื่อย",
+        "multimeter", "tester", "เทสเตอร์", "มิเตอร์ไฟ",
+
+        # วัสดุยึด / ซ่อม / ติดตั้ง
+        "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
+        "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
+        "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
+
+        # อะไหล่บ้านเชิงช่าง
+        "filter", "air purifier filter"
     ]
 
     block_keywords = [
-        "smart home", "camera", "cctv", "ip camera", "security camera",
-        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell",
-        "smart plug", "smart bulb", "smart switch", "mesh", "router",
+        # แฟชั่น/ความงาม/เสื้อผ้า
+        "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน", "แฟชั่น",
+        "fashion", "beauty", "cosmetic", "skincare", "สบู่", "soap", "ครีม",
+        "lip", "ลิป", "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "หมวก",
+
+        # มือถือ/อุปกรณ์เสริมที่ไม่ใช่งานไฟฟ้าบ้าน
         "iphone", "ipad", "macbook", "airpods", "apple watch",
-        "case", "lens protection", "full lens", "watch strap", "watch active",
-        "beauty", "สบู่", "soap", "ครีม", "skincare", "fashion", "เสื้อ", "รองเท้า",
-        "food", "อาหาร", "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ"
+        "case", "เคส", "lens protection", "full lens", "watch strap",
+
+        # smart home / กล้อง ให้ไปเพจ smart
+        "smart home", "camera", "cctv", "ip camera", "security camera",
+        "กล้อง", "กล้องติดรถ", "dash cam", "smart plug", "smart bulb",
+        "smart switch", "router", "mesh", "wifi", "sensor", "doorbell",
+
+        # ของใช้ทั่วไปที่ไม่ตรงเพจ
+        "robot vacuum", "หุ่นยนต์ดูดฝุ่น",
+        "food", "อาหาร", "ขนม", "ของเล่น", "toy",
+        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
+        "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน"
     ]
 
     if any(k in text for k in block_keywords):
         return False
 
     return any(k in text for k in allow_keywords)
+
+
+def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
+    text = f"{title} {cat1} {cat2} {cat3}".lower()
+    hard_blocks = [
+        "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน",
+        "fashion", "beauty", "cosmetic", "skincare", "สบู่", "ครีม",
+        "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า",
+        "iphone case", "เคสมือถือ", "lens protection", "full lens",
+        "watch strap", "smart watch", "apple watch strap"
+    ]
+    return any(k in text for k in hard_blocks)
 
 
 def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
@@ -198,7 +252,7 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
         "smart switch", "lens protection", "camera lens", "full lens",
         "watch strap", "watch active", "redmi watch", "led", "ไฟ led",
-        "air purifier", "purifier", "filter"
+        "air purifier", "purifier", "filter", "dash cam", "กล้องติดรถ"
     ]
 
     block_keywords = [
@@ -214,6 +268,9 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     return any(k in text for k in allow_keywords)
 
 
+# ---------------------------
+# build + score
+# ---------------------------
 def build_product(row: Dict, page_mode: str) -> Dict:
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
@@ -226,6 +283,9 @@ def build_product(row: Dict, page_mode: str) -> Dict:
     cat2 = norm_text(row.get("global_category2"))
     cat3 = norm_text(row.get("global_category3"))
 
+    long_aff_link = build_shopee_affiliate_link(row, page_mode)
+    final_link = wrap_with_shortener(long_aff_link) if long_aff_link else ""
+
     return {
         "itemid": itemid,
         "title": title,
@@ -234,7 +294,7 @@ def build_product(row: Dict, page_mode: str) -> Dict:
         "sold": sold,
         "rating": rating,
         "price": price,
-        "link": build_shopee_affiliate_link(row, page_mode),
+        "link": final_link,
         "cat1": cat1,
         "cat2": cat2,
         "cat3": cat3,
@@ -268,12 +328,15 @@ def score_product(row: Dict, page_mode: str) -> float:
     if page_mode == "smart" and any(k in title for k in ["camera", "smart", "wifi", "led", "filter"]):
         score += 25
 
-    if page_mode == "ben" and any(k in title for k in ["ปลั๊ก", "adapter", "gan", "กาว", "พุก", "น็อต", "สกรู"]):
+    if page_mode == "ben" and any(k in title for k in ["ปลั๊ก", "adapter", "gan", "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน"]):
         score += 25
 
     return score
 
 
+# ---------------------------
+# choose product
+# ---------------------------
 def choose_product(page_mode: str) -> Optional[Dict]:
     posted = load_posted()
     page_history = posted[page_mode]
@@ -300,14 +363,13 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             if not title or not image or not itemid:
                 continue
 
-            affiliate_link = build_shopee_affiliate_link(row, page_mode)
-            if not affiliate_link:
+            long_aff_link = build_shopee_affiliate_link(row, page_mode)
+            if not long_aff_link:
                 no_link_count += 1
                 continue
 
             if rating < 4.0:
                 continue
-
             if sold < 20:
                 continue
 
@@ -316,6 +378,8 @@ def choose_product(page_mode: str) -> Optional[Dict]:
                 continue
 
             if page_mode == "ben":
+                if is_hard_block_for_ben(title, cat1, cat2, cat3):
+                    continue
                 if not is_ben_target(title, cat1, cat2, cat3):
                     continue
             else:
@@ -338,12 +402,16 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             f"✅ CHOSEN: {best['title']} | sold={best['sold']} | rating={best['rating']} | price={best['price']}",
             flush=True
         )
+        print("FINAL LINK:", best["link"], flush=True)
     else:
         print("❌ No product found", flush=True)
 
     return best
 
 
+# ---------------------------
+# caption
+# ---------------------------
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ ของแนวนี้กำลังขายดี กดดูตัวนี้ก่อน",
@@ -439,6 +507,9 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
+# ---------------------------
+# post
+# ---------------------------
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     try:
         res = requests.post(
