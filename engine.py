@@ -180,44 +180,30 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
     allow_keywords = [
-        # ไฟฟ้า / ปลั๊ก / สายไฟ
         "electrical", "electric", "ไฟฟ้า", "อุปกรณ์ไฟฟ้า",
         "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง", "เต้ารับ", "เต้าเสียบ",
         "power socket", "socket", "power strip", "extension", "extension cord",
         "สายไฟ", "cable", "wire", "usb socket", "adapter", "charger", "gan",
         "converter", "transformer", "เบรกเกอร์", "breaker", "switch", "สวิตช์",
         "หลอดไฟ", "led", "ไฟฉาย", "โคมไฟ",
-
-        # เครื่องมือช่าง
         "tools", "tool", "เครื่องมือ", "เครื่องมือช่าง",
         "drill", "สว่าน", "ไขควง", "คีม", "ประแจ", "ค้อน", "เลื่อย",
         "multimeter", "tester", "เทสเตอร์", "มิเตอร์ไฟ",
-
-        # วัสดุยึด / ซ่อม / ติดตั้ง
         "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
         "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
         "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
-
-        # อะไหล่บ้านเชิงช่าง
         "filter", "air purifier filter"
     ]
 
     block_keywords = [
-        # แฟชั่น/ความงาม/เสื้อผ้า
         "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน", "แฟชั่น",
         "fashion", "beauty", "cosmetic", "skincare", "สบู่", "soap", "ครีม",
         "lip", "ลิป", "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "หมวก",
-
-        # มือถือ/อุปกรณ์เสริมที่ไม่ใช่งานไฟฟ้าบ้าน
         "iphone", "ipad", "macbook", "airpods", "apple watch",
         "case", "เคส", "lens protection", "full lens", "watch strap",
-
-        # smart home / กล้อง ให้ไปเพจ smart
         "smart home", "camera", "cctv", "ip camera", "security camera",
         "กล้อง", "กล้องติดรถ", "dash cam", "smart plug", "smart bulb",
         "smart switch", "router", "mesh", "wifi", "sensor", "doorbell",
-
-        # ของใช้ทั่วไปที่ไม่ตรงเพจ
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น",
         "food", "อาหาร", "ขนม", "ของเล่น", "toy",
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
@@ -444,8 +430,7 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
         f"🛒 ขายแล้ว {sold_text} ชิ้น",
         "📌 ของกำลังมาแรง คนสนใจเยอะ",
         "",
-        "👉 กดดูราคาล่าสุดตรงนี้:",
-        product["link"],
+        "👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์",
     ])
 
 
@@ -474,7 +459,8 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
 - ไม่ใส่ค่าคอม
-- บรรทัดท้ายให้ชวนกดดูราคา
+- ไม่ใส่ลิงก์ในแคปชัน
+- ปิดท้ายให้คนไปกดดูที่คอมเมนต์ใต้โพสต์
 """.strip()
 
     try:
@@ -501,7 +487,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         if not content:
             return fallback_caption(product, page_mode)
 
-        return f"{content}\n\n👉 กดดูราคาล่าสุดตรงนี้:\n{product['link']}"
+        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์"
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback_caption(product, page_mode)
