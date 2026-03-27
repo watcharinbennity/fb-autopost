@@ -198,7 +198,8 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
         "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
         "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
-        "filter", "air purifier filter", "เทปใส", "เทปนาโน", "กาวสองหน้า"
+        "filter", "air purifier filter", "เทปใส", "เทปนาโน", "กาวสองหน้า",
+        "เครื่องฉีดน้ำ", "เครื่องล้างรถ", "pressure washer", "ปืนฉีดน้ำ"
     ]
 
     block_keywords = [
@@ -311,7 +312,7 @@ def score_product(row: Dict, page_mode: str) -> float:
     hot_words = [
         "usb", "gan", "power bank", "adapter", "ปลั๊ก", "switch",
         "led", "สายไฟ", "สว่าน", "ไขควง", "กาว", "พุก", "สกรู",
-        "เทป", "เทปใส", "เทปนาโน"
+        "เทป", "เทปใส", "เทปนาโน", "pressure washer", "เครื่องฉีดน้ำ"
     ]
     if any(k in title for k in hot_words):
         score += 35
@@ -321,7 +322,8 @@ def score_product(row: Dict, page_mode: str) -> float:
 
     if page_mode == "ben" and any(k in title for k in [
         "ปลั๊ก", "adapter", "gan", "charger", "usb-c",
-        "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน", "เทป", "เครื่องมือ"
+        "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน", "เทป", "เครื่องมือ",
+        "pressure washer", "เครื่องฉีดน้ำ", "ปืนฉีดน้ำ"
     ]):
         score += 25
 
@@ -462,8 +464,11 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
 - ไม่ใส่ค่าคอม
-- ปิดท้ายด้วยการชวนกดลิงก์
-- แทรกลิงก์สั้น 1 บรรทัดท้ายสุด
+- ห้ามใส่ markdown link
+- ห้ามใส่วงเล็บลิงก์
+- ห้ามใส่คำว่า [คลิกเลย]
+- ห้ามใส่ URL ใด ๆ ในเนื้อหา
+- ปิดท้ายเป็นคำชวนกดดูรายละเอียด
 """.strip()
 
     try:
@@ -489,6 +494,35 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 
         if not content:
             return fallback_caption(product, page_mode)
+
+        bad_words = [
+            "[คลิกเลย]",
+            "(คลิกเลย)",
+            "คลิกเลย",
+            "[ลิงก์สินค้า]",
+            "(ลิงก์สินค้า)",
+            "[ดูเพิ่มเติม]",
+            "(ดูเพิ่มเติม)",
+            "https://shortlink.com",
+            "http://shortlink.com",
+        ]
+
+        for w in bad_words:
+            content = content.replace(w, "")
+
+        lines = [line.strip() for line in content.splitlines()]
+        cleaned = []
+        prev_blank = False
+        for line in lines:
+            if not line:
+                if not prev_blank:
+                    cleaned.append("")
+                prev_blank = True
+            else:
+                cleaned.append(line)
+                prev_blank = False
+
+        content = "\n".join(cleaned).strip()
 
         return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
     except Exception as e:
