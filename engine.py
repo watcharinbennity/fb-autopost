@@ -182,6 +182,45 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     )
 
 
+def get_csv_short_link(row: Dict) -> str:
+    candidates = [
+        "product_short link",
+        "product_short_link",
+        "product short link",
+        "short_link",
+        "short link",
+    ]
+
+    for key in candidates:
+        val = norm_text(row.get(key))
+        if val.startswith("http"):
+            return val
+
+    return ""
+
+
+def pick_best_link(row: Dict, page_mode: str) -> str:
+    itemid = norm_text(row.get("itemid"))
+
+    csv_short = get_csv_short_link(row)
+    if csv_short:
+        print(f"USE CSV SHORT LINK ({page_mode}): {itemid}", flush=True)
+        return csv_short
+
+    long_aff_link = build_shopee_affiliate_link(row, page_mode)
+    if not long_aff_link:
+        return ""
+
+    if SHORTENER_BASE_URL:
+        slug = f"{page_mode}-{itemid}".lower()
+        short_link = create_real_short_link(long_aff_link, slug)
+        if short_link:
+            print(f"USE WORKER SHORT LINK ({page_mode}): {itemid}", flush=True)
+            return short_link
+
+    return long_aff_link
+
+
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -198,8 +237,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
         "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
         "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
-        "filter", "air purifier filter", "เทปใส", "เทปนาโน", "กาวสองหน้า",
-        "เครื่องฉีดน้ำ", "เครื่องล้างรถ", "pressure washer", "ปืนฉีดน้ำ"
+        "filter", "air purifier filter"
     ]
 
     block_keywords = [
@@ -213,6 +251,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "smart switch", "router", "mesh", "wifi", "sensor", "doorbell",
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น",
         "food", "อาหาร", "ขนม", "ของเล่น", "toy",
+        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
         "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน"
     ]
 
@@ -272,10 +311,7 @@ def build_product(row: Dict, page_mode: str) -> Dict:
     cat2 = norm_text(row.get("global_category2"))
     cat3 = norm_text(row.get("global_category3"))
 
-    long_aff_link = build_shopee_affiliate_link(row, page_mode)
-
-    slug = f"{page_mode}-{itemid}".lower()
-    final_link = create_real_short_link(long_aff_link, slug) if long_aff_link else ""
+    final_link = pick_best_link(row, page_mode)
 
     return {
         "itemid": itemid,
@@ -300,7 +336,7 @@ def score_product(row: Dict, page_mode: str) -> float:
 
     score = (sold * 3.0) + (rating * 120.0)
 
-    if 50 <= price <= 3000:
+    if 80 <= price <= 3000:
         score += 25
     if sold >= 500:
         score += 80
@@ -310,9 +346,8 @@ def score_product(row: Dict, page_mode: str) -> float:
         score += 50
 
     hot_words = [
-        "usb", "gan", "power bank", "adapter", "ปลั๊ก", "switch",
-        "led", "สายไฟ", "สว่าน", "ไขควง", "กาว", "พุก", "สกรู",
-        "เทป", "เทปใส", "เทปนาโน", "pressure washer", "เครื่องฉีดน้ำ"
+        "usb", "gan", "power bank", "adapter", "ปลั๊ก", "wifi",
+        "camera", "smart", "switch", "led", "พุก", "กาว", "ตะขอ", "filter"
     ]
     if any(k in title for k in hot_words):
         score += 35
@@ -320,11 +355,7 @@ def score_product(row: Dict, page_mode: str) -> float:
     if page_mode == "smart" and any(k in title for k in ["camera", "smart", "wifi", "led", "filter"]):
         score += 25
 
-    if page_mode == "ben" and any(k in title for k in [
-        "ปลั๊ก", "adapter", "gan", "charger", "usb-c",
-        "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน", "เทป", "เครื่องมือ",
-        "pressure washer", "เครื่องฉีดน้ำ", "ปืนฉีดน้ำ"
-    ]):
+    if page_mode == "ben" and any(k in title for k in ["ปลั๊ก", "adapter", "gan", "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน"]):
         score += 25
 
     return score
@@ -356,8 +387,8 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             if not title or not image or not itemid:
                 continue
 
-            long_aff_link = build_shopee_affiliate_link(row, page_mode)
-            if not long_aff_link:
+            link_check = pick_best_link(row, page_mode)
+            if not link_check:
                 no_link_count += 1
                 continue
 
@@ -388,7 +419,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             continue
 
     print(f"SCAN DONE ({page_mode}): {count}", flush=True)
-    print(f"SKIP NO affiliate link ({page_mode}): {no_link_count}", flush=True)
+    print(f"SKIP NO link ({page_mode}): {no_link_count}", flush=True)
 
     if best:
         print(
@@ -405,7 +436,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ ของแนวนี้กำลังขายดี กดดูตัวนี้ก่อน",
-        "🔥 ของใช้สายช่างและซ่อมบ้าน ตัวนี้น่าสนใจมาก",
+        "🔥 สายช่างและสายบ้านน่าดูตัวนี้มาก",
         "👀 รีวิวดี คนซื้อเยอะ ใช้งานจริง",
         "🛠 ของใช้คุ้ม ๆ ตัวนี้กำลังมาแรง",
     ]
@@ -434,8 +465,7 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
         f"🛒 ขายแล้ว {sold_text} ชิ้น",
         "📌 ของกำลังมาแรง คนสนใจเยอะ",
         "",
-        "👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้",
-        product["link"],
+        "👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์",
     ])
 
 
@@ -444,7 +474,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
     sold_text = f"{int(product['sold']):,}"
-    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่าง งานไฟฟ้า และของใช้ซ่อมบ้าน"
+    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและงานไฟฟ้า"
 
     prompt = f"""
 เขียนแคปชัน Facebook ภาษาไทยแบบเพิ่มยอดคลิก สำหรับ {page_desc}
@@ -464,11 +494,8 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
 - ไม่ใส่ค่าคอม
-- ห้ามใส่ markdown link
-- ห้ามใส่วงเล็บลิงก์
-- ห้ามใส่คำว่า [คลิกเลย]
-- ห้ามใส่ URL ใด ๆ ในเนื้อหา
-- ปิดท้ายเป็นคำชวนกดดูรายละเอียด
+- ไม่ใส่ลิงก์ในแคปชัน
+- ปิดท้ายให้คนไปกดดูที่คอมเมนต์ใต้โพสต์
 """.strip()
 
     try:
@@ -495,36 +522,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         if not content:
             return fallback_caption(product, page_mode)
 
-        bad_words = [
-            "[คลิกเลย]",
-            "(คลิกเลย)",
-            "คลิกเลย",
-            "[ลิงก์สินค้า]",
-            "(ลิงก์สินค้า)",
-            "[ดูเพิ่มเติม]",
-            "(ดูเพิ่มเติม)",
-            "https://shortlink.com",
-            "http://shortlink.com",
-        ]
-
-        for w in bad_words:
-            content = content.replace(w, "")
-
-        lines = [line.strip() for line in content.splitlines()]
-        cleaned = []
-        prev_blank = False
-        for line in lines:
-            if not line:
-                if not prev_blank:
-                    cleaned.append("")
-                prev_blank = True
-            else:
-                cleaned.append(line)
-                prev_blank = False
-
-        content = "\n".join(cleaned).strip()
-
-        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
+        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์"
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback_caption(product, page_mode)
@@ -559,7 +557,7 @@ def comment_link(post_id: str, access_token: str, link: str) -> None:
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{post_id}/comments",
             data={
-                "message": f"🛒 สั่งซื้อ / ดูราคาล่าสุด\n{link}",
+                "message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}",
                 "access_token": access_token
             },
             timeout=TIMEOUT
