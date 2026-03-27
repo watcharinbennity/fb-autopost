@@ -3,15 +3,15 @@ name: AUTO-POST
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'
-    - cron: '0 5 * * *'
-    - cron: '30 11 * * *'
-    - cron: '0 14 * * *'
+    - cron: '0 2 * * *'      # 09:00 ไทย
+    - cron: '0 5 * * *'      # 12:00 ไทย
+    - cron: '30 11 * * *'    # 18:30 ไทย
+    - cron: '0 14 * * *'     # 21:00 ไทย
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: write
 
