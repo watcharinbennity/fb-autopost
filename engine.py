@@ -32,6 +32,9 @@ SHORTENER_BASE_URL = os.getenv(
 ).strip()
 
 
+# ---------------------------
+# storage
+# ---------------------------
 def load_posted() -> Dict:
     default_data = {
         "ben": {"items": [], "images": [], "titles": []},
@@ -101,6 +104,9 @@ def mark_as_posted(page_mode: str, itemid: str, image_key: str, title: str) -> N
     save_posted(posted)
 
 
+# ---------------------------
+# helpers
+# ---------------------------
 def to_float(v) -> float:
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -137,6 +143,9 @@ def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
             yield row
 
 
+# ---------------------------
+# link builders
+# ---------------------------
 def create_real_short_link(long_url: str, slug: str) -> str:
     if not long_url:
         return ""
@@ -199,28 +208,31 @@ def get_csv_short_link(row: Dict) -> str:
     return ""
 
 
-def pick_best_link(row: Dict, page_mode: str) -> str:
+def pick_best_link(row: Dict, page_mode: str) -> tuple[str, str]:
     itemid = norm_text(row.get("itemid"))
 
     csv_short = get_csv_short_link(row)
     if csv_short:
-        print(f"USE CSV SHORT LINK ({page_mode}): {itemid}", flush=True)
-        return csv_short
+        return csv_short, "csv_short"
 
     long_aff_link = build_shopee_affiliate_link(row, page_mode)
     if not long_aff_link:
-        return ""
+        return "", "none"
 
     if SHORTENER_BASE_URL:
         slug = f"{page_mode}-{itemid}".lower()
         short_link = create_real_short_link(long_aff_link, slug)
+        if short_link and short_link != long_aff_link:
+            return short_link, "worker_short"
         if short_link:
-            print(f"USE WORKER SHORT LINK ({page_mode}): {itemid}", flush=True)
-            return short_link
+            return short_link, "affiliate_long"
 
-    return long_aff_link
+    return long_aff_link, "affiliate_long"
 
 
+# ---------------------------
+# theme filters
+# ---------------------------
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -299,6 +311,9 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     return any(k in text for k in allow_keywords)
 
 
+# ---------------------------
+# build + score
+# ---------------------------
 def build_product(row: Dict, page_mode: str) -> Dict:
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
@@ -311,7 +326,7 @@ def build_product(row: Dict, page_mode: str) -> Dict:
     cat2 = norm_text(row.get("global_category2"))
     cat3 = norm_text(row.get("global_category3"))
 
-    final_link = pick_best_link(row, page_mode)
+    final_link, link_source = pick_best_link(row, page_mode)
 
     return {
         "itemid": itemid,
@@ -322,6 +337,7 @@ def build_product(row: Dict, page_mode: str) -> Dict:
         "rating": rating,
         "price": price,
         "link": final_link,
+        "link_source": link_source,
         "cat1": cat1,
         "cat2": cat2,
         "cat3": cat3,
@@ -361,6 +377,9 @@ def score_product(row: Dict, page_mode: str) -> float:
     return score
 
 
+# ---------------------------
+# choose product
+# ---------------------------
 def choose_product(page_mode: str) -> Optional[Dict]:
     posted = load_posted()
     page_history = posted[page_mode]
@@ -387,7 +406,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             if not title or not image or not itemid:
                 continue
 
-            link_check = pick_best_link(row, page_mode)
+            link_check, _ = pick_best_link(row, page_mode)
             if not link_check:
                 no_link_count += 1
                 continue
@@ -426,6 +445,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             f"✅ CHOSEN: {best['title']} | sold={best['sold']} | rating={best['rating']} | price={best['price']}",
             flush=True
         )
+        print("LINK SOURCE:", best["link_source"], flush=True)
         print("FINAL LINK:", best["link"], flush=True)
     else:
         print("❌ No product found", flush=True)
@@ -433,6 +453,9 @@ def choose_product(page_mode: str) -> Optional[Dict]:
     return best
 
 
+# ---------------------------
+# caption
+# ---------------------------
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ ของแนวนี้กำลังขายดี กดดูตัวนี้ก่อน",
@@ -528,6 +551,9 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
+# ---------------------------
+# post
+# ---------------------------
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     try:
         res = requests.post(
