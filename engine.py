@@ -444,7 +444,8 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
         f"🛒 ขายแล้ว {sold_text} ชิ้น",
         "📌 ของกำลังมาแรง คนสนใจเยอะ",
         "",
-        "👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์",
+        "👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้",
+        product["link"],
     ])
 
 
@@ -473,8 +474,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
 - ไม่ใส่ค่าคอม
-- ไม่ใส่ลิงก์ในแคปชัน
-- ปิดท้ายให้คนไปกดดูที่คอมเมนต์ใต้โพสต์
+- ปิดท้ายให้คนกดลิงก์ด้านล่าง
 """.strip()
 
     try:
@@ -501,7 +501,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         if not content:
             return fallback_caption(product, page_mode)
 
-        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์"
+        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback_caption(product, page_mode)
