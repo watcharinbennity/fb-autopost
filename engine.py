@@ -144,7 +144,7 @@ def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
 
 
 # ---------------------------
-# link builders
+# shortener
 # ---------------------------
 def create_real_short_link(long_url: str, slug: str) -> str:
     if not long_url:
@@ -173,6 +173,9 @@ def create_real_short_link(long_url: str, slug: str) -> str:
         return long_url
 
 
+# ---------------------------
+# shopee affiliate link
+# ---------------------------
 def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     landing_page = norm_text(row.get("product_link"))
     itemid = norm_text(row.get("itemid"))
@@ -191,29 +194,8 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     )
 
 
-def get_csv_short_link(row: Dict) -> str:
-    candidates = [
-        "product_short link",
-        "product_short_link",
-        "product short link",
-        "short_link",
-        "short link",
-    ]
-
-    for key in candidates:
-        val = norm_text(row.get(key))
-        if val.startswith("http"):
-            return val
-
-    return ""
-
-
 def pick_best_link(row: Dict, page_mode: str) -> tuple[str, str]:
     itemid = norm_text(row.get("itemid"))
-
-    csv_short = get_csv_short_link(row)
-    if csv_short:
-        return csv_short, "csv_short"
 
     long_aff_link = build_shopee_affiliate_link(row, page_mode)
     if not long_aff_link:
@@ -264,7 +246,9 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น",
         "food", "อาหาร", "ขนม", "ของเล่น", "toy",
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
-        "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน"
+        "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน",
+        "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์", "สติ๊กเกอร์",
+        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag"
     ]
 
     if any(k in text for k in block_keywords):
@@ -280,7 +264,9 @@ def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "fashion", "beauty", "cosmetic", "skincare", "สบู่", "ครีม",
         "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า",
         "iphone case", "เคสมือถือ", "lens protection", "full lens",
-        "watch strap", "smart watch", "apple watch strap"
+        "watch strap", "smart watch", "apple watch strap",
+        "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์", "สติ๊กเกอร์",
+        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag"
     ]
     return any(k in text for k in hard_blocks)
 
@@ -302,7 +288,8 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "power socket", "รางปลั๊ก", "ปลั๊กพ่วง", "สายไฟ", "extension cord",
         "drill", "ไขควง", "สว่าน", "คีม", "tester", "multimeter",
         "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
-        "food", "อาหาร", "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas"
+        "food", "อาหาร", "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas",
+        "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์"
     ]
 
     if any(k in text for k in block_keywords):
@@ -362,8 +349,8 @@ def score_product(row: Dict, page_mode: str) -> float:
         score += 50
 
     hot_words = [
-        "usb", "gan", "power bank", "adapter", "ปลั๊ก", "wifi",
-        "camera", "smart", "switch", "led", "พุก", "กาว", "ตะขอ", "filter"
+        "usb", "gan", "power bank", "adapter", "ปลั๊ก",
+        "switch", "led", "พุก", "กาว", "ตะขอ", "filter"
     ]
     if any(k in title for k in hot_words):
         score += 35
