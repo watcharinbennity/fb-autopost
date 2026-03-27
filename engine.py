@@ -32,9 +32,6 @@ SHORTENER_BASE_URL = os.getenv(
 ).strip()
 
 
-# ---------------------------
-# storage
-# ---------------------------
 def load_posted() -> Dict:
     default_data = {
         "ben": {"items": [], "images": [], "titles": []},
@@ -104,9 +101,6 @@ def mark_as_posted(page_mode: str, itemid: str, image_key: str, title: str) -> N
     save_posted(posted)
 
 
-# ---------------------------
-# helpers
-# ---------------------------
 def to_float(v) -> float:
     try:
         return float(str(v).replace(",", "").strip() or 0)
@@ -143,18 +137,33 @@ def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
             yield row
 
 
-# ---------------------------
-# shortener
-# ---------------------------
-def wrap_with_shortener(url: str) -> str:
-    if not url:
+def create_real_short_link(long_url: str, slug: str) -> str:
+    if not long_url:
         return ""
-    return f"{SHORTENER_BASE_URL.rstrip('/')}/?url={quote(url, safe='')}"
+
+    if not SHORTENER_BASE_URL:
+        return long_url
+
+    base = SHORTENER_BASE_URL.rstrip("/")
+    create_url = f"{base}/create?target={quote(long_url, safe='')}&slug={quote(slug, safe='')}"
+
+    try:
+        res = requests.get(create_url, timeout=20)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("ok") and data.get("short_url"):
+                return data["short_url"]
+
+        if res.status_code == 409:
+            return f"{base}/{slug}"
+
+        print("SHORTENER ERROR:", res.status_code, res.text[:300], flush=True)
+        return long_url
+    except Exception as e:
+        print("SHORTENER EXCEPTION:", e, flush=True)
+        return long_url
 
 
-# ---------------------------
-# shopee affiliate link
-# ---------------------------
 def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     landing_page = norm_text(row.get("product_link"))
     itemid = norm_text(row.get("itemid"))
@@ -173,9 +182,6 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
     )
 
 
-# ---------------------------
-# theme filters
-# ---------------------------
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -254,9 +260,6 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     return any(k in text for k in allow_keywords)
 
 
-# ---------------------------
-# build + score
-# ---------------------------
 def build_product(row: Dict, page_mode: str) -> Dict:
     title = norm_text(row.get("title"))
     image = norm_text(row.get("image_link"))
@@ -270,7 +273,9 @@ def build_product(row: Dict, page_mode: str) -> Dict:
     cat3 = norm_text(row.get("global_category3"))
 
     long_aff_link = build_shopee_affiliate_link(row, page_mode)
-    final_link = wrap_with_shortener(long_aff_link) if long_aff_link else ""
+
+    slug = f"{page_mode}-{itemid}".lower()
+    final_link = create_real_short_link(long_aff_link, slug) if long_aff_link else ""
 
     return {
         "itemid": itemid,
@@ -320,9 +325,6 @@ def score_product(row: Dict, page_mode: str) -> float:
     return score
 
 
-# ---------------------------
-# choose product
-# ---------------------------
 def choose_product(page_mode: str) -> Optional[Dict]:
     posted = load_posted()
     page_history = posted[page_mode]
@@ -395,9 +397,6 @@ def choose_product(page_mode: str) -> Optional[Dict]:
     return best
 
 
-# ---------------------------
-# caption
-# ---------------------------
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ ของแนวนี้กำลังขายดี กดดูตัวนี้ก่อน",
@@ -493,9 +492,6 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
-# ---------------------------
-# post
-# ---------------------------
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     try:
         res = requests.post(
