@@ -198,7 +198,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
         "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
         "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
-        "filter", "air purifier filter"
+        "filter", "air purifier filter", "เทปใส", "เทปนาโน", "กาวสองหน้า"
     ]
 
     block_keywords = [
@@ -212,7 +212,6 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "smart switch", "router", "mesh", "wifi", "sensor", "doorbell",
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น",
         "food", "อาหาร", "ขนม", "ของเล่น", "toy",
-        "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
         "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน"
     ]
 
@@ -300,7 +299,7 @@ def score_product(row: Dict, page_mode: str) -> float:
 
     score = (sold * 3.0) + (rating * 120.0)
 
-    if 80 <= price <= 3000:
+    if 50 <= price <= 3000:
         score += 25
     if sold >= 500:
         score += 80
@@ -310,8 +309,9 @@ def score_product(row: Dict, page_mode: str) -> float:
         score += 50
 
     hot_words = [
-        "usb", "gan", "power bank", "adapter", "ปลั๊ก", "wifi",
-        "camera", "smart", "switch", "led", "พุก", "กาว", "ตะขอ", "filter"
+        "usb", "gan", "power bank", "adapter", "ปลั๊ก", "switch",
+        "led", "สายไฟ", "สว่าน", "ไขควง", "กาว", "พุก", "สกรู",
+        "เทป", "เทปใส", "เทปนาโน"
     ]
     if any(k in title for k in hot_words):
         score += 35
@@ -319,7 +319,10 @@ def score_product(row: Dict, page_mode: str) -> float:
     if page_mode == "smart" and any(k in title for k in ["camera", "smart", "wifi", "led", "filter"]):
         score += 25
 
-    if page_mode == "ben" and any(k in title for k in ["ปลั๊ก", "adapter", "gan", "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน"]):
+    if page_mode == "ben" and any(k in title for k in [
+        "ปลั๊ก", "adapter", "gan", "charger", "usb-c",
+        "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน", "เทป", "เครื่องมือ"
+    ]):
         score += 25
 
     return score
@@ -400,7 +403,7 @@ def choose_product(page_mode: str) -> Optional[Dict]:
 def make_hook(page_mode: str) -> str:
     ben_hooks = [
         "⚡ ของแนวนี้กำลังขายดี กดดูตัวนี้ก่อน",
-        "🔥 สายช่างและสายบ้านน่าดูตัวนี้มาก",
+        "🔥 ของใช้สายช่างและซ่อมบ้าน ตัวนี้น่าสนใจมาก",
         "👀 รีวิวดี คนซื้อเยอะ ใช้งานจริง",
         "🛠 ของใช้คุ้ม ๆ ตัวนี้กำลังมาแรง",
     ]
@@ -429,7 +432,8 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
         f"🛒 ขายแล้ว {sold_text} ชิ้น",
         "📌 ของกำลังมาแรง คนสนใจเยอะ",
         "",
-        "👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์",
+        "👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้",
+        product["link"],
     ])
 
 
@@ -438,7 +442,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
     sold_text = f"{int(product['sold']):,}"
-    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและงานไฟฟ้า"
+    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่าง งานไฟฟ้า และของใช้ซ่อมบ้าน"
 
     prompt = f"""
 เขียนแคปชัน Facebook ภาษาไทยแบบเพิ่มยอดคลิก สำหรับ {page_desc}
@@ -458,8 +462,8 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
 - ไม่ใส่ราคาตัวเลข
 - ไม่ใส่ค่าคอม
-- ไม่ใส่ลิงก์ในแคปชัน
-- ปิดท้ายให้คนไปกดดูที่คอมเมนต์ใต้โพสต์
+- ปิดท้ายด้วยการชวนกดลิงก์
+- แทรกลิงก์สั้น 1 บรรทัดท้ายสุด
 """.strip()
 
     try:
@@ -486,7 +490,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         if not content:
             return fallback_caption(product, page_mode)
 
-        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดได้ที่คอมเมนต์ใต้โพสต์"
+        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
     except Exception as e:
         print("OPENAI ERROR:", e, flush=True)
         return fallback_caption(product, page_mode)
@@ -521,7 +525,7 @@ def comment_link(post_id: str, access_token: str, link: str) -> None:
         res = requests.post(
             f"https://graph.facebook.com/v25.0/{post_id}/comments",
             data={
-                "message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}",
+                "message": f"🛒 สั่งซื้อ / ดูราคาล่าสุด\n{link}",
                 "access_token": access_token
             },
             timeout=TIMEOUT
