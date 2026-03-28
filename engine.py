@@ -213,20 +213,21 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "electrical", "electric", "ไฟฟ้า", "อุปกรณ์ไฟฟ้า",
         "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง", "เต้ารับ", "เต้าเสียบ",
         "power socket", "socket", "power strip", "extension", "extension cord",
-        "สายไฟ", "cable", "wire", "usb socket", "adapter", "charger", "gan",
+        "สายไฟ", "cable", "wire", "usb", "usb-c", "lightning",
+        "adapter", "charger", "fast charge", "gan", "power adapter",
         "converter", "transformer", "เบรกเกอร์", "breaker", "switch", "สวิตช์",
-        "หลอดไฟ", "led", "ไฟฉาย", "โคมไฟ",
+        "หลอดไฟ", "led", "โคมไฟ", "ไฟฉาย",
         "tools", "tool", "เครื่องมือ", "เครื่องมือช่าง",
         "drill", "สว่าน", "ไขควง", "คีม", "ประแจ", "ค้อน", "เลื่อย",
         "multimeter", "tester", "เทสเตอร์", "มิเตอร์ไฟ",
         "กาว", "กาวร้อน", "กาวแห้งเร็ว", "ซิลิโคน", "sealant",
-        "ตะขอ", "พุก", "พุกตะกั่ว", "น็อต", "สกรู", "ตะปู", "anchor",
+        "ตะขอ", "พุก", "พุกตะกั่ว", "anchor", "น็อต", "สกรู", "ตะปู",
         "เทปพันสายไฟ", "insulation tape", "เคเบิ้ลไทร์", "cable tie",
         "filter", "air purifier filter"
     ]
 
     block_keywords = [
-        "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน", "แฟชั่น",
+        "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน",
         "fashion", "beauty", "cosmetic", "skincare", "สบู่", "soap", "ครีม",
         "lip", "ลิป", "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "หมวก",
         "iphone", "ipad", "macbook", "airpods", "apple watch",
@@ -239,7 +240,9 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas", "cover", "คลุมรถ",
         "ที่นอน", "หมอน", "ผ้าห่ม", "ตกแต่งบ้าน", "ของแต่งบ้าน",
         "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์", "สติ๊กเกอร์",
-        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag"
+        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag",
+        "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร", "ทอด",
+        "frying pan", "pan", "cookware", "kitchenware", "kitchen"
     ]
 
     if any(k in text for k in block_keywords):
@@ -254,10 +257,16 @@ def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "bra", "bra pad", "บรา", "บราทรง", "เสื้อใน", "ชั้นใน",
         "fashion", "beauty", "cosmetic", "skincare", "สบู่", "ครีม",
         "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า",
-        "iphone case", "เคสมือถือ", "lens protection", "full lens",
-        "watch strap", "smart watch", "apple watch strap",
+        "iphone case", "ipad case", "เคสมือถือ", "watch strap",
+        "smart home", "camera", "cctv", "ip camera", "security camera",
+        "กล้อง", "กล้องติดรถ", "dash cam", "smart plug", "smart bulb",
+        "router", "mesh", "wifi", "sensor", "doorbell",
+        "food", "อาหาร", "ขนม", "ของเล่น", "toy",
+        "ผ้าใบ", "กันฝน", "ตัดเย็บ", "แฟชั่น",
         "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์", "สติ๊กเกอร์",
-        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag"
+        "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag",
+        "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร", "ทอด",
+        "frying pan", "pan", "cookware", "kitchenware", "kitchen"
     ]
     return any(k in text for k in hard_blocks)
 
@@ -280,7 +289,9 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "drill", "ไขควง", "สว่าน", "คีม", "tester", "multimeter",
         "beauty", "สบู่", "soap", "fashion", "เสื้อ", "รองเท้า",
         "food", "อาหาร", "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas",
-        "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์"
+        "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์",
+        "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร",
+        "frying pan", "pan", "cookware", "kitchenware", "kitchen"
     ]
 
     if any(k in text for k in block_keywords):
@@ -364,6 +375,20 @@ def choose_product(page_mode: str) -> Optional[Dict]:
             if page_mode == "ben":
                 if is_hard_block_for_ben(title, cat1, cat2, cat3):
                     continue
+
+                ben_required_keywords = [
+                    "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง",
+                    "สายไฟ", "สายชาร์จ", "charger", "adapter", "gan",
+                    "ไฟฟ้า", "electrical", "breaker", "เบรกเกอร์", "switch", "สวิตช์",
+                    "หลอดไฟ", "led", "โคมไฟ",
+                    "เครื่องมือ", "tool", "drill", "สว่าน", "ไขควง", "คีม", "ประแจ",
+                    "กาว", "พุก", "น็อต", "สกรู", "anchor", "เทปพันสายไฟ"
+                ]
+
+                raw_text = f"{title} {cat1} {cat2} {cat3}".lower()
+                if not any(k in raw_text for k in ben_required_keywords):
+                    continue
+
                 if not is_ben_target(title, cat1, cat2, cat3):
                     continue
             else:
