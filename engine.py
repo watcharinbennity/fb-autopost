@@ -33,8 +33,9 @@ SHORTENER_BASE_URL = os.getenv(
 ).strip()
 
 AUTO_REPLY_COMMENTS = os.getenv("AUTO_REPLY_COMMENTS", "true").lower() == "true"
-COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "20"))
+COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "30"))
 MAX_REPLY_PER_RUN = int(os.getenv("MAX_REPLY_PER_RUN", "5"))
+RECENT_POST_LIMIT = int(os.getenv("RECENT_POST_LIMIT", "5"))
 
 
 def load_posted() -> Dict:
@@ -571,6 +572,24 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
+def get_recent_posts(page_id: str, access_token: str, limit: int = 5) -> list:
+    try:
+        res = requests.get(
+            f"https://graph.facebook.com/v25.0/{page_id}/posts",
+            params={
+                "access_token": access_token,
+                "fields": "id,message,created_time",
+                "limit": limit,
+            },
+            timeout=TIMEOUT,
+        )
+        data = res.json()
+        return data.get("data", [])
+    except Exception as e:
+        print("GET RECENT POSTS ERROR:", e, flush=True)
+        return []
+
+
 def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
     try:
         res = requests.get(
@@ -585,186 +604,4 @@ def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
         )
         data = res.json()
         return data.get("data", [])
-    except Exception as e:
-        print("GET COMMENTS ERROR:", e, flush=True)
-        return []
-
-
-def generate_comment_reply(comment_text: str, page_mode: str) -> str:
-    fallback_map = {
-        "ben": "ขอบคุณมากครับ สนใจรายละเอียดเพิ่มเติมกดลิงก์ใต้โพสต์ได้เลย 🙏",
-        "smart": "ขอบคุณมากครับ ถ้าสนใจรายละเอียดเพิ่มเติมกดลิงก์ใต้โพสต์ได้เลย 🙏",
-    }
-
-    if not USE_OPENAI or not OPENAI_API_KEY:
-        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
-
-    page_desc = "เพจเครื่องมือช่างและงานไฟฟ้า" if page_mode == "ben" else "เพจ Smart Home"
-
-    prompt = f"""
-คุณเป็นแอดมินเพจ {page_desc}
-ช่วยตอบคอมเมนต์ลูกค้าแบบสั้น สุภาพ เป็นกันเอง ภาษาไทย
-
-คอมเมนต์ลูกค้า:
-{comment_text}
-
-เงื่อนไข:
-- ตอบสั้น 1-2 ประโยค
-- สุภาพ
-- ไม่เวอร์
-- ไม่ใส่ราคา
-- ไม่ใส่ข้อมูลที่ไม่รู้จริง
-- ถ้าเป็นแนวสนใจซื้อ ให้ชวนกดลิงก์ใต้โพสต์
-- ถ้าเป็นแนวชม ให้ขอบคุณ
-- ถ้าเป็นแนวถามทั่วไป ให้ตอบกลาง ๆ และชวนดูรายละเอียดที่ลิงก์ใต้โพสต์
-""".strip()
-
-    try:
-        res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": "คุณเป็นแอดมินเพจขายของ ตอบคอมเมนต์สั้น สุภาพ และน่าเชื่อถือ"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.7,
-            },
-            timeout=45,
-        )
-        res.raise_for_status()
-        data = res.json()
-        content = data["choices"][0]["message"]["content"].strip()
-        return content or fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
-    except Exception as e:
-        print("OPENAI COMMENT REPLY ERROR:", e, flush=True)
-        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
-
-
-def reply_to_comment(comment_id: str, access_token: str, message: str) -> bool:
-    try:
-        res = requests.post(
-            f"https://graph.facebook.com/v25.0/{comment_id}/comments",
-            data={
-                "message": message,
-                "access_token": access_token,
-            },
-            timeout=TIMEOUT,
-        )
-        data = res.json()
-        print("REPLY COMMENT:", data, flush=True)
-        return "id" in data
-    except Exception as e:
-        print("REPLY COMMENT ERROR:", e, flush=True)
-        return False
-
-
-def auto_reply_recent_comments(page_mode: str, post_id: str, access_token: str, page_name: str) -> None:
-    if not AUTO_REPLY_COMMENTS:
-        return
-
-    comments = get_post_comments(post_id, access_token, COMMENT_SCAN_LIMIT)
-    replied_count = 0
-
-    for c in comments:
-        if replied_count >= MAX_REPLY_PER_RUN:
-            break
-
-        comment_id = norm_text(c.get("id"))
-        message = norm_text(c.get("message"))
-        from_obj = c.get("from") or {}
-        from_name = norm_text(from_obj.get("name"))
-
-        if not comment_id or not message:
-            continue
-
-        if was_comment_replied(comment_id):
-            continue
-
-        if from_name and from_name.lower() == page_name.lower():
-            continue
-
-        reply_text = generate_comment_reply(message, page_mode)
-        ok = reply_to_comment(comment_id, access_token, reply_text)
-
-        if ok:
-            mark_comment_replied(comment_id)
-            replied_count += 1
-            time.sleep(2)
-
-    print(f"AUTO REPLY DONE ({page_mode}): {replied_count}", flush=True)
-
-
-def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
-    try:
-        res = requests.post(
-            f"https://graph.facebook.com/v25.0/{page_id}/photos",
-            data={
-                "url": image_url,
-                "caption": caption,
-                "access_token": access_token
-            },
-            timeout=TIMEOUT
-        )
-        data = res.json()
-        print("POST IMAGE:", data, flush=True)
-
-        if "post_id" in data:
-            return data["post_id"]
-        if "id" in data:
-            return data["id"]
-        return None
-    except Exception as e:
-        print("POST IMAGE ERROR:", e, flush=True)
-        return None
-
-
-def comment_link(post_id: str, access_token: str, link: str) -> None:
-    try:
-        res = requests.post(
-            f"https://graph.facebook.com/v25.0/{post_id}/comments",
-            data={
-                "message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}",
-                "access_token": access_token
-            },
-            timeout=TIMEOUT
-        )
-        print("COMMENT:", res.json(), flush=True)
-    except Exception as e:
-        print("COMMENT ERROR:", e, flush=True)
-
-
-def run_page(page_mode: str, page_id: str, access_token: str) -> None:
-    if not page_id or not access_token:
-        print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
-        return
-
-    print("RUN PAGE:", page_mode, "***", flush=True)
-
-    product = choose_product(page_mode)
-    if not product:
-        return
-
-    print("IMAGE URL:", product["image"], flush=True)
-    print("LINK:", product["link"], flush=True)
-
-    caption = generate_caption(product, page_mode)
-    post_id = post_image(page_id, access_token, product["image"], caption)
-
-    if post_id:
-        mark_as_posted(page_mode, product["itemid"], product["image_key"], product["title"])
-        time.sleep(3)
-        comment_link(post_id, access_token, product["link"])
-        time.sleep(3)
-
-        page_name = "BEN Home & Electrical" if page_mode == "ben" else "SmartHome Thailand"
-        auto_reply_recent_comments(page_mode, post_id, access_token, page_name)
-
-
-def run_all_pages() -> None:
-    run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
-    run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
+  
