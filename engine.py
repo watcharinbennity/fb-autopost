@@ -33,9 +33,8 @@ SHORTENER_BASE_URL = os.getenv(
 ).strip()
 
 AUTO_REPLY_COMMENTS = os.getenv("AUTO_REPLY_COMMENTS", "true").lower() == "true"
-COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "30"))
+COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "20"))
 MAX_REPLY_PER_RUN = int(os.getenv("MAX_REPLY_PER_RUN", "5"))
-RECENT_POST_LIMIT = int(os.getenv("RECENT_POST_LIMIT", "5"))
 
 
 def load_posted() -> Dict:
@@ -572,7 +571,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
-def get_recent_posts(page_id: str, access_token: str, limit: int = 5) -> list:
+def get_page_posts(page_id: str, access_token: str, limit: int = 5) -> list:
     try:
         res = requests.get(
             f"https://graph.facebook.com/v25.0/{page_id}/posts",
@@ -586,7 +585,7 @@ def get_recent_posts(page_id: str, access_token: str, limit: int = 5) -> list:
         data = res.json()
         return data.get("data", [])
     except Exception as e:
-        print("GET RECENT POSTS ERROR:", e, flush=True)
+        print("GET PAGE POSTS ERROR:", e, flush=True)
         return []
 
 
@@ -604,4 +603,5 @@ def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
         )
         data = res.json()
         return data.get("data", [])
-  
+    except Exception as e:
+        print("GET COMMENTS ERROR:", e, 
