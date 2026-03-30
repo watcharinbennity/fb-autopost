@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import requests
 
-MAX_ROWS = 250000
+MAX_ROWS = 250001
 TIMEOUT = 30
 POSTED_FILE = "posted.json"
 REPLIED_FILE = "replied_comments.json"
