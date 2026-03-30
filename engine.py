@@ -11,6 +11,7 @@ import requests
 MAX_ROWS = 250000
 TIMEOUT = 30
 POSTED_FILE = "posted.json"
+REPLIED_FILE = "replied_comments.json"
 
 PAGE_ID = os.getenv("PAGE_ID", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "").strip()
@@ -30,6 +31,10 @@ SHORTENER_BASE_URL = os.getenv(
     "SHORTENER_BASE_URL",
     "https://ben-shortener.bennity.workers.dev"
 ).strip()
+
+AUTO_REPLY_COMMENTS = os.getenv("AUTO_REPLY_COMMENTS", "true").lower() == "true"
+COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "20"))
+MAX_REPLY_PER_RUN = int(os.getenv("MAX_REPLY_PER_RUN", "5"))
 
 
 def load_posted() -> Dict:
@@ -62,6 +67,40 @@ def load_posted() -> Dict:
 def save_posted(data: Dict) -> None:
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_replied() -> Dict:
+    default_data = {"comments": []}
+
+    if not os.path.exists(REPLIED_FILE):
+        return default_data
+
+    try:
+        with open(REPLIED_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict):
+            return default_data
+        raw.setdefault("comments", [])
+        return raw
+    except Exception:
+        return default_data
+
+
+def save_replied(data: Dict) -> None:
+    with open(REPLIED_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def mark_comment_replied(comment_id: str) -> None:
+    data = load_replied()
+    if comment_id not in data["comments"]:
+        data["comments"].append(comment_id)
+    save_replied(data)
+
+
+def was_comment_replied(comment_id: str) -> bool:
+    data = load_replied()
+    return comment_id in data["comments"]
 
 
 def normalize_image_key(image_url: str) -> str:
@@ -532,6 +571,134 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         return fallback_caption(product, page_mode)
 
 
+def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
+    try:
+        res = requests.get(
+            f"https://graph.facebook.com/v25.0/{post_id}/comments",
+            params={
+                "access_token": access_token,
+                "fields": "id,message,from,created_time,parent",
+                "filter": "stream",
+                "limit": limit,
+            },
+            timeout=TIMEOUT,
+        )
+        data = res.json()
+        return data.get("data", [])
+    except Exception as e:
+        print("GET COMMENTS ERROR:", e, flush=True)
+        return []
+
+
+def generate_comment_reply(comment_text: str, page_mode: str) -> str:
+    fallback_map = {
+        "ben": "ขอบคุณมากครับ สนใจรายละเอียดเพิ่มเติมกดลิงก์ใต้โพสต์ได้เลย 🙏",
+        "smart": "ขอบคุณมากครับ ถ้าสนใจรายละเอียดเพิ่มเติมกดลิงก์ใต้โพสต์ได้เลย 🙏",
+    }
+
+    if not USE_OPENAI or not OPENAI_API_KEY:
+        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
+
+    page_desc = "เพจเครื่องมือช่างและงานไฟฟ้า" if page_mode == "ben" else "เพจ Smart Home"
+
+    prompt = f"""
+คุณเป็นแอดมินเพจ {page_desc}
+ช่วยตอบคอมเมนต์ลูกค้าแบบสั้น สุภาพ เป็นกันเอง ภาษาไทย
+
+คอมเมนต์ลูกค้า:
+{comment_text}
+
+เงื่อนไข:
+- ตอบสั้น 1-2 ประโยค
+- สุภาพ
+- ไม่เวอร์
+- ไม่ใส่ราคา
+- ไม่ใส่ข้อมูลที่ไม่รู้จริง
+- ถ้าเป็นแนวสนใจซื้อ ให้ชวนกดลิงก์ใต้โพสต์
+- ถ้าเป็นแนวชม ให้ขอบคุณ
+- ถ้าเป็นแนวถามทั่วไป ให้ตอบกลาง ๆ และชวนดูรายละเอียดที่ลิงก์ใต้โพสต์
+""".strip()
+
+    try:
+        res = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENAI_MODEL,
+                "messages": [
+                    {"role": "system", "content": "คุณเป็นแอดมินเพจขายของ ตอบคอมเมนต์สั้น สุภาพ และน่าเชื่อถือ"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+            },
+            timeout=45,
+        )
+        res.raise_for_status()
+        data = res.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        return content or fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
+    except Exception as e:
+        print("OPENAI COMMENT REPLY ERROR:", e, flush=True)
+        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
+
+
+def reply_to_comment(comment_id: str, access_token: str, message: str) -> bool:
+    try:
+        res = requests.post(
+            f"https://graph.facebook.com/v25.0/{comment_id}/comments",
+            data={
+                "message": message,
+                "access_token": access_token,
+            },
+            timeout=TIMEOUT,
+        )
+        data = res.json()
+        print("REPLY COMMENT:", data, flush=True)
+        return "id" in data
+    except Exception as e:
+        print("REPLY COMMENT ERROR:", e, flush=True)
+        return False
+
+
+def auto_reply_recent_comments(page_mode: str, post_id: str, access_token: str, page_name: str) -> None:
+    if not AUTO_REPLY_COMMENTS:
+        return
+
+    comments = get_post_comments(post_id, access_token, COMMENT_SCAN_LIMIT)
+    replied_count = 0
+
+    for c in comments:
+        if replied_count >= MAX_REPLY_PER_RUN:
+            break
+
+        comment_id = norm_text(c.get("id"))
+        message = norm_text(c.get("message"))
+        from_obj = c.get("from") or {}
+        from_name = norm_text(from_obj.get("name"))
+
+        if not comment_id or not message:
+            continue
+
+        if was_comment_replied(comment_id):
+            continue
+
+        if from_name and from_name.lower() == page_name.lower():
+            continue
+
+        reply_text = generate_comment_reply(message, page_mode)
+        ok = reply_to_comment(comment_id, access_token, reply_text)
+
+        if ok:
+            mark_comment_replied(comment_id)
+            replied_count += 1
+            time.sleep(2)
+
+    print(f"AUTO REPLY DONE ({page_mode}): {replied_count}", flush=True)
+
+
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     try:
         res = requests.post(
@@ -592,6 +759,10 @@ def run_page(page_mode: str, page_id: str, access_token: str) -> None:
         mark_as_posted(page_mode, product["itemid"], product["image_key"], product["title"])
         time.sleep(3)
         comment_link(post_id, access_token, product["link"])
+        time.sleep(3)
+
+        page_name = "BEN Home & Electrical" if page_mode == "ben" else "SmartHome Thailand"
+        auto_reply_recent_comments(page_mode, post_id, access_token, page_name)
 
 
 def run_all_pages() -> None:
