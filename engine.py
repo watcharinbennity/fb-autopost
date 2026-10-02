@@ -439,8 +439,7 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "security camera", "กล้อง", "smart plug", "wifi plug",
         "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
         "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
-        "smart switch", "lens protection", "camera lens", "full lens",
-        "watch strap", "watch active", "redmi watch", "led", "ไฟ led",
+        "smart switch", "led", "ไฟ led",
         "air purifier", "purifier", "filter", "dash cam", "กล้องติดรถ"
     ]
 
@@ -451,7 +450,9 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "food", "อาหาร", "ผ้าใบ", "กันฝน", "tarp", "tarpaulin", "canvas",
         "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์",
         "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร",
-        "frying pan", "pan", "cookware", "kitchenware", "kitchen"
+        "frying pan", "pan", "cookware", "kitchenware", "kitchen",
+        "ผ้า", "microfiber", "ไมโครไฟเบอร์", "lens cloth", "ฟิล์ม", "film",
+        "เคส", "case", "strap", "สายนาฬิกา", "ที่วางมือถือ"
     ]
 
     if any(k in text for k in block_keywords):
@@ -653,7 +654,9 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - บรรทัดแรกเป็น hook สั้น ดึงความสนใจ
 - รวม 5-7 บรรทัด อ่านง่าย ใช้อีโมจิพอประมาณ
 - บอกว่าสินค้านี้ช่วยแก้ปัญหาอะไร/เหมาะกับใคร โดยอิงจากชื่อสินค้าเท่านั้น
-- ห้ามแต่งสเปก คุณสมบัติ หรือคำรับรองที่ไม่มีในชื่อสินค้า
+- ห้ามแต่งสเปก คุณสมบัติ หรือคำรับรองที่ไม่มีในชื่อสินค้า (เช่น ทนทาน ไม่ทิ้งรอย ปลอดภัย ของแท้)
+- ห้ามเร่งให้รีบซื้อ เช่น ก่อนหมด ด่วน สต๊อกจำกัด โปรวันนี้เท่านั้น
+- ใช้ภาษาไทยที่ถูกต้องและเป็นธรรมชาติ ทุกคำต้องเป็นคำไทยที่มีความหมาย ตรวจทานก่อนตอบ
 - ห้ามใส่ราคา ห้ามใส่ลิงก์ ห้ามพูดถึงค่าคอมมิชชัน
 - ปิดท้ายด้วยแฮชแท็ก 2-3 อัน
 - ตอบเฉพาะตัวแคปชัน ไม่ต้องมีคำอธิบายอื่น
