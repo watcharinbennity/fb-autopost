@@ -21,7 +21,14 @@ W, H, FPS = 1080, 1920, 30
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(HERE, "assets", "fonts", "NotoSansThai.ttf")
 GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY", "").strip()
-TTS_VOICE = os.getenv("TTS_VOICE", "").strip()  # ว่าง = เลือกเสียงไทยที่ดีที่สุดอัตโนมัติ
+TTS_VOICE = os.getenv("TTS_VOICE", "").strip()  # Google: ว่าง = เลือกเสียงไทยที่ดีที่สุดอัตโนมัติ
+# Edge TTS (ฟรี ไม่เป็นทางการ) ใช้เมื่อไม่มี GOOGLE_TTS_API_KEY; ตั้ง TTS_ENGINE=none เพื่อปิดเสียง
+TTS_ENGINE = os.getenv("TTS_ENGINE", "edge").strip().lower()
+EDGE_VOICES = {
+    "ben": os.getenv("EDGE_VOICE_BEN", "th-TH-NiwatNeural"),        # เสียงผู้ชาย
+    "smart": os.getenv("EDGE_VOICE_SMART", "th-TH-PremwadeeNeural"),  # เสียงผู้หญิง
+}
+EDGE_RATE = os.getenv("EDGE_RATE", "+8%")
 
 PAGE_STYLE = {
     "ben": {"name": "BEN Home & Electrical", "accent": (255, 176, 32)},
@@ -112,9 +119,37 @@ def pick_voice() -> str:
     return names[0] if names else "th-TH-Standard-A"
 
 
-def synthesize(text: str, out_path: str) -> Optional[str]:
-    if not GOOGLE_TTS_API_KEY or not text:
+def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
+    if not text:
         return None
+    if GOOGLE_TTS_API_KEY:
+        return synthesize_google(text, out_path)
+    if TTS_ENGINE == "edge":
+        return synthesize_edge(text, out_path, mode)
+    return None
+
+
+def synthesize_edge(text: str, out_path: str, mode: str) -> Optional[str]:
+    voice = EDGE_VOICES.get(mode, EDGE_VOICES["ben"])
+    try:
+        import asyncio
+        import edge_tts
+
+        async def run():
+            await edge_tts.Communicate(text, voice, rate=EDGE_RATE).save(out_path)
+
+        asyncio.run(run())
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+            print("TTS OK: edge", voice, flush=True)
+            return out_path
+        print("TTS EDGE EMPTY", flush=True)
+    except Exception as e:
+        print("TTS EDGE ERROR:", e, flush=True)
+        engine.annotate("warning", "TTS", f"edge {voice}: {str(e)[:200]}")
+    return None
+
+
+def synthesize_google(text: str, out_path: str) -> Optional[str]:
     voice = pick_voice()
     try:
         res = requests.post(
@@ -314,7 +349,7 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
     img_path = image_path or download_image(product["image"], os.path.join(work, "product.jpg"))
     script = make_script(product, mode)
 
-    voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"))
+    voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
     voice_sec = media_duration(voice) if voice else 0.0
     total = min(30.0, max(12.0, voice_sec + 1.2))
 

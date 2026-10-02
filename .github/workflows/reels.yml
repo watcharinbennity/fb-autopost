@@ -33,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-          pip install -q requests pillow
+          pip install -q requests pillow edge-tts
 
       - name: Make reels
         env:
@@ -50,6 +50,9 @@ jobs:
           CLAUDE_MODEL: "claude-sonnet-5-5"
           CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+          TTS_ENGINE: "edge"
+          EDGE_VOICE_BEN: "th-TH-NiwatNeural"
+          EDGE_VOICE_SMART: "th-TH-PremwadeeNeural"
           MIN_RATING: "4.0"
           MIN_SOLD: "20"
         run: python reels_main.py ${{ inputs.action }}
