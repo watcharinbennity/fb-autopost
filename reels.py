@@ -322,13 +322,15 @@ def build_video(frames: List[str], audio: Optional[str], out_path: str, total_se
         filt.append(f"[{last}][v{i}]xfade=transition=fade:duration={fade}:offset={offset:.3f}[x{i}]")
         last = f"x{i}"
     a_idx = n
-    filt.append(f"[{a_idx}:a]aresample=44100,apad[aout]")
+    # เสียงพากย์: ปรับความดังให้มาตรฐานโซเชียล (~-16 LUFS)
+    norm = "loudnorm=I=-16:TP=-1.5:LRA=11," if audio else ""
+    filt.append(f"[{a_idx}:a]{norm}aresample=44100,apad[aout]")
     cmd += [
         "-filter_complex", ";".join(filt),
         "-map", f"[{last}]", "-map", "[aout]",
         "-t", f"{total_sec:.3f}",
         "-c:v", "libx264", "-preset", "medium", "-crf", "21", "-pix_fmt", "yuv420p", "-r", str(FPS),
-        "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
         "-movflags", "+faststart", out_path,
     ]
     subprocess.run(cmd, check=True)
@@ -351,7 +353,7 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
 
     voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
     voice_sec = media_duration(voice) if voice else 0.0
-    total = min(30.0, max(12.0, voice_sec + 1.2))
+    total = min(30.0, max(10.0, voice_sec + 1.2))
 
     base = base_frame(Image.open(img_path), mode)
     frames = []
