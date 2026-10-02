@@ -8,6 +8,9 @@ on:
         type: choice
         options: [preview, post]
         default: preview
+  # โพสต์ Reels อัตโนมัติวันละ 1 คลิปต่อเพจ เวลา 19:46 น. (เวลาไทย)
+  schedule:
+    - cron: '46 12 * * *'
 
 concurrency:
   group: auto-post
@@ -17,6 +20,8 @@ jobs:
   reels:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      ACTION: ${{ inputs.action || 'post' }}
     permissions:
       contents: write
 
@@ -55,11 +60,11 @@ jobs:
           EDGE_VOICE_SMART: "th-TH-PremwadeeNeural"
           MIN_RATING: "4.0"
           MIN_SOLD: "20"
-        run: python reels_main.py ${{ inputs.action }}
+        run: python reels_main.py "$ACTION"
 
       # preview: เก็บคลิปไว้ที่ branch reels-preview (ไม่ปนกับ main)
       - name: Publish previews
-        if: always() && inputs.action == 'preview'
+        if: always() && env.ACTION == 'preview'
         run: |
           [ -d reels_out ] || exit 0
           cd reels_out
@@ -71,7 +76,7 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" reels-preview
 
       - name: Commit reels history
-        if: always() && inputs.action == 'post'
+        if: always() && env.ACTION == 'post'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"

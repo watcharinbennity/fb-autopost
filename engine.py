@@ -974,6 +974,7 @@ def comment_link(post_id: str, access_token: str, link: str) -> None:
         )
         err = graph_error(safe_json(res))
         print("COMMENT LINK:", err or "ok", flush=True)
+        annotate("warning" if err else "notice", "Comment link", err or f"ok on {post_id}")
     except Exception as e:
         print("COMMENT LINK EXCEPTION:", e, flush=True)
 
