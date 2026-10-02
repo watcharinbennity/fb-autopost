@@ -29,6 +29,65 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 
+# Claude (Anthropic) — ถ้ามี ANTHROPIC_API_KEY จะใช้ Claude เขียนแคปชันก่อน OpenAI
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001").strip()
+
+
+def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600) -> str:
+    """ให้ AI เขียนข้อความ: Claude ก่อน แล้วค่อย OpenAI; คืน "" ถ้าใช้ไม่ได้"""
+    if ANTHROPIC_API_KEY:
+        try:
+            res = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": CLAUDE_MODEL,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "system": system,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=60,
+            )
+            data = res.json()
+            if res.status_code != 200:
+                err = (data.get("error") or {}) if isinstance(data, dict) else {}
+                print(f"CLAUDE ERROR: {res.status_code} {err.get('type')} {str(err.get('message'))[:200]}", flush=True)
+            else:
+                text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
+                if text:
+                    print("AI: claude", flush=True)
+                    return text
+        except Exception as e:
+            print("CLAUDE EXCEPTION:", e, flush=True)
+
+    if USE_OPENAI and OPENAI_API_KEY:
+        try:
+            res = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": OPENAI_MODEL,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                },
+                timeout=45,
+            )
+            res.raise_for_status()
+            text = res.json()["choices"][0]["message"]["content"].strip()
+            if text:
+                print("AI: openai", flush=True)
+                return text
+        except Exception as e:
+            print("OPENAI ERROR:", e, flush=True)
+
+    return ""
+
 SHORTENER_BASE_URL = os.getenv(
     "SHORTENER_BASE_URL",
     "https://ben-shortener.bennity.workers.dev"
@@ -584,61 +643,39 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
 
 
 def generate_caption(product: Dict, page_mode: str) -> str:
-    if not USE_OPENAI or not OPENAI_API_KEY:
-        return fallback_caption(product, page_mode)
-
     sold_text = f"{int(product['sold']):,}"
-    page_desc = "เพจ Smart Home" if page_mode == "smart" else "เพจเครื่องมือช่างและงานไฟฟ้า"
+    if page_mode == "smart":
+        page_desc = "เพจ SmartHome Thailand (อุปกรณ์สมาร์ทโฮม กล้อง ปลั๊กอัจฉริยะ ของใช้ไฮเทคในบ้าน)"
+    else:
+        page_desc = "เพจ BEN Home & Electrical (อุปกรณ์ไฟฟ้า ของใช้ในบ้าน เครื่องมือช่าง)"
 
     prompt = f"""
-เขียนแคปชัน Facebook ภาษาไทยแบบเพิ่มยอดคลิก สำหรับ {page_desc}
+เขียนแคปชัน Facebook ภาษาไทยสำหรับ {page_desc}
 
-สินค้า:
-{product['title']}
-
-ข้อมูล:
-- rating: {product['rating']}
-- sold: {sold_text}
-- หมวด: {product['cat1']} / {product['cat2']} / {product['cat3']}
+สินค้า: {product['title']}
+คะแนนรีวิว: {product['rating']:.1f}
+ขายแล้ว: {sold_text} ชิ้น
+หมวด: {product['cat1']} / {product['cat2']} / {product['cat3']}
 
 เงื่อนไข:
-- เปิดด้วย hook แรง 1 บรรทัด
-- ยาว 5-7 บรรทัด
-- อ่านง่าย
-- ใช้คำแนว รีวิวเยอะ / ขายดี / กำลังฮิต / น่ากดดู
-- ไม่ใส่ราคาตัวเลข
-- ไม่ใส่ค่าคอม
-- ปิดท้ายให้คนกดลิงก์ด้านล่าง
+- บรรทัดแรกเป็น hook สั้น ดึงความสนใจ
+- รวม 5-7 บรรทัด อ่านง่าย ใช้อีโมจิพอประมาณ
+- บอกว่าสินค้านี้ช่วยแก้ปัญหาอะไร/เหมาะกับใคร โดยอิงจากชื่อสินค้าเท่านั้น
+- ห้ามแต่งสเปก คุณสมบัติ หรือคำรับรองที่ไม่มีในชื่อสินค้า
+- ห้ามใส่ราคา ห้ามใส่ลิงก์ ห้ามพูดถึงค่าคอมมิชชัน
+- ปิดท้ายด้วยแฮชแท็ก 2-3 อัน
+- ตอบเฉพาะตัวแคปชัน ไม่ต้องมีคำอธิบายอื่น
 """.strip()
 
-    try:
-        res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": "คุณเป็นนักเขียนแคปชันขายของภาษาไทยที่เน้นยอดคลิก"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.9,
-            },
-            timeout=45,
-        )
-        res.raise_for_status()
-        data = res.json()
-        content = data["choices"][0]["message"]["content"].strip()
-
-        if not content:
-            return fallback_caption(product, page_mode)
-
-        return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
-    except Exception as e:
-        print("OPENAI ERROR:", e, flush=True)
+    content = ai_write(
+        "คุณเป็นแอดมินเพจขายของออนไลน์ชาวไทย เขียนแคปชันกระชับ เป็นกันเอง และซื่อสัตย์ต่อข้อมูลสินค้า",
+        prompt,
+        temperature=0.9,
+    )
+    if not content:
         return fallback_caption(product, page_mode)
+
+    return f"{content}\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
 
 
 def get_page_posts(page_id: str, access_token: str, limit: int = 5) -> list:
@@ -690,9 +727,6 @@ def generate_comment_reply(comment_text: str, page_mode: str) -> str:
         "smart": "ขอบคุณมากครับ ถ้าสนใจรายละเอียดเพิ่มเติมกดลิงก์ใต้โพสต์ได้เลย 🙏",
     }
 
-    if not USE_OPENAI or not OPENAI_API_KEY:
-        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
-
     page_desc = "เพจเครื่องมือช่างและงานไฟฟ้า" if page_mode == "ben" else "เพจ Smart Home"
 
     prompt = f"""
@@ -713,30 +747,13 @@ def generate_comment_reply(comment_text: str, page_mode: str) -> str:
 - ถ้าเป็นแนวถามทั่วไป ให้ตอบกลาง ๆ และชวนดูรายละเอียดที่ลิงก์ใต้โพสต์
 """.strip()
 
-    try:
-        res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": "คุณเป็นแอดมินเพจขายของ ตอบคอมเมนต์สั้น สุภาพ และน่าเชื่อถือ"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.7,
-            },
-            timeout=45,
-        )
-        res.raise_for_status()
-        data = res.json()
-        content = data["choices"][0]["message"]["content"].strip()
-        return content or fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
-    except Exception as e:
-        print("OPENAI COMMENT REPLY ERROR:", e, flush=True)
-        return fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
+    content = ai_write(
+        "คุณเป็นแอดมินเพจขายของ ตอบคอมเมนต์สั้น สุภาพ และน่าเชื่อถือ",
+        prompt,
+        temperature=0.7,
+        max_tokens=200,
+    )
+    return content or fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
 
 
 def reply_to_comment(comment_id: str, access_token: str, message: str) -> bool:
