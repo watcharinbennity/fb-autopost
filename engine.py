@@ -410,7 +410,7 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "electrical", "electric", "ไฟฟ้า", "อุปกรณ์ไฟฟ้า",
         "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง", "เต้ารับ", "เต้าเสียบ",
         "power socket", "socket", "power strip", "extension", "extension cord",
-        "สายไฟ", "cable", "wire", "usb", "usb-c", "lightning",
+        "สายไฟ", "cable", "wire", "usb", "usb-c", "type-c", "lightning", "สายชาร์จ", "หัวชาร์จ",
         "adapter", "charger", "fast charge", "gan", "power adapter",
         "converter", "transformer", "เบรกเกอร์", "breaker", "switch", "สวิตช์",
         "หลอดไฟ", "led", "โคมไฟ", "ไฟฉาย",
@@ -463,7 +463,10 @@ def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ถุง", "ซอง", "ฝากาว", "แพ็ก", "แพค", "บรรจุภัณฑ์", "สติ๊กเกอร์",
         "เทปใส", "ซองใส", "ถุงแก้ว", "opp", "packing", "package", "poly bag",
         "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร", "ทอด",
-        "frying pan", "pan", "cookware", "kitchenware", "kitchen"
+        "frying pan", "pan", "cookware", "kitchenware", "kitchen",
+        # อุปกรณ์เสริมมือถือที่ไม่ใช่งานไฟฟ้า/เครื่องมือช่าง
+        "ฟิล์ม", "film", "กระจกนิรภัย", "tempered", "screen protector", "กันรอย",
+        "เคส", "ที่วางมือถือ", "ขาตั้งมือถือ", "สายคล้อง"
     ]
     return any(k in text for k in hard_blocks)
 
