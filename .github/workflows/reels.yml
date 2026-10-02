@@ -1,0 +1,79 @@
+name: REELS
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "preview = สร้างคลิปตัวอย่าง (ไม่โพสต์) / post = โพสต์ Reels จริงเพจละ 1 คลิป"
+        type: choice
+        options: [preview, post]
+        default: preview
+
+concurrency:
+  group: auto-post
+  cancel-in-progress: false
+
+jobs:
+  reels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg + packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          pip install -q requests pillow
+
+      - name: Make reels
+        env:
+          TZ: Asia/Bangkok
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
+          PAGE_ACCESS_TOKEN_2: ${{ secrets.PAGE_ACCESS_TOKEN_2 }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+          SHOPEE_SUB_ID_PREFIX: "fbreel"
+          SHORTENER_BASE_URL: "https://ben-shortener.bennity.workers.dev"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: "claude-sonnet-5-5"
+          CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+          MIN_RATING: "4.0"
+          MIN_SOLD: "20"
+        run: python reels_main.py ${{ inputs.action }}
+
+      # preview: เก็บคลิปไว้ที่ branch reels-preview (ไม่ปนกับ main)
+      - name: Publish previews
+        if: always() && inputs.action == 'preview'
+        run: |
+          [ -d reels_out ] || exit 0
+          cd reels_out
+          git init -q -b reels-preview
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "reels preview ${GITHUB_RUN_ID}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" reels-preview
+
+      - name: Commit reels history
+        if: always() && inputs.action == 'post'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add posted.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "update reels history"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push

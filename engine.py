@@ -559,9 +559,10 @@ def row_matches_page(row: Dict, page_mode: str) -> bool:
     return is_smarthome_target(title, cat1, cat2, cat3)
 
 
-def choose_products(page_modes: list) -> Dict[str, Optional[Dict]]:
-    """อ่าน CSV รอบเดียว แล้วเลือกสินค้าที่ดีที่สุดให้ทุกเพจพร้อมกัน"""
-    posted = load_posted()
+def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[str, Optional[Dict]]:
+    """อ่าน CSV รอบเดียว แล้วเลือกสินค้าที่ดีที่สุดให้ทุกเพจพร้อมกัน
+    history: ประวัติกันซ้ำต่อเพจ (ค่าเริ่มต้น = ประวัติโพสต์รูป)"""
+    posted = history if history is not None else load_posted()
     best = {m: (None, -1.0) for m in page_modes}
     count = 0
     no_link_count = 0
