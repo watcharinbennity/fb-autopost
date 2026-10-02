@@ -35,35 +35,46 @@ CLAUDE_REPLY_MODEL = os.getenv("CLAUDE_REPLY_MODEL", "claude-haiku-4-5-20251001"
 def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600, model: str = "") -> str:
     """ให้ Claude เขียนข้อความ; คืน "" ถ้าใช้ไม่ได้ (จะใช้ข้อความแม่แบบแทน)"""
     if ANTHROPIC_API_KEY:
-        try:
-            res = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": model or CLAUDE_MODEL,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "system": system,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=60,
-            )
-            data = res.json()
-            if res.status_code != 200:
+        use_model = model or CLAUDE_MODEL
+        body = {
+            "model": use_model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        # บางรุ่น (เช่น Sonnet/Opus 5.x) ไม่รับ temperature — ส่งเฉพาะรุ่น 4.x
+        if "-4-" in use_model:
+            body["temperature"] = temperature
+        for attempt in range(2):
+            try:
+                res = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=body,
+                    timeout=60,
+                )
+                data = res.json()
+                if res.status_code == 200:
+                    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
+                    if text:
+                        print(f"AI: claude ({use_model})", flush=True)
+                        return text
+                    break
                 err = (data.get("error") or {}) if isinstance(data, dict) else {}
-                print(f"CLAUDE ERROR: {res.status_code} {err.get('type')} {str(err.get('message'))[:200]}", flush=True)
-                annotate("warning", "Claude", f"{res.status_code} {err.get('type')} {str(err.get('message'))[:200]}")
-            else:
-                text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
-                if text:
-                    print("AI: claude", flush=True)
-                    return text
-        except Exception as e:
-            print("CLAUDE EXCEPTION:", e, flush=True)
+                msg = str(err.get("message"))
+                if attempt == 0 and "temperature" in msg and "temperature" in body:
+                    body.pop("temperature")
+                    continue
+                print(f"CLAUDE ERROR: {res.status_code} {err.get('type')} {msg[:200]}", flush=True)
+                annotate("warning", "Claude", f"{res.status_code} {err.get('type')} {msg[:200]}")
+                break
+            except Exception as e:
+                print("CLAUDE EXCEPTION:", e, flush=True)
+                break
 
     return ""
 
