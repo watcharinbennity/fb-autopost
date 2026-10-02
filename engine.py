@@ -357,7 +357,7 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
 
 
 def has_link_data(row: Dict) -> bool:
-    if feed_affiliate_link(row):
+    if "affiliate_id=" in feed_affiliate_link(row):
         return True
     landing_page = norm_text(row.get("product_link"))
     itemid = norm_text(row.get("itemid"))
@@ -372,10 +372,20 @@ def feed_affiliate_link(row: Dict) -> str:
     return ""
 
 
+def aff_ok(link: str) -> bool:
+    """ลิงก์มี affiliate id หรือเป็นลิงก์ย่อของเรา (ซึ่งชี้ไปลิงก์ที่มี affiliate id)"""
+    if not link:
+        return False
+    if "affiliate_id=" in link:
+        return True
+    return bool(SHORTENER_BASE_URL) and link.startswith(SHORTENER_BASE_URL.rstrip("/"))
+
+
 def build_final_link(row: Dict, page_mode: str) -> tuple[str, str]:
     itemid = norm_text(row.get("itemid"))
+    # ใช้ลิงก์จาก feed เฉพาะเมื่อมี affiliate_id อยู่แล้ว ไม่งั้นจะไม่ได้ค่าคอม
     feed_link = feed_affiliate_link(row)
-    if feed_link:
+    if feed_link and "affiliate_id=" in feed_link:
         return feed_link, "feed_column"
     long_aff_link = build_shopee_affiliate_link(row, page_mode)
 
@@ -950,7 +960,7 @@ def run_all_pages() -> None:
                 annotate(
                     "notice",
                     f"Caption {mode}",
-                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | link {product['link_source']}\n---\n{caption}",
+                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | link {product['link_source']} | aff_id={'yes' if aff_ok(product['link']) else 'NO'}\n---\n{caption}",
                 )
                 post_id = post_image(page["id"], page["token"], product["image"], caption)
                 if post_id:
