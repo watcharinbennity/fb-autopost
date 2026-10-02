@@ -55,6 +55,7 @@ def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600
             if res.status_code != 200:
                 err = (data.get("error") or {}) if isinstance(data, dict) else {}
                 print(f"CLAUDE ERROR: {res.status_code} {err.get('type')} {str(err.get('message'))[:200]}", flush=True)
+                annotate("warning", "Claude", f"{res.status_code} {err.get('type')} {str(err.get('message'))[:200]}")
             else:
                 text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
                 if text:
@@ -79,6 +80,16 @@ MIN_RATING = float(os.getenv("MIN_RATING", "4.0"))
 MIN_SOLD = float(os.getenv("MIN_SOLD", "20"))
 GRAPH = "https://graph.facebook.com/v25.0"
 STATUS_FILE = "run_status.json"
+IN_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+
+
+def annotate(level: str, title: str, msg: str) -> None:
+    """แสดงผลสรุปบนหน้า Actions (annotation) — ไม่ใส่ token/ลิงก์ยาว"""
+    if not IN_ACTIONS:
+        return
+    msg = str(msg)[:900].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+    title = title.replace(",", " ").replace("::", ":")
+    print(f"::{level} title={title}::{msg}", flush=True)
 
 PAGES = [
     {"mode": "ben", "name": "BEN Home & Electrical", "id": PAGE_ID, "token": PAGE_ACCESS_TOKEN},
@@ -116,15 +127,18 @@ def check_page_token(page: Dict) -> bool:
     err = graph_error(data)
     if err:
         print(f"❌ TOKEN INVALID ({page['mode']}): {err}", flush=True)
+        annotate("error", f"Token {page['mode']}", err)
         if "code=190" in err:
             print("   → Page Access Token หมดอายุ/ถูกยกเลิก ต้องสร้าง token ใหม่แล้วอัปเดต GitHub Secret", flush=True)
         return False
 
     if str(data.get("id")) != str(page["id"]):
         print(f"❌ TOKEN/PAGE MISMATCH ({page['mode']}): token เป็นของ '{data.get('name')}' ไม่ใช่ PAGE_ID ที่ตั้งไว้", flush=True)
+        annotate("error", f"Token {page['mode']}", f"token เป็นของเพจ {data.get('name')} ไม่ตรง PAGE_ID")
         return False
 
     print(f"✅ TOKEN OK ({page['mode']}): {data.get('name')}", flush=True)
+    annotate("notice", f"Token {page['mode']}", f"OK: {data.get('name')}")
     return True
 
 
@@ -554,6 +568,7 @@ def choose_products(page_modes: list) -> Dict[str, Optional[Dict]]:
         row = best[mode][0]
         if not row:
             print(f"❌ No product found ({mode})", flush=True)
+            annotate("error", f"Product {mode}", "ไม่พบสินค้าที่ผ่านเงื่อนไข")
             result[mode] = None
             continue
 
@@ -818,9 +833,11 @@ def post_image(page_id: str, access_token: str, image_url: str, caption: str) ->
         err = graph_error(data)
         if err:
             print("❌ POST IMAGE ERROR:", err, flush=True)
+            annotate("error", "Post", err)
             return None
         post_id = data.get("post_id") or data.get("id")
         print("✅ POSTED:", post_id, flush=True)
+        annotate("notice", "Posted", str(post_id))
         return post_id
     except Exception as e:
         print("POST IMAGE EXCEPTION:", e, flush=True)
@@ -881,6 +898,7 @@ def run_all_pages() -> None:
             products = choose_products([p["mode"] for p in active])
         except Exception as e:
             print("❌ CSV ERROR:", e, flush=True)
+            annotate("error", "CSV", str(e)[:300])
             for p in active:
                 results[p["mode"]] = "csv_error"
             active = []
@@ -893,6 +911,11 @@ def run_all_pages() -> None:
                 results[mode] = "no_product"
             else:
                 caption = generate_caption(product, mode)
+                annotate(
+                    "notice",
+                    f"Caption {mode}",
+                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | link {product['link_source']}\n---\n{caption}",
+                )
                 post_id = post_image(page["id"], page["token"], product["image"], caption)
                 if post_id:
                     mark_as_posted(mode, product["itemid"], product["image_key"], product["title"])
@@ -911,6 +934,7 @@ def run_all_pages() -> None:
     print("===== SUMMARY =====", flush=True)
     for mode, r in results.items():
         print(f"{mode}: {r}", flush=True)
+    annotate("notice", "Summary", " | ".join(f"{m}: {r}" for m, r in results.items()) + (" (DRY_RUN)" if DRY_RUN else ""))
 
     if not DRY_RUN:
         save_status(results)
