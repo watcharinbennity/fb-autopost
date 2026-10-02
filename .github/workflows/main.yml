@@ -50,7 +50,8 @@ jobs:
           SHOPEE_SUB_ID_PREFIX: "fbbot"
           SHORTENER_BASE_URL: "https://ben-shortener.bennity.workers.dev"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_MODEL: "claude-haiku-4-5-20251001"
+          CLAUDE_MODEL: "claude-sonnet-5-5"
+          CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
           AUTO_REPLY_COMMENTS: "true"
           COMMENT_SCAN_LIMIT: "20"
           MAX_REPLY_PER_RUN: "5"

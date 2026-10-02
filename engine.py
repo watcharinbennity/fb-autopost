@@ -28,10 +28,11 @@ SHOPEE_SUB_ID_PREFIX = os.getenv("SHOPEE_SUB_ID_PREFIX", "fbbot").strip()
 
 # Claude (Anthropic) — ใช้เขียนแคปชันและตอบคอมเมนต์ (ไม่มี key = ใช้แคปชันแม่แบบ)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001").strip()
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5").strip()            # เขียนแคปชัน
+CLAUDE_REPLY_MODEL = os.getenv("CLAUDE_REPLY_MODEL", "claude-haiku-4-5-20251001").strip()  # ตอบคอมเมนต์
 
 
-def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600) -> str:
+def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600, model: str = "") -> str:
     """ให้ Claude เขียนข้อความ; คืน "" ถ้าใช้ไม่ได้ (จะใช้ข้อความแม่แบบแทน)"""
     if ANTHROPIC_API_KEY:
         try:
@@ -43,7 +44,7 @@ def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600
                     "content-type": "application/json",
                 },
                 json={
-                    "model": CLAUDE_MODEL,
+                    "model": model or CLAUDE_MODEL,
                     "max_tokens": max_tokens,
                     "temperature": temperature,
                     "system": system,
@@ -750,6 +751,7 @@ def generate_comment_reply(comment_text: str, page_mode: str) -> str:
         prompt,
         temperature=0.7,
         max_tokens=200,
+        model=CLAUDE_REPLY_MODEL,
     )
     return content or fallback_map.get(page_mode, "ขอบคุณมากครับ 🙏")
 
