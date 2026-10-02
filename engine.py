@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -562,6 +563,23 @@ def row_matches_page(row: Dict, page_mode: str) -> bool:
     return is_smarthome_target(title, cat1, cat2, cat3)
 
 
+
+IMAGE_COLUMNS = ["image_link", "additional_image_link"] + [f"image_link_{i}" for i in range(2, 11)]
+MAX_POST_IMAGES = int(os.getenv("MAX_POST_IMAGES", "4"))
+
+
+def product_images(row: Dict, limit: int = 10) -> list:
+    """รวมรูปสินค้าทุกคอลัมน์ (ไม่ซ้ำ) รูปหลักมาก่อนเสมอ"""
+    out, seen = [], set()
+    for col in IMAGE_COLUMNS:
+        for url in re.split(r"[,|\s]+", norm_text(row.get(col))):
+            url = url.strip()
+            key = normalize_image_key(url)
+            if url.startswith("http") and key and key not in seen:
+                seen.add(key)
+                out.append(url)
+    return out[:limit]
+
 def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[str, Optional[Dict]]:
     """อ่าน CSV รอบเดียว แล้วเลือกสินค้าที่ดีที่สุดให้ทุกเพจพร้อมกัน
     history: ประวัติกันซ้ำต่อเพจ (ค่าเริ่มต้น = ประวัติโพสต์รูป)"""
@@ -625,6 +643,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             "itemid": norm_text(row.get("itemid")),
             "title": norm_text(row.get("title")),
             "image": norm_text(row.get("image_link")),
+            "images": product_images(row),
             "image_key": normalize_image_key(norm_text(row.get("image_link"))),
             "sold": to_float(row.get("item_sold")),
             "rating": to_float(row.get("item_rating")),
@@ -871,6 +890,55 @@ def auto_reply_recent_comments(page_mode: str, page_id: str, access_token: str, 
     print(f"AUTO REPLY DONE ({page_mode}): {total_replied}", flush=True)
 
 
+def post_images(page_id: str, access_token: str, image_urls: list, caption: str) -> Optional[str]:
+    """โพสต์หลายรูปในโพสต์เดียว; ถ้ามีรูปเดียวหรือทำไม่สำเร็จ ใช้โพสต์รูปเดียวแทน"""
+    urls = [u for u in image_urls if u][:MAX_POST_IMAGES]
+    if len(urls) < 2:
+        return post_image(page_id, access_token, urls[0] if urls else "", caption)
+    if DRY_RUN:
+        print(f"[DRY_RUN] would post {len(urls)} images", flush=True)
+        print("[DRY_RUN] caption:\n" + caption, flush=True)
+        return None
+
+    media_ids = []
+    for u in urls:
+        try:
+            res = requests.post(
+                f"{GRAPH}/{page_id}/photos",
+                data={"url": u, "published": "false", "access_token": access_token},
+                timeout=TIMEOUT,
+            )
+            data = safe_json(res)
+            if graph_error(data) or "id" not in data:
+                print("PHOTO UPLOAD SKIP:", graph_error(data), flush=True)
+                continue
+            media_ids.append(data["id"])
+        except Exception as e:
+            print("PHOTO UPLOAD EXCEPTION:", e, flush=True)
+
+    if len(media_ids) < 2:
+        print("MULTI PHOTO → fallback single", flush=True)
+        return post_image(page_id, access_token, urls[0], caption)
+
+    payload = {"message": caption, "access_token": access_token}
+    for n, mid in enumerate(media_ids):
+        payload[f"attached_media[{n}]"] = json.dumps({"media_fbid": mid})
+    try:
+        res = requests.post(f"{GRAPH}/{page_id}/feed", data=payload, timeout=TIMEOUT)
+        data = safe_json(res)
+    except Exception as e:
+        print("MULTI POST EXCEPTION:", e, flush=True)
+        data = {"error": {"message": str(e)}}
+    err = graph_error(data)
+    if err or "id" not in data:
+        print("❌ MULTI POST ERROR:", err, "→ fallback single", flush=True)
+        annotate("warning", "Post", f"multi-photo failed ({err}) → single photo")
+        return post_image(page_id, access_token, urls[0], caption)
+    print(f"✅ POSTED ({len(media_ids)} photos):", data["id"], flush=True)
+    annotate("notice", "Posted", f"{data['id']} ({len(media_ids)} photos)")
+    return data["id"]
+
+
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
     if DRY_RUN:
         print("[DRY_RUN] would post image:", image_url, flush=True)
@@ -967,9 +1035,9 @@ def run_all_pages() -> None:
                 annotate(
                     "notice",
                     f"Caption {mode}",
-                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | link {product['link_source']} | aff_id={'yes' if aff_ok(product['link']) else 'NO'}\n---\n{caption}",
+                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | images {len(product.get('images') or [])} | link {product['link_source']} | aff_id={'yes' if aff_ok(product['link']) else 'NO'}\n---\n{caption}",
                 )
-                post_id = post_image(page["id"], page["token"], product["image"], caption)
+                post_id = post_images(page["id"], page["token"], product.get("images") or [product["image"]], caption)
                 if post_id:
                     mark_as_posted(mode, product["itemid"], product["image_key"], product["title"])
                     time.sleep(3)

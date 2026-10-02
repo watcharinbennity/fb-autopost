@@ -345,24 +345,46 @@ def download_image(url: str, path: str) -> str:
     return path
 
 
+def download_images(product: Dict, work: str, limit: int = 4) -> List[str]:
+    urls = product.get("images") or [product["image"]]
+    paths = []
+    for n, url in enumerate(urls):
+        if len(paths) >= limit:
+            break
+        try:
+            pth = download_image(url, os.path.join(work, f"product{n}.jpg"))
+            with Image.open(pth) as im:
+                if min(im.size) < 300:  # รูปเล็กเกินไป ภาพจะแตก
+                    continue
+                im.verify()
+            paths.append(pth)
+        except Exception as e:
+            print("IMAGE SKIP:", url[:80], e, flush=True)
+    return paths
+
+
 def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] = None) -> Dict:
     os.makedirs(out_dir, exist_ok=True)
     work = tempfile.mkdtemp(prefix=f"reel_{mode}_")
-    img_path = image_path or download_image(product["image"], os.path.join(work, "product.jpg"))
+    img_paths = [image_path] if image_path else download_images(product, work)
+    if not img_paths:
+        raise RuntimeError("ดาวน์โหลดรูปสินค้าไม่ได้")
     script = make_script(product, mode)
 
     voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
     voice_sec = media_duration(voice) if voice else 0.0
     total = min(30.0, max(10.0, voice_sec + 1.2))
 
-    base = base_frame(Image.open(img_path), mode)
+    # 1 รูปต่อฉาก (ถ้ารูปน้อยกว่าฉาก วนใช้รูปเดิม)
+    bases = [base_frame(Image.open(pth), mode) for pth in img_paths]
     frames = []
     for i, text in enumerate(script["slides"]):
         p = os.path.join(work, f"slide{i}.png")
-        slide_frame(base, text, mode, i, len(script["slides"])).save(p)
+        slide_frame(bases[i % len(bases)], text, mode, i, len(script["slides"])).save(p)
         frames.append(p)
 
     out = os.path.join(out_dir, f"reel_{mode}_{product['itemid']}.mp4")
     build_video(frames, voice, out, total)
     print(f"REEL OK ({mode}): {out} {total:.1f}s voice={'yes' if voice else 'no'} script={script['source']}", flush=True)
-    return {"path": out, "script": script, "seconds": total, "voice": bool(voice), "cover": frames[0]}
+    return {"path": out, "script": script, "seconds": total, "voice": bool(voice), "cover": frames[0],
+            "images": len(img_paths)}
