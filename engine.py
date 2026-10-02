@@ -25,17 +25,14 @@ SHOPEE_CSV_URL = os.getenv("SHOPEE_CSV_URL", "").strip()
 SHOPEE_AFFILIATE_ID = os.getenv("SHOPEE_AFFILIATE_ID", "").strip()
 SHOPEE_SUB_ID_PREFIX = os.getenv("SHOPEE_SUB_ID_PREFIX", "fbbot").strip()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
-USE_OPENAI = os.getenv("USE_OPENAI", "true").lower() == "true"
 
-# Claude (Anthropic) — ถ้ามี ANTHROPIC_API_KEY จะใช้ Claude เขียนแคปชันก่อน OpenAI
+# Claude (Anthropic) — ใช้เขียนแคปชันและตอบคอมเมนต์ (ไม่มี key = ใช้แคปชันแม่แบบ)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001").strip()
 
 
 def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600) -> str:
-    """ให้ AI เขียนข้อความ: Claude ก่อน แล้วค่อย OpenAI; คืน "" ถ้าใช้ไม่ได้"""
+    """ให้ Claude เขียนข้อความ; คืน "" ถ้าใช้ไม่ได้ (จะใช้ข้อความแม่แบบแทน)"""
     if ANTHROPIC_API_KEY:
         try:
             res = requests.post(
@@ -65,26 +62,6 @@ def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600
                     return text
         except Exception as e:
             print("CLAUDE EXCEPTION:", e, flush=True)
-
-    if USE_OPENAI and OPENAI_API_KEY:
-        try:
-            res = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": OPENAI_MODEL,
-                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                },
-                timeout=45,
-            )
-            res.raise_for_status()
-            text = res.json()["choices"][0]["message"]["content"].strip()
-            if text:
-                print("AI: openai", flush=True)
-                return text
-        except Exception as e:
-            print("OPENAI ERROR:", e, flush=True)
 
     return ""
 
