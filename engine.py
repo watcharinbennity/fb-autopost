@@ -434,13 +434,15 @@ def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
 def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
+    # เฉพาะคำที่เป็น "อุปกรณ์" สมาร์ทโฮมจริง (ไม่ใช้คำกว้าง ๆ อย่าง smart / camera / กล้อง)
     allow_keywords = [
-        "smart", "smart home", "wifi", "camera", "cctv", "ip camera",
-        "security camera", "กล้อง", "smart plug", "wifi plug",
-        "ปลั๊กอัจฉริยะ", "smart bulb", "smart light", "robot vacuum",
-        "หุ่นยนต์ดูดฝุ่น", "sensor", "doorbell", "router", "mesh",
-        "smart switch", "led", "ไฟ led",
-        "air purifier", "purifier", "filter", "dash cam", "กล้องติดรถ"
+        "smart home", "smart plug", "wifi plug", "ปลั๊กอัจฉริยะ", "ปลั๊กไวไฟ",
+        "smart bulb", "smart light", "หลอดไฟอัจฉริยะ", "smart switch", "สวิตช์อัจฉริยะ",
+        "cctv", "ip camera", "security camera", "กล้องวงจรปิด", "wifi camera", "กล้อง wifi",
+        "dash cam", "กล้องติดรถ", "doorbell", "กริ่งประตู", "smart lock", "กลอนดิจิตอล",
+        "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "air purifier", "เครื่องฟอกอากาศ",
+        "router", "เราเตอร์", "mesh wifi", "access point", "motion sensor", "เซ็นเซอร์",
+        "tuya", "google home", "alexa", "homekit", "zigbee",
     ]
 
     block_keywords = [
@@ -452,7 +454,8 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "กระทะ", "หม้อ", "เครื่องครัว", "ครัว", "ทำอาหาร",
         "frying pan", "pan", "cookware", "kitchenware", "kitchen",
         "ผ้า", "microfiber", "ไมโครไฟเบอร์", "lens cloth", "ฟิล์ม", "film",
-        "เคส", "case", "strap", "สายนาฬิกา", "ที่วางมือถือ"
+        "เคส", "case", "strap", "สายนาฬิกา", "ที่วางมือถือ",
+        "แฟชั่น", "fashion", "เครื่องประดับ", "jewelry", "ห่วงโซ่", "สายคล้อง", "พวงกุญแจ"
     ]
 
     if any(k in text for k in block_keywords):
