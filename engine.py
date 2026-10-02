@@ -32,50 +32,65 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5").strip()           
 CLAUDE_REPLY_MODEL = os.getenv("CLAUDE_REPLY_MODEL", "claude-haiku-4-5-20251001").strip()  # ตอบคอมเมนต์
 
 
+
+def claude_once(use_model: str, system: str, prompt: str, temperature: float, max_tokens: int) -> str:
+    body = {
+        "model": use_model,
+        # เผื่อ token ให้รุ่นที่คิดก่อนตอบ (thinking) ไม่ให้ใช้หมดก่อนได้ข้อความ
+        "max_tokens": max(max_tokens, 4000),
+        "system": system,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if "-4-" in use_model:
+        body["temperature"] = temperature
+    for attempt in range(2):
+        try:
+            res = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=body,
+                timeout=90,
+            )
+            data = res.json()
+        except Exception as e:
+            print("CLAUDE EXCEPTION:", e, flush=True)
+            annotate("warning", "Claude", f"{use_model}: {str(e)[:200]}")
+            return ""
+
+        if res.status_code == 200:
+            blocks = data.get("content", []) or []
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+            if text:
+                print(f"AI: claude ({use_model})", flush=True)
+                return text
+            info = f"{use_model}: empty text stop_reason={data.get('stop_reason')} blocks={[b.get('type') for b in blocks]}"
+            print("CLAUDE EMPTY:", info, flush=True)
+            annotate("warning", "Claude", info)
+            return ""
+
+        err = (data.get("error") or {}) if isinstance(data, dict) else {}
+        msg = str(err.get("message"))
+        if attempt == 0 and "temperature" in msg and "temperature" in body:
+            body.pop("temperature")
+            continue
+        print(f"CLAUDE ERROR: {use_model} {res.status_code} {err.get('type')} {msg[:200]}", flush=True)
+        annotate("warning", "Claude", f"{use_model} {res.status_code} {err.get('type')} {msg[:200]}")
+        return ""
+    return ""
+
 def ai_write(system: str, prompt: str, temperature: float, max_tokens: int = 600, model: str = "") -> str:
     """ให้ Claude เขียนข้อความ; คืน "" ถ้าใช้ไม่ได้ (จะใช้ข้อความแม่แบบแทน)"""
     if ANTHROPIC_API_KEY:
-        use_model = model or CLAUDE_MODEL
-        body = {
-            "model": use_model,
-            "max_tokens": max_tokens,
-            "system": system,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        # บางรุ่น (เช่น Sonnet/Opus 5.x) ไม่รับ temperature — ส่งเฉพาะรุ่น 4.x
-        if "-4-" in use_model:
-            body["temperature"] = temperature
-        for attempt in range(2):
-            try:
-                res = requests.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": ANTHROPIC_API_KEY,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json=body,
-                    timeout=60,
-                )
-                data = res.json()
-                if res.status_code == 200:
-                    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
-                    if text:
-                        print(f"AI: claude ({use_model})", flush=True)
-                        return text
-                    break
-                err = (data.get("error") or {}) if isinstance(data, dict) else {}
-                msg = str(err.get("message"))
-                if attempt == 0 and "temperature" in msg and "temperature" in body:
-                    body.pop("temperature")
-                    continue
-                print(f"CLAUDE ERROR: {res.status_code} {err.get('type')} {msg[:200]}", flush=True)
-                annotate("warning", "Claude", f"{res.status_code} {err.get('type')} {msg[:200]}")
-                break
-            except Exception as e:
-                print("CLAUDE EXCEPTION:", e, flush=True)
-                break
-
+        first = model or CLAUDE_MODEL
+        chain = [first] + ([CLAUDE_REPLY_MODEL] if CLAUDE_REPLY_MODEL and CLAUDE_REPLY_MODEL != first else [])
+        for use_model in chain:
+            text = claude_once(use_model, system, prompt, temperature, max_tokens)
+            if text:
+                return text
     return ""
 
 SHORTENER_BASE_URL = os.getenv(
