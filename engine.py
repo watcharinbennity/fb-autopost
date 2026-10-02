@@ -2,7 +2,9 @@ import csv
 import json
 import os
 import random
+import sys
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Generator, Optional
 from urllib.parse import quote
 
@@ -35,6 +37,59 @@ SHORTENER_BASE_URL = os.getenv(
 AUTO_REPLY_COMMENTS = os.getenv("AUTO_REPLY_COMMENTS", "true").lower() == "true"
 COMMENT_SCAN_LIMIT = int(os.getenv("COMMENT_SCAN_LIMIT", "20"))
 MAX_REPLY_PER_RUN = int(os.getenv("MAX_REPLY_PER_RUN", "5"))
+
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+MIN_RATING = float(os.getenv("MIN_RATING", "4.0"))
+MIN_SOLD = float(os.getenv("MIN_SOLD", "20"))
+GRAPH = "https://graph.facebook.com/v25.0"
+STATUS_FILE = "run_status.json"
+
+PAGES = [
+    {"mode": "ben", "name": "BEN Home & Electrical", "id": PAGE_ID, "token": PAGE_ACCESS_TOKEN},
+    {"mode": "smart", "name": "SmartHome Thailand", "id": PAGE_ID_2, "token": PAGE_ACCESS_TOKEN_2},
+]
+
+# คอลัมน์ลิงก์ Affiliate ที่ feed อาจให้มาเอง (ถ้ามี จะใช้ก่อนการประกอบลิงก์เอง)
+AFF_LINK_COLUMNS = ["product_short link", "product_short_link", "short_link", "offer_link", "affiliate_link"]
+
+
+def graph_error(data) -> str:
+    """คืนข้อความ error ของ Graph API (ไม่มี token) หรือ "" ถ้าไม่มี error"""
+    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+        e = data["error"]
+        return f"code={e.get('code')} sub={e.get('error_subcode')} type={e.get('type')} msg={str(e.get('message'))[:200]}"
+    return ""
+
+
+def safe_json(res) -> Dict:
+    try:
+        return res.json()
+    except Exception:
+        return {"error": {"code": res.status_code, "message": res.text[:200]}}
+
+
+def check_page_token(page: Dict) -> bool:
+    """ตรวจว่า token ยังใช้ได้และเป็นของเพจที่ถูกต้อง"""
+    try:
+        res = requests.get(f"{GRAPH}/me", params={"fields": "id,name", "access_token": page["token"]}, timeout=TIMEOUT)
+        data = safe_json(res)
+    except Exception as e:
+        print(f"TOKEN CHECK EXCEPTION ({page['mode']}): {e}", flush=True)
+        return False
+
+    err = graph_error(data)
+    if err:
+        print(f"❌ TOKEN INVALID ({page['mode']}): {err}", flush=True)
+        if "code=190" in err:
+            print("   → Page Access Token หมดอายุ/ถูกยกเลิก ต้องสร้าง token ใหม่แล้วอัปเดต GitHub Secret", flush=True)
+        return False
+
+    if str(data.get("id")) != str(page["id"]):
+        print(f"❌ TOKEN/PAGE MISMATCH ({page['mode']}): token เป็นของ '{data.get('name')}' ไม่ใช่ PAGE_ID ที่ตั้งไว้", flush=True)
+        return False
+
+    print(f"✅ TOKEN OK ({page['mode']}): {data.get('name')}", flush=True)
+    return True
 
 
 def load_posted() -> Dict:
@@ -225,13 +280,26 @@ def build_shopee_affiliate_link(row: Dict, page_mode: str) -> str:
 
 
 def has_link_data(row: Dict) -> bool:
+    if feed_affiliate_link(row):
+        return True
     landing_page = norm_text(row.get("product_link"))
     itemid = norm_text(row.get("itemid"))
     return bool(landing_page and itemid and SHOPEE_AFFILIATE_ID)
 
 
+def feed_affiliate_link(row: Dict) -> str:
+    for col in AFF_LINK_COLUMNS:
+        v = norm_text(row.get(col))
+        if v.startswith("http"):
+            return v
+    return ""
+
+
 def build_final_link(row: Dict, page_mode: str) -> tuple[str, str]:
     itemid = norm_text(row.get("itemid"))
+    feed_link = feed_affiliate_link(row)
+    if feed_link:
+        return feed_link, "feed_column"
     long_aff_link = build_shopee_affiliate_link(row, page_mode)
 
     if not long_aff_link:
@@ -375,108 +443,107 @@ def score_product(row: Dict, page_mode: str) -> float:
     return score
 
 
-def choose_product(page_mode: str) -> Optional[Dict]:
-    posted = load_posted()
-    page_history = posted[page_mode]
+def row_matches_page(row: Dict, page_mode: str) -> bool:
+    title = norm_text(row.get("title"))
+    cat1 = norm_text(row.get("global_category1"))
+    cat2 = norm_text(row.get("global_category2"))
+    cat3 = norm_text(row.get("global_category3"))
 
-    best_row = None
-    best_score = -1
+    if page_mode == "ben":
+        if is_hard_block_for_ben(title, cat1, cat2, cat3):
+            return False
+        ben_required_keywords = [
+            "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง",
+            "สายไฟ", "สายชาร์จ", "charger", "adapter", "gan",
+            "ไฟฟ้า", "electrical", "breaker", "เบรกเกอร์", "switch", "สวิตช์",
+            "หลอดไฟ", "led", "โคมไฟ",
+            "เครื่องมือ", "tool", "drill", "สว่าน", "ไขควง", "คีม", "ประแจ",
+            "กาว", "พุก", "น็อต", "สกรู", "anchor", "เทปพันสายไฟ"
+        ]
+        raw_text = f"{title} {cat1} {cat2} {cat3}".lower()
+        if not any(k in raw_text for k in ben_required_keywords):
+            return False
+        return is_ben_target(title, cat1, cat2, cat3)
+
+    return is_smarthome_target(title, cat1, cat2, cat3)
+
+
+def choose_products(page_modes: list) -> Dict[str, Optional[Dict]]:
+    """อ่าน CSV รอบเดียว แล้วเลือกสินค้าที่ดีที่สุดให้ทุกเพจพร้อมกัน"""
+    posted = load_posted()
+    best = {m: (None, -1.0) for m in page_modes}
     count = 0
     no_link_count = 0
+    headers_logged = False
 
     for row in iter_csv_rows(SHOPEE_CSV_URL):
+        if not headers_logged:
+            print("CSV COLUMNS:", ", ".join(list(row.keys())[:40]), flush=True)
+            headers_logged = True
+        count += 1
         try:
             title = norm_text(row.get("title"))
             image = norm_text(row.get("image_link"))
             itemid = norm_text(row.get("itemid"))
-            sold = to_float(row.get("item_sold"))
-            rating = to_float(row.get("item_rating"))
-
-            cat1 = norm_text(row.get("global_category1"))
-            cat2 = norm_text(row.get("global_category2"))
-            cat3 = norm_text(row.get("global_category3"))
-
-            count += 1
-
             if not title or not image or not itemid:
                 continue
-
             if not has_link_data(row):
                 no_link_count += 1
                 continue
-
-            if rating < 4.0:
+            if to_float(row.get("item_rating")) < MIN_RATING:
                 continue
-            if sold < 20:
+            if to_float(row.get("item_sold")) < MIN_SOLD:
                 continue
 
             image_key = normalize_image_key(image)
-            if is_duplicate(page_history, itemid, image_key, title):
-                continue
-
-            if page_mode == "ben":
-                if is_hard_block_for_ben(title, cat1, cat2, cat3):
+            for mode in page_modes:
+                if is_duplicate(posted[mode], itemid, image_key, title):
                     continue
-
-                ben_required_keywords = [
-                    "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง",
-                    "สายไฟ", "สายชาร์จ", "charger", "adapter", "gan",
-                    "ไฟฟ้า", "electrical", "breaker", "เบรกเกอร์", "switch", "สวิตช์",
-                    "หลอดไฟ", "led", "โคมไฟ",
-                    "เครื่องมือ", "tool", "drill", "สว่าน", "ไขควง", "คีม", "ประแจ",
-                    "กาว", "พุก", "น็อต", "สกรู", "anchor", "เทปพันสายไฟ"
-                ]
-
-                raw_text = f"{title} {cat1} {cat2} {cat3}".lower()
-                if not any(k in raw_text for k in ben_required_keywords):
+                if not row_matches_page(row, mode):
                     continue
-
-                if not is_ben_target(title, cat1, cat2, cat3):
-                    continue
-            else:
-                if not is_smarthome_target(title, cat1, cat2, cat3):
-                    continue
-
-            score = score_product(row, page_mode)
-            if score > best_score:
-                best_score = score
-                best_row = row
-
-        except Exception:
+                score = score_product(row, mode)
+                if score > best[mode][1]:
+                    best[mode] = (row, score)
+        except Exception as e:
+            if count < 5:
+                print("ROW ERROR:", e, flush=True)
             continue
 
-    print(f"SCAN DONE ({page_mode}): {count}", flush=True)
-    print(f"SKIP NO link ({page_mode}): {no_link_count}", flush=True)
+    print(f"SCAN DONE: {count} rows | no_link={no_link_count}", flush=True)
+    if count == 0:
+        print("❌ CSV ว่างหรืออ่านไม่ได้ — ตรวจ SHOPEE_CSV_URL", flush=True)
 
-    if not best_row:
-        print("❌ No product found", flush=True)
-        return None
+    result: Dict[str, Optional[Dict]] = {}
+    for mode in page_modes:
+        row = best[mode][0]
+        if not row:
+            print(f"❌ No product found ({mode})", flush=True)
+            result[mode] = None
+            continue
 
-    final_link, link_source = build_final_link(best_row, page_mode)
+        final_link, link_source = build_final_link(row, mode)
+        product = {
+            "itemid": norm_text(row.get("itemid")),
+            "title": norm_text(row.get("title")),
+            "image": norm_text(row.get("image_link")),
+            "image_key": normalize_image_key(norm_text(row.get("image_link"))),
+            "sold": to_float(row.get("item_sold")),
+            "rating": to_float(row.get("item_rating")),
+            "price": to_float(row.get("sale_price")),
+            "link": final_link,
+            "link_source": link_source,
+            "cat1": norm_text(row.get("global_category1")),
+            "cat2": norm_text(row.get("global_category2")),
+            "cat3": norm_text(row.get("global_category3")),
+        }
+        print(
+            f"✅ CHOSEN ({mode}): {product['title']} | sold={product['sold']} | "
+            f"rating={product['rating']} | price={product['price']} | link={link_source}",
+            flush=True,
+        )
+        result[mode] = product
 
-    product = {
-        "itemid": norm_text(best_row.get("itemid")),
-        "title": norm_text(best_row.get("title")),
-        "image": norm_text(best_row.get("image_link")),
-        "image_key": normalize_image_key(norm_text(best_row.get("image_link"))),
-        "sold": to_float(best_row.get("item_sold")),
-        "rating": to_float(best_row.get("item_rating")),
-        "price": to_float(best_row.get("sale_price")),
-        "link": final_link,
-        "link_source": link_source,
-        "cat1": norm_text(best_row.get("global_category1")),
-        "cat2": norm_text(best_row.get("global_category2")),
-        "cat3": norm_text(best_row.get("global_category3")),
-    }
-
-    print(
-        f"✅ CHOSEN: {product['title']} | sold={product['sold']} | rating={product['rating']} | price={product['price']}",
-        flush=True
-    )
-    print("LINK SOURCE:", product["link_source"], flush=True)
-    print("FINAL LINK:", product["link"], flush=True)
-
-    return product
+    return result
 
 
 def make_hook(page_mode: str) -> str:
@@ -577,7 +644,7 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 def get_page_posts(page_id: str, access_token: str, limit: int = 5) -> list:
     try:
         res = requests.get(
-            f"https://graph.facebook.com/v25.0/{page_id}/posts",
+            f"{GRAPH}/{page_id}/posts",
             params={
                 "access_token": access_token,
                 "fields": "id,message,created_time",
@@ -585,17 +652,20 @@ def get_page_posts(page_id: str, access_token: str, limit: int = 5) -> list:
             },
             timeout=TIMEOUT,
         )
-        data = res.json()
+        data = safe_json(res)
+        err = graph_error(data)
+        if err:
+            print("GET PAGE POSTS ERROR:", err, flush=True)
         return data.get("data", [])
     except Exception as e:
-        print("GET PAGE POSTS ERROR:", e, flush=True)
+        print("GET PAGE POSTS EXCEPTION:", e, flush=True)
         return []
 
 
 def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
     try:
         res = requests.get(
-            f"https://graph.facebook.com/v25.0/{post_id}/comments",
+            f"{GRAPH}/{post_id}/comments",
             params={
                 "access_token": access_token,
                 "fields": "id,message,from,created_time,parent",
@@ -604,10 +674,13 @@ def get_post_comments(post_id: str, access_token: str, limit: int = 20) -> list:
             },
             timeout=TIMEOUT,
         )
-        data = res.json()
+        data = safe_json(res)
+        err = graph_error(data)
+        if err:
+            print("GET COMMENTS ERROR:", err, flush=True)
         return data.get("data", [])
     except Exception as e:
-        print("GET COMMENTS ERROR:", e, flush=True)
+        print("GET COMMENTS EXCEPTION:", e, flush=True)
         return []
 
 
@@ -667,20 +740,23 @@ def generate_comment_reply(comment_text: str, page_mode: str) -> str:
 
 
 def reply_to_comment(comment_id: str, access_token: str, message: str) -> bool:
+    if DRY_RUN:
+        print(f"[DRY_RUN] would reply to {comment_id}: {message[:80]}", flush=True)
+        return False
     try:
         res = requests.post(
-            f"https://graph.facebook.com/v25.0/{comment_id}/comments",
-            data={
-                "message": message,
-                "access_token": access_token,
-            },
+            f"{GRAPH}/{comment_id}/comments",
+            data={"message": message, "access_token": access_token},
             timeout=TIMEOUT,
         )
-        data = res.json()
-        print("REPLY COMMENT:", data, flush=True)
+        data = safe_json(res)
+        err = graph_error(data)
+        if err:
+            print("REPLY COMMENT ERROR:", err, flush=True)
+            return False
         return "id" in data
     except Exception as e:
-        print("REPLY COMMENT ERROR:", e, flush=True)
+        print("REPLY COMMENT EXCEPTION:", e, flush=True)
         return False
 
 
@@ -706,6 +782,7 @@ def auto_reply_recent_comments(page_mode: str, page_id: str, access_token: str, 
             message = norm_text(c.get("message"))
             from_obj = c.get("from") or {}
             from_name = norm_text(from_obj.get("name"))
+            from_id = norm_text(from_obj.get("id"))
 
             if not comment_id or not message:
                 continue
@@ -713,6 +790,8 @@ def auto_reply_recent_comments(page_mode: str, page_id: str, access_token: str, 
             if was_comment_replied(comment_id):
                 continue
 
+            if from_id and from_id == page_id:
+                continue
             if from_name and from_name.lower() == page_name.lower():
                 continue
 
@@ -731,69 +810,118 @@ def auto_reply_recent_comments(page_mode: str, page_id: str, access_token: str, 
 
 
 def post_image(page_id: str, access_token: str, image_url: str, caption: str) -> Optional[str]:
+    if DRY_RUN:
+        print("[DRY_RUN] would post image:", image_url, flush=True)
+        print("[DRY_RUN] caption:\n" + caption, flush=True)
+        return None
     try:
         res = requests.post(
-            f"https://graph.facebook.com/v25.0/{page_id}/photos",
-            data={
-                "url": image_url,
-                "caption": caption,
-                "access_token": access_token
-            },
-            timeout=TIMEOUT
+            f"{GRAPH}/{page_id}/photos",
+            data={"url": image_url, "caption": caption, "access_token": access_token},
+            timeout=TIMEOUT,
         )
-        data = res.json()
-        print("POST IMAGE:", data, flush=True)
-
-        if "post_id" in data:
-            return data["post_id"]
-        if "id" in data:
-            return data["id"]
-        return None
+        data = safe_json(res)
+        err = graph_error(data)
+        if err:
+            print("❌ POST IMAGE ERROR:", err, flush=True)
+            return None
+        post_id = data.get("post_id") or data.get("id")
+        print("✅ POSTED:", post_id, flush=True)
+        return post_id
     except Exception as e:
-        print("POST IMAGE ERROR:", e, flush=True)
+        print("POST IMAGE EXCEPTION:", e, flush=True)
         return None
 
 
 def comment_link(post_id: str, access_token: str, link: str) -> None:
     try:
         res = requests.post(
-            f"https://graph.facebook.com/v25.0/{post_id}/comments",
-            data={
-                "message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}",
-                "access_token": access_token
-            },
-            timeout=TIMEOUT
+            f"{GRAPH}/{post_id}/comments",
+            data={"message": f"🛒 ลิงก์สั่งซื้ออยู่ตรงนี้\n{link}", "access_token": access_token},
+            timeout=TIMEOUT,
         )
-        print("COMMENT:", res.json(), flush=True)
+        err = graph_error(safe_json(res))
+        print("COMMENT LINK:", err or "ok", flush=True)
     except Exception as e:
-        print("COMMENT ERROR:", e, flush=True)
+        print("COMMENT LINK EXCEPTION:", e, flush=True)
 
 
-def run_page(page_mode: str, page_id: str, access_token: str) -> None:
-    if not page_id or not access_token:
-        print(f"SKIP PAGE ({page_mode}) missing config", flush=True)
-        return
-
-    print("RUN PAGE:", page_mode, "***", flush=True)
-
-    product = choose_product(page_mode)
-    if product:
-        print("IMAGE URL:", product["image"], flush=True)
-        print("LINK:", product["link"], flush=True)
-
-        caption = generate_caption(product, page_mode)
-        post_id = post_image(page_id, access_token, product["image"], caption)
-
-        if post_id:
-            mark_as_posted(page_mode, product["itemid"], product["image_key"], product["title"])
-            time.sleep(3)
-            comment_link(post_id, access_token, product["link"])
-
-    time.sleep(3)
-    page_name = "BEN Home & Electrical" if page_mode == "ben" else "SmartHome Thailand"
-    auto_reply_recent_comments(page_mode, page_id, access_token, page_name)
+def save_status(results: Dict[str, str]) -> None:
+    """บันทึกผลรอบล่าสุดแบบรายวัน (ทำให้ repo มี activity และดูสถานะได้ง่าย)"""
+    today = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+    data = {}
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    for mode, result in results.items():
+        data[mode] = {"date": today, "result": result}
+    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def run_all_pages() -> None:
-    run_page("ben", PAGE_ID, PAGE_ACCESS_TOKEN)
-    run_page("smart", PAGE_ID_2, PAGE_ACCESS_TOKEN_2)
+    if DRY_RUN:
+        print("===== DRY_RUN: อ่านและเลือกสินค้าเท่านั้น ไม่โพสต์/ไม่ตอบคอมเมนต์ =====", flush=True)
+
+    if not SHOPEE_CSV_URL:
+        print("❌ Missing SHOPEE_CSV_URL", flush=True)
+        sys.exit(1)
+
+    results: Dict[str, str] = {}
+    active = []
+    for page in PAGES:
+        if not page["id"] or not page["token"]:
+            print(f"SKIP PAGE ({page['mode']}) missing PAGE_ID/TOKEN secret", flush=True)
+            continue
+        if not check_page_token(page):
+            results[page["mode"]] = "token_error"
+            continue
+        active.append(page)
+
+    products: Dict[str, Optional[Dict]] = {}
+    if active:
+        try:
+            products = choose_products([p["mode"] for p in active])
+        except Exception as e:
+            print("❌ CSV ERROR:", e, flush=True)
+            for p in active:
+                results[p["mode"]] = "csv_error"
+            active = []
+
+    for page in active:
+        mode = page["mode"]
+        try:
+            product = products.get(mode)
+            if not product:
+                results[mode] = "no_product"
+            else:
+                caption = generate_caption(product, mode)
+                post_id = post_image(page["id"], page["token"], product["image"], caption)
+                if post_id:
+                    mark_as_posted(mode, product["itemid"], product["image_key"], product["title"])
+                    time.sleep(3)
+                    comment_link(post_id, page["token"], product["link"])
+                    results[mode] = "posted"
+                else:
+                    results[mode] = "dry_run" if DRY_RUN else "post_error"
+
+            time.sleep(3)
+            auto_reply_recent_comments(mode, page["id"], page["token"], page["name"])
+        except Exception as e:
+            print(f"❌ PAGE ERROR ({mode}):", e, flush=True)
+            results[mode] = "page_error"
+
+    print("===== SUMMARY =====", flush=True)
+    for mode, r in results.items():
+        print(f"{mode}: {r}", flush=True)
+
+    if not DRY_RUN:
+        save_status(results)
+
+    failed = [m for m, r in results.items() if r not in ("posted", "dry_run")]
+    if failed or not results:
+        print("❌ Run มีปัญหา:", failed or "ไม่มีเพจที่ตั้งค่าไว้", flush=True)
+        sys.exit(1)
