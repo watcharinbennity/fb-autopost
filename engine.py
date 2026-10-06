@@ -417,6 +417,23 @@ def build_final_link(row: Dict, page_mode: str) -> tuple[str, str]:
     return long_aff_link, "affiliate_long"
 
 
+
+_KW_CACHE: Dict[str, "re.Pattern"] = {}
+
+
+def has_kw(text: str, keywords) -> bool:
+    """หา keyword ในข้อความ: คำภาษาอังกฤษสั้น ๆ ต้องเป็นคำเต็ม (กัน 'gan' ไปตรงกับ 'cardigan')"""
+    for k in keywords:
+        if re.fullmatch(r"[a-z0-9\- ]+", k) and len(k) <= 5:
+            pat = _KW_CACHE.get(k)
+            if pat is None:
+                pat = _KW_CACHE[k] = re.compile(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])")
+            if pat.search(text):
+                return True
+        elif k in text:
+            return True
+    return False
+
 def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
 
@@ -456,10 +473,10 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "frying pan", "pan", "cookware", "kitchenware", "kitchen"
     ]
 
-    if any(k in text for k in block_keywords):
+    if has_kw(text, block_keywords):
         return False
 
-    return any(k in text for k in allow_keywords)
+    return has_kw(text, allow_keywords)
 
 
 def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
@@ -482,7 +499,7 @@ def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "ฟิล์ม", "film", "กระจกนิรภัย", "tempered", "screen protector", "กันรอย",
         "เคส", "ที่วางมือถือ", "ขาตั้งมือถือ", "สายคล้อง"
     ]
-    return any(k in text for k in hard_blocks)
+    return has_kw(text, hard_blocks)
 
 
 def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
@@ -512,10 +529,10 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "แฟชั่น", "fashion", "เครื่องประดับ", "jewelry", "ห่วงโซ่", "สายคล้อง", "พวงกุญแจ"
     ]
 
-    if any(k in text for k in block_keywords):
+    if has_kw(text, block_keywords):
         return False
 
-    return any(k in text for k in allow_keywords)
+    return has_kw(text, allow_keywords)
 
 
 def score_product(row: Dict, page_mode: str) -> float:
@@ -569,7 +586,7 @@ def row_matches_page(row: Dict, page_mode: str) -> bool:
             "กาว", "พุก", "น็อต", "สกรู", "anchor", "เทปพันสายไฟ"
         ]
         raw_text = f"{title} {cat1} {cat2} {cat3}".lower()
-        if not any(k in raw_text for k in ben_required_keywords):
+        if not has_kw(raw_text, ben_required_keywords):
             return False
         return is_ben_target(title, cat1, cat2, cat3)
 
