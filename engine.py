@@ -1059,7 +1059,7 @@ def run_all_pages() -> None:
                 annotate(
                     "notice",
                     f"Caption {mode}",
-                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | images {len(product.get('images') or [])} | link {product['link_source']} | aff_id={'yes' if aff_ok(product['link']) else 'NO'}\n---\n{caption}",
+                    f"{product['title'][:80]} | rating {product['rating']} | sold {int(product['sold'])} | price {product['price']:.0f} | images {len(product.get('images') or [])} | link {product['link_source']} | aff_id={'yes' if aff_ok(product['link']) else 'NO'}\n---\n{caption}",
                 )
                 post_id = post_images(page["id"], page["token"], product.get("images") or [product["image"]], caption)
                 if post_id:
