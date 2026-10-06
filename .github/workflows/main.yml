@@ -71,6 +71,7 @@ jobs:
           MAX_REPLY_PER_RUN: "5"
           MIN_RATING: "4.0"
           MIN_SOLD: "20"
+          MIN_PRICE: "300"
           FEED_DIAG: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: python app.py
 

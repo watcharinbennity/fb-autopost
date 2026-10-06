@@ -76,6 +76,7 @@ jobs:
           EDGE_VOICE_SMART: "th-TH-PremwadeeNeural"
           MIN_RATING: "4.0"
           MIN_SOLD: "20"
+          MIN_PRICE: "300"
         run: python reels_main.py "$ACTION"
 
       # preview: เก็บคลิปไว้ที่ branch reels-preview (ไม่ปนกับ main)

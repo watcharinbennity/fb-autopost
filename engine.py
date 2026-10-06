@@ -106,6 +106,8 @@ MAX_REPLY_PER_RUN = int(os.getenv("MAX_REPLY_PER_RUN", "5"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 MIN_RATING = float(os.getenv("MIN_RATING", "4.0"))
 MIN_SOLD = float(os.getenv("MIN_SOLD", "20"))
+# feed ไม่มีข้อมูลค่าคอม จึงประมาณจากราคาขาย: ราคา >= 300 บาท × ค่าคอม ~3-4% ≈ 10 บาทขึ้นไป
+MIN_PRICE = float(os.getenv("MIN_PRICE", "300"))
 GRAPH = "https://graph.facebook.com/v25.0"
 STATUS_FILE = "run_status.json"
 IN_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
@@ -626,6 +628,8 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             if to_float(row.get("item_rating")) < MIN_RATING:
                 continue
             if to_float(row.get("item_sold")) < MIN_SOLD:
+                continue
+            if to_float(row.get("sale_price")) < MIN_PRICE:
                 continue
 
             image_key = normalize_image_key(image)
