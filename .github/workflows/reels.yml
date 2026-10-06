@@ -13,6 +13,10 @@ on:
         type: choice
         options: [all, ben, smart]
         default: all
+      via_cron:
+        description: "เรียกจากตัวตั้งเวลาภายนอก (Cloudflare) — ให้ scheduler.py ตัดสินรอบ"
+        type: boolean
+        default: false
   # Reels วันละ 1 คลิปต่อเพจ รอบ 19:30 น. (เวลาไทย, ตั้งใน scheduler.py)
   # ปลุกทุก 15 นาที (เหลื่อมกับ AUTO-POST 7 นาที) เพราะ GitHub cron มักช้าหลายชั่วโมง
   schedule:
@@ -40,7 +44,7 @@ jobs:
       - name: Check slot
         id: slot
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.via_cron }}" != "true" ]; then
             echo "due=true" >> "$GITHUB_OUTPUT"; echo "slot=manual" >> "$GITHUB_OUTPUT"
           else
             python3 scheduler.py check reels
@@ -99,7 +103,7 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" reels-preview
 
       - name: Record slot
-        if: always() && steps.slot.outputs.due == 'true' && github.event_name == 'schedule'
+        if: always() && steps.slot.outputs.due == 'true' && (github.event_name == 'schedule' || inputs.via_cron)
         run: python3 scheduler.py mark reels "${{ steps.slot.outputs.slot }}" "${{ steps.run.outcome }}"
 
       - name: Commit reels history

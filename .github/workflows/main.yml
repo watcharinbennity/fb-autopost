@@ -10,6 +10,10 @@ on:
         description: "DRY_RUN = อ่าน feed และเลือกสินค้าเท่านั้น ไม่โพสต์จริง"
         type: boolean
         default: true
+      via_cron:
+        description: "เรียกจากตัวตั้งเวลาภายนอก (Cloudflare) — ให้ scheduler.py ตัดสินรอบ"
+        type: boolean
+        default: false
   schedule:
     - cron: '*/15 * * * *'
 
@@ -33,7 +37,7 @@ jobs:
       - name: Check slot
         id: slot
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.via_cron }}" != "true" ]; then
             echo "due=true" >> "$GITHUB_OUTPUT"; echo "slot=manual" >> "$GITHUB_OUTPUT"
           else
             python3 scheduler.py check posts
@@ -76,7 +80,7 @@ jobs:
         run: python app.py
 
       - name: Record slot
-        if: always() && steps.slot.outputs.due == 'true' && github.event_name == 'schedule'
+        if: always() && steps.slot.outputs.due == 'true' && (github.event_name == 'schedule' || inputs.via_cron)
         run: python3 scheduler.py mark posts "${{ steps.slot.outputs.slot }}" "${{ steps.run.outcome }}"
 
       # รันแม้ step ก่อนหน้าล้มเหลว เพื่อไม่ให้ประวัติกันซ้ำหาย
