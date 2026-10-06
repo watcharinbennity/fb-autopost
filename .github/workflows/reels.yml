@@ -8,6 +8,11 @@ on:
         type: choice
         options: [preview, post]
         default: preview
+      page:
+        description: "เพจ (all = ทั้ง 2 เพจ)"
+        type: choice
+        options: [all, ben, smart]
+        default: all
   # Reels วันละ 1 คลิปต่อเพจ รอบ 19:30 น. (เวลาไทย, ตั้งใน scheduler.py)
   # ปลุกทุก 15 นาที (เหลื่อมกับ AUTO-POST 7 นาที) เพราะ GitHub cron มักช้าหลายชั่วโมง
   schedule:
@@ -77,6 +82,7 @@ jobs:
           MIN_RATING: "4.0"
           MIN_SOLD: "20"
           MIN_PRICE: "300"
+          ONLY_PAGE: ${{ inputs.page || 'all' }}
         run: python reels_main.py "$ACTION"
 
       # preview: เก็บคลิปไว้ที่ branch reels-preview (ไม่ปนกับ main)

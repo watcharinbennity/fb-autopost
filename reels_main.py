@@ -108,6 +108,9 @@ def publish_reel(page: Dict, video_path: str, caption: str) -> Optional[str]:
 def main(action: str) -> None:
     dry = engine.DRY_RUN or action == "preview"
     pages = [p for p in engine.PAGES if p["id"] and p["token"]]
+    only = os.getenv("ONLY_PAGE", "all").strip().lower()
+    if only in ("ben", "smart"):
+        pages = [p for p in pages if p["mode"] == only]
     if action == "post":
         pages = [p for p in pages if engine.check_page_token(p)]
     if not pages:
