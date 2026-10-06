@@ -132,12 +132,14 @@ def main(action: str) -> None:
             results[mode] = "build_error"
             continue
 
-        caption = (reel["script"]["caption"] or product["title"]) + f"\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{product['link']}"
+        # Reels ใช้ลิงก์ Shopee ตรง (ไม่ผ่านตัวย่อ) เพื่อให้ Facebook Affiliate ตรวจจับและนับเข้าชาเลนจ์
+        reel_link = product.get("shopee_link") or product["link"]
+        caption = (reel["script"]["caption"] or product["title"]) + f"\n\n👉 กดดูรายละเอียดและราคาล่าสุดตรงนี้\n{reel_link}"
         engine.annotate(
             "notice",
             f"Reel script {mode}",
             f"{product['title'][:70]} | {reel['seconds']:.0f}s images={reel['images']} voice={'yes' if reel['voice'] else 'no'} "
-            f"script={reel['script']['source']} aff_id={'yes' if engine.aff_ok(product['link']) else 'NO'}\n"
+            f"script={reel['script']['source']} aff_id={'yes' if engine.aff_ok(reel_link) else 'NO'} link={'shopee' if 'shopee' in reel_link else 'short'}\n"
             f"จอ: {' / '.join(reel['script']['slides'])}\nพากย์: {reel['script']['voiceover']}\n---\n{caption}",
         )
         manifest.append({"mode": mode, "file": os.path.basename(reel["path"]), "title": product["title"],
@@ -150,7 +152,7 @@ def main(action: str) -> None:
         vid = publish_reel(page, reel["path"], caption)
         if vid:
             mark_reel_posted(mode, product)
-            engine.comment_link(vid, page["token"], product["link"])
+            engine.comment_link(vid, page["token"], reel_link)
             results[mode] = "posted"
         else:
             results[mode] = "post_error"

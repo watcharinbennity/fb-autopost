@@ -662,6 +662,9 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             continue
 
         final_link, link_source = build_final_link(row, mode)
+        # ลิงก์ Shopee ตรง (มี affiliate_id) ให้ Facebook Affiliate Partnerships ตรวจจับได้
+        feed_link = feed_affiliate_link(row)
+        shopee_aff_link = feed_link if "affiliate_id=" in feed_link else build_shopee_affiliate_link(row, mode)
         product = {
             "itemid": norm_text(row.get("itemid")),
             "title": norm_text(row.get("title")),
@@ -673,6 +676,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             "price": to_float(row.get("sale_price")),
             "link": final_link,
             "link_source": link_source,
+            "shopee_link": shopee_aff_link or final_link,
             "cat1": norm_text(row.get("global_category1")),
             "cat2": norm_text(row.get("global_category2")),
             "cat3": norm_text(row.get("global_category3")),
