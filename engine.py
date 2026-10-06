@@ -289,7 +289,18 @@ def norm_text(v) -> str:
 def iter_csv_rows(url: str) -> Generator[Dict, None, None]:
     print("Streaming CSV...", flush=True)
 
-    with requests.get(url, stream=True, timeout=(20, 120)) as res:
+    res = None
+    for attempt, wait in enumerate((0, 45, 120)):
+        if wait:
+            print(f"CSV retry in {wait}s (attempt {attempt + 1})", flush=True)
+            time.sleep(wait)
+        res = requests.get(url, stream=True, timeout=(20, 120))
+        if res.status_code in (429, 500, 502, 503, 504):
+            print("CSV HTTP", res.status_code, flush=True)
+            res.close()
+            continue
+        break
+    with res:
         res.raise_for_status()
 
         lines = (

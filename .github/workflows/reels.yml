@@ -8,9 +8,10 @@ on:
         type: choice
         options: [preview, post]
         default: preview
-  # โพสต์ Reels อัตโนมัติวันละ 1 คลิปต่อเพจ เวลา 19:46 น. (เวลาไทย)
+  # Reels วันละ 1 คลิปต่อเพจ รอบ 19:30 น. (เวลาไทย, ตั้งใน scheduler.py)
+  # ปลุกทุก 15 นาที (เหลื่อมกับ AUTO-POST 7 นาที) เพราะ GitHub cron มักช้าหลายชั่วโมง
   schedule:
-    - cron: '46 12 * * *'
+    - cron: '7-59/15 * * * *'
 
 concurrency:
   group: auto-post
@@ -28,19 +29,34 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Check slot
+        id: slot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"; echo "slot=manual" >> "$GITHUB_OUTPUT"
+          else
+            python3 scheduler.py check reels
+          fi
 
       - name: Set up Python
+        if: steps.slot.outputs.due == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install ffmpeg + packages
+        if: steps.slot.outputs.due == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           pip install -q requests pillow edge-tts
 
       - name: Make reels
+        id: run
+        if: steps.slot.outputs.due == 'true'
         env:
           TZ: Asia/Bangkok
           PAGE_ID: ${{ secrets.PAGE_ID }}
@@ -64,7 +80,7 @@ jobs:
 
       # preview: เก็บคลิปไว้ที่ branch reels-preview (ไม่ปนกับ main)
       - name: Publish previews
-        if: always() && env.ACTION == 'preview'
+        if: always() && env.ACTION == 'preview' && steps.slot.outputs.due == 'true'
         run: |
           [ -d reels_out ] || exit 0
           cd reels_out
@@ -75,12 +91,18 @@ jobs:
           git commit -q -m "reels preview ${GITHUB_RUN_ID}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" reels-preview
 
+      - name: Record slot
+        if: always() && steps.slot.outputs.due == 'true' && github.event_name == 'schedule'
+        run: python3 scheduler.py mark reels "${{ steps.slot.outputs.slot }}" "${{ steps.run.outcome }}"
+
       - name: Commit reels history
-        if: always() && env.ACTION == 'post'
+        if: always() && env.ACTION == 'post' && steps.slot.outputs.due == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add posted.json
+          for f in posted.json schedule_state.json; do
+            [ -f "$f" ] && git add "$f"
+          done
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "update reels history"
           git pull --rebase origin "${GITHUB_REF_NAME}"
