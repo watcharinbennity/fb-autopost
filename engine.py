@@ -599,6 +599,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
     count = 0
     no_link_count = 0
     headers_logged = False
+    diag = {"cb": {}, "samples": []}
 
     for row in iter_csv_rows(SHOPEE_CSV_URL):
         if not headers_logged:
@@ -608,6 +609,11 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
                      " | ".join(f"{k}={str(row.get(k))[:120]}" for k in img_cols))
             headers_logged = True
         count += 1
+        if os.getenv("FEED_DIAG") == "true":
+            cb = norm_text(row.get("cb_option"))[:40]
+            diag["cb"][cb] = diag["cb"].get(cb, 0) + 1
+            if len(diag["samples"]) < 6 and cb:
+                diag["samples"].append({k: norm_text(row.get(k))[:60] for k in ("cb_option", "price", "sale_price", "discount_percentage", "is_official_shop", "global_category1")})
         try:
             title = norm_text(row.get("title"))
             image = norm_text(row.get("image_link"))
@@ -637,6 +643,8 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             continue
 
     print(f"SCAN DONE: {count} rows | no_link={no_link_count}", flush=True)
+    if os.getenv("FEED_DIAG") == "true":
+        annotate("notice", "Feed diag", json.dumps(diag, ensure_ascii=False)[:900])
     if count == 0:
         print("❌ CSV ว่างหรืออ่านไม่ได้ — ตรวจ SHOPEE_CSV_URL", flush=True)
 
