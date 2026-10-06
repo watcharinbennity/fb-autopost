@@ -1,0 +1,35 @@
+name: DELETE-POST
+
+# ลบโพสต์/Reels ด้วยมือ: Actions → DELETE-POST → Run workflow → ใส่ ID และเลือกเพจ
+on:
+  workflow_dispatch:
+    inputs:
+      post_id:
+        description: "ID ของโพสต์หรือวิดีโอ (ตัวเลข หรือ PAGEID_POSTID)"
+        required: true
+      page:
+        description: "เพจ"
+        type: choice
+        options: [ben, smart]
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete
+        env:
+          POST_ID: ${{ inputs.post_id }}
+          TOKEN: ${{ inputs.page == 'ben' && secrets.PAGE_ACCESS_TOKEN || secrets.PAGE_ACCESS_TOKEN_2 }}
+        run: |
+          set -e
+          if ! printf '%s' "$POST_ID" | grep -Eq '^[0-9_]+$'; then
+            echo "::error title=Delete::post_id ต้องเป็นตัวเลขหรือ PAGEID_POSTID"; exit 1
+          fi
+          RES=$(curl -sS -X DELETE "https://graph.facebook.com/v25.0/${POST_ID}" -d "access_token=${TOKEN}")
+          echo "$RES"
+          if printf '%s' "$RES" | grep -q '"success":true'; then
+            echo "::notice title=Delete::ลบ ${POST_ID} แล้ว"
+          else
+            echo "::error title=Delete::$RES"; exit 1
+          fi
