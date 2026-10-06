@@ -682,6 +682,9 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
         # ลิงก์ Shopee ตรง (มี affiliate_id) ให้ Facebook Affiliate Partnerships ตรวจจับได้
         feed_link = feed_affiliate_link(row)
         shopee_aff_link = feed_link if "affiliate_id=" in feed_link else build_shopee_affiliate_link(row, mode)
+        # ใช้ลิงก์ Shopee ตรงในทุกโพสต์ (Facebook ตรวจจับเป็นสินค้า Affiliate ได้); ตั้ง USE_SHOPEE_LINK=false เพื่อกลับไปใช้ลิงก์ย่อ
+        if shopee_aff_link and os.getenv("USE_SHOPEE_LINK", "true").lower() == "true":
+            final_link, link_source = shopee_aff_link, "shopee_direct"
         product = {
             "itemid": norm_text(row.get("itemid")),
             "title": norm_text(row.get("title")),
