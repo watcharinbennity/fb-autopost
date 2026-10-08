@@ -6,6 +6,11 @@
         "attempts": 1,
         "result": "success",
         "at": "09:05"
+      },
+      "1200": {
+        "attempts": 1,
+        "result": "success",
+        "at": "12:03"
       }
     }
   },
