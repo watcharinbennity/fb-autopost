@@ -939,7 +939,13 @@ def auto_reply_recent_comments(page_mode: str, page_id: str, access_token: str, 
 
 def post_images(page_id: str, access_token: str, image_urls: list, caption: str) -> Optional[str]:
     """โพสต์หลายรูปในโพสต์เดียว; ถ้ามีรูปเดียวหรือทำไม่สำเร็จ ใช้โพสต์รูปเดียวแทน"""
-    urls = [u for u in image_urls if u][:MAX_POST_IMAGES]
+    urls = [u for u in image_urls if u]
+    try:
+        import imgpick
+        urls = imgpick.order_urls(urls)
+    except Exception as e:
+        print("IMGPICK SKIP:", e, flush=True)
+    urls = urls[:MAX_POST_IMAGES]
     if len(urls) < 2:
         return post_image(page_id, access_token, urls[0] if urls else "", caption)
     if DRY_RUN:

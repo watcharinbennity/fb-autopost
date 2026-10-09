@@ -16,6 +16,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import engine
+import imgpick
 
 W, H, FPS = 1080, 1920, 30
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,9 +53,11 @@ def make_script(product: Dict, mode: str) -> Dict:
 {{"slides": ["...", "...", "...", "..."], "voiceover": "...", "caption": "..."}}
 
 กติกา:
-- slides = ข้อความบนจอ 4 ฉาก ฉากละไม่เกิน 28 ตัวอักษร ห้ามมีอีโมจิ
-  ฉาก 1 hook ดึงความสนใจ / ฉาก 2-3 จุดเด่นจากชื่อสินค้า / ฉาก 4 ชวนกดลิงก์ในคอมเมนต์
-- voiceover = บทพากย์ต่อเนื่อง 2-3 ประโยค อ่านจบใน 12 วินาที ภาษาพูดเป็นกันเอง ไม่มีอีโมจิ ไม่อ่านตัวเลขยาว ๆ
+- slides = ข้อความบนจอ 4 ฉาก ห้ามมีอีโมจิ
+  ฉาก 1 = hook สั้นมาก ไม่เกิน 18 ตัวอักษร เป็นคำถามถึงปัญหาที่คนเจอบ่อย หรือประโยคที่ทำให้หยุดดู (เช่น "ไฟดับบ่อยไหม?")
+  ฉาก 2-3 = จุดเด่นจากชื่อสินค้า ฉากละไม่เกิน 28 ตัวอักษร / ฉาก 4 = ชวนกดลิงก์ในคอมเมนต์
+- voiceover = บทพากย์ต่อเนื่อง 2-3 ประโยค อ่านจบใน 12 วินาที ประโยคแรกต้องเป็น hook เดียวกับฉาก 1 (พูดทันที ไม่ทักทาย)
+  ภาษาพูดเป็นกันเอง ไม่มีอีโมจิ ไม่อ่านตัวเลขยาว ๆ
 - caption = แคปชันโพสต์ 3-4 บรรทัด มีอีโมจิได้ ปิดด้วยแฮชแท็ก 2-3 อัน ห้ามใส่ลิงก์
 - ห้ามแต่งสเปกหรือคุณสมบัติที่ไม่มีในชื่อสินค้า ห้ามใส่ราคา ห้ามเร่งให้รีบซื้อ ห้ามชวนทักแชท
 - ภาษาไทยถูกต้อง เป็นธรรมชาติ
@@ -277,19 +280,35 @@ def slide_frame(base: Image.Image, text: str, mode: str, idx: int, total: int) -
     accent = PAGE_STYLE[mode]["accent"]
     img = base.copy()
     d = ImageDraw.Draw(img)
-    f = font(84 if len(text) <= 18 else 72)
-    lines = wrap(d, text, f, W - 160)[:3]
-    lh = int(f.size * 1.45)
-    block_h = lh * len(lines) + 80
-    top = 1330 + max(0, (420 - block_h) // 2)
-    panel = Image.new("RGBA", (W - 80, block_h), (0, 0, 0, 0))
-    ImageDraw.Draw(panel).rounded_rectangle((0, 0, W - 80, block_h), radius=40, fill=(0, 0, 0, 165))
-    img.alpha_composite(panel, (40, top))
-    d.rounded_rectangle((40, top, 52, top + block_h), radius=6, fill=(*accent, 255))
-    y = top + 40 + lh // 2
-    for ln in lines:
-        d.text((W / 2, y), ln, font=f, fill=(255, 255, 255), anchor="mm")
-        y += lh
+    hook = idx == 0
+    if hook:
+        # ฉากแรก: ตัวหนังสือใหญ่บนแถบสีเพจ ให้สะดุดตาตั้งแต่วินาทีแรก
+        f = font(118 if len(text) <= 12 else 100, b"Black")
+        lines = wrap(d, text, f, W - 140)[:2]
+        lh = int(f.size * 1.35)
+        block_h = lh * len(lines) + 70
+        top = 1300 + max(0, (460 - block_h) // 2)
+        panel = Image.new("RGBA", (W - 60, block_h), (0, 0, 0, 0))
+        ImageDraw.Draw(panel).rounded_rectangle((0, 0, W - 60, block_h), radius=44, fill=(*accent, 245))
+        img.alpha_composite(panel, (30, top))
+        y = top + 35 + lh // 2
+        for ln in lines:
+            d.text((W / 2, y), ln, font=f, fill=(12, 12, 12), anchor="mm")
+            y += lh
+    else:
+        f = font(84 if len(text) <= 18 else 72)
+        lines = wrap(d, text, f, W - 160)[:3]
+        lh = int(f.size * 1.45)
+        block_h = lh * len(lines) + 80
+        top = 1330 + max(0, (420 - block_h) // 2)
+        panel = Image.new("RGBA", (W - 80, block_h), (0, 0, 0, 0))
+        ImageDraw.Draw(panel).rounded_rectangle((0, 0, W - 80, block_h), radius=40, fill=(0, 0, 0, 165))
+        img.alpha_composite(panel, (40, top))
+        d.rounded_rectangle((40, top, 52, top + block_h), radius=6, fill=(*accent, 255))
+        y = top + 40 + lh // 2
+        for ln in lines:
+            d.text((W / 2, y), ln, font=f, fill=(255, 255, 255), anchor="mm")
+            y += lh
     # จุดบอกลำดับฉาก
     for i in range(total):
         x = W / 2 + (i - (total - 1) / 2) * 34
@@ -312,8 +331,10 @@ def build_video(frames: List[str], audio: Optional[str], out_path: str, total_se
         cmd += ["-f", "lavfi", "-t", f"{total_sec:.3f}", "-i", "anullsrc=r=44100:cl=stereo"]
     filt = []
     for i in range(n):
+        # ฉากแรก: ซูมออกเร็ว 0.6 วินาที (จาก 1.15 -> 1.0) ดึงสายตา แล้วค่อยซูมช้าเหมือนฉากอื่น
+        zexpr = "if(lt(on,18),1.15-0.15*on/18,min(1+0.0009*(on-18),1.08))" if i == 0 else "min(1+0.0009*on,1.08)"
         filt.append(
-            f"[{i}:v]scale={W*2}:{H*2},zoompan=z='min(1+0.0009*on,1.08)':d={frames_per}:"
+            f"[{i}:v]scale={W*2}:{H*2},zoompan=z='{zexpr}':d={frames_per}:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},setsar=1,format=yuv420p[v{i}]"
         )
     last = "v0"
@@ -323,7 +344,8 @@ def build_video(frames: List[str], audio: Optional[str], out_path: str, total_se
         last = f"x{i}"
     a_idx = n
     # เสียงพากย์: ปรับความดังให้มาตรฐานโซเชียล (~-16 LUFS)
-    norm = "loudnorm=I=-16:TP=-1.5:LRA=11," if audio else ""
+    norm = ("silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,"
+            "loudnorm=I=-16:TP=-1.5:LRA=11,") if audio else ""
     filt.append(f"[{a_idx}:a]{norm}aresample=44100,apad[aout]")
     cmd += [
         "-filter_complex", ";".join(filt),
@@ -345,7 +367,7 @@ def download_image(url: str, path: str) -> str:
     return path
 
 
-def download_images(product: Dict, work: str, limit: int = 4) -> List[str]:
+def download_images(product: Dict, work: str, limit: int = 5) -> List[str]:
     urls = product.get("images") or [product["image"]]
     paths = []
     for n, url in enumerate(urls):
@@ -369,6 +391,12 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
     img_paths = [image_path] if image_path else download_images(product, work)
     if not img_paths:
         raise RuntimeError("ดาวน์โหลดรูปสินค้าไม่ได้")
+    if len(img_paths) > 1:
+        try:
+            order = imgpick.best_first([Image.open(pth) for pth in img_paths])
+            img_paths = [img_paths[i] for i in order]
+        except Exception as e:
+            print("IMGPICK SKIP:", e, flush=True)
     script = make_script(product, mode)
 
     voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
