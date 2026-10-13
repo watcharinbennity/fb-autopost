@@ -149,6 +149,12 @@ def main(action: str) -> None:
                          "slides": reel["script"]["slides"], "voiceover": reel["script"]["voiceover"],
                          "caption": caption, "seconds": reel["seconds"], "voice": reel["voice"]})
 
+        if not reel["voice"] and os.getenv("ALLOW_SILENT_REELS", "") != "1":
+            # ไม่โพสต์คลิปเงียบ: ปล่อยให้รอบถัดไปลองใหม่
+            engine.annotate("error", f"Reel {mode}", "ไม่มีเสียงพากย์ (TTS ใช้ไม่ได้ทุกตัว) — ไม่โพสต์")
+            results[mode] = "no_voice"
+            continue
+
         if dry:
             results[mode] = "preview"
             continue
