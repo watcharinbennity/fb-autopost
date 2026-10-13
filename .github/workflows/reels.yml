@@ -61,7 +61,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-          pip install -q requests pillow edge-tts
+          pip install -q requests pillow edge-tts gTTS
 
       - name: Make reels
         id: run

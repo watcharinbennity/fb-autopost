@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from typing import Dict, List, Optional
 
 import requests
@@ -127,8 +128,46 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
         return None
     if GOOGLE_TTS_API_KEY:
         return synthesize_google(text, out_path)
+    if TTS_ENGINE == "none":
+        return None
+    # Edge ก่อน (เสียงดีกว่า) ถ้าใช้ไม่ได้ (เช่น Microsoft บล็อก 403) สำรองด้วย Google Translate TTS (gTTS)
     if TTS_ENGINE == "edge":
-        return synthesize_edge(text, out_path, mode)
+        got = synthesize_edge(text, out_path, mode)
+        if got:
+            return got
+    return synthesize_gtts(text, out_path)
+
+
+GTTS_TEMPO = os.getenv("GTTS_TEMPO", "1.18")
+
+
+def synthesize_gtts(text: str, out_path: str) -> Optional[str]:
+    """เสียงสำรอง: Google Translate TTS (ฟรี) แล้วเร่งความเร็วเล็กน้อยด้วย ffmpeg ให้ฟังเป็นธรรมชาติขึ้น"""
+    raw = out_path + ".gtts.mp3"
+    for attempt in range(3):
+        try:
+            from gtts import gTTS
+
+            gTTS(text=text, lang="th").save(raw)
+            if os.path.exists(raw) and os.path.getsize(raw) > 1000:
+                break
+        except Exception as e:
+            print("TTS GTTS ERROR:", e, flush=True)
+            if attempt == 2:
+                engine.annotate("warning", "TTS", f"gtts: {str(e)[:200]}")
+                return None
+            time.sleep(5 * (attempt + 1))
+    else:
+        return None
+    try:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", raw, "-filter:a", f"atempo={GTTS_TEMPO}",
+                        "-ar", "44100", "-b:a", "160k", out_path], check=True)
+    except Exception as e:
+        print("TTS GTTS TEMPO ERROR:", e, flush=True)
+        os.replace(raw, out_path)
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+        print("TTS OK: gtts", flush=True)
+        return out_path
     return None
 
 
