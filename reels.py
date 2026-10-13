@@ -138,7 +138,7 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
     return synthesize_gtts(text, out_path)
 
 
-GTTS_TEMPO = os.getenv("GTTS_TEMPO", "1.18")
+GTTS_TEMPO = os.getenv("GTTS_TEMPO", "1.35")
 
 
 def synthesize_gtts(text: str, out_path: str) -> Optional[str]:
