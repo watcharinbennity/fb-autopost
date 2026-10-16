@@ -19,7 +19,7 @@ VOX = os.getenv("VOX_SPACE", "https://openbmb-voxcpm-demo.hf.space").rstrip("/")
 ASR = os.getenv("ASR_SPACE", "https://biodatlab-whisper-thai-demo.hf.space").rstrip("/")
 REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.ogg"))
 TRIES = int(os.getenv("VOX_TRIES", "4"))
-MAX_CER = float(os.getenv("VOX_MAX_CER", "0.2"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 20% ของตัวอักษร
+MAX_CER = float(os.getenv("VOX_MAX_CER", "0.08"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 8% ของตัวอักษร
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 240
 
@@ -51,8 +51,13 @@ def speak_text(text: str) -> str:
     return text
 
 
+THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
+
+
 def thai_only(s: str) -> str:
     s = s.replace("โซล่าร์", "โซล่า")
+    # ระบบถอดเสียงมักเขียนตัวเลขเป็นเลขอารบิก: แปลงทีละหลักเป็นคำไทย ทั้งบทและที่ได้ยิน
+    s = re.sub(r"\d", lambda m: THAI_DIGITS[int(m.group())], s)
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
