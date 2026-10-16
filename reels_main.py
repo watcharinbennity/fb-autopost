@@ -141,7 +141,7 @@ def main(action: str) -> None:
         engine.annotate(
             "notice",
             f"Reel script {mode}",
-            f"{product['title'][:70]} | {reel['seconds']:.0f}s images={reel['images']} voice={'yes' if reel['voice'] else 'no'} "
+            f"{product['title'][:70]} | {reel['seconds']:.0f}s images={reel['images']} voice={reel.get('tts') or 'no'} "
             f"script={reel['script']['source']} aff_id={'yes' if engine.aff_ok(reel_link) else 'NO'} link={'shopee' if 'shopee' in reel_link else 'short'}\n"
             f"จอ: {' / '.join(reel['script']['slides'])}\nพากย์: {reel['script']['voiceover']}\n---\n{caption}",
         )

@@ -123,6 +123,9 @@ def pick_voice() -> str:
     return names[0] if names else "th-TH-Standard-A"
 
 
+LAST_TTS = ""
+
+
 def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
     if not text:
         return None
@@ -130,11 +133,22 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
         return synthesize_google(text, out_path)
     if TTS_ENGINE == "none":
         return None
+    global LAST_TTS
+    # เสียงหลัก: VoxCPM เสียงเดียวกับคลิป TikTok (ตรวจคำด้วยการถอดเสียง)
+    if TTS_ENGINE in ("vox", "voxcpm"):
+        import voxtts
+        got = voxtts.synthesize(text, out_path)
+        if got:
+            LAST_TTS = "vox"
+            return got
+        engine.annotate("warning", "TTS", "VoxCPM ใช้ไม่ได้/คำไม่ตรงบท -> ใช้เสียงสำรอง")
     # Edge ก่อน (เสียงดีกว่า) ถ้าใช้ไม่ได้ (เช่น Microsoft บล็อก 403) สำรองด้วย Google Translate TTS (gTTS)
-    if TTS_ENGINE == "edge":
+    if TTS_ENGINE in ("edge", "vox", "voxcpm"):
         got = synthesize_edge(text, out_path, mode)
         if got:
+            LAST_TTS = "edge"
             return got
+    LAST_TTS = "gtts"
     return synthesize_gtts(text, out_path)
 
 
@@ -453,5 +467,5 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
     out = os.path.join(out_dir, f"reel_{mode}_{product['itemid']}.mp4")
     build_video(frames, voice, out, total)
     print(f"REEL OK ({mode}): {out} {total:.1f}s voice={'yes' if voice else 'no'} script={script['source']}", flush=True)
-    return {"path": out, "script": script, "seconds": total, "voice": bool(voice), "cover": frames[0],
+    return {"path": out, "script": script, "seconds": total, "voice": bool(voice), "tts": LAST_TTS if voice else "", "cover": frames[0],
             "images": len(img_paths)}

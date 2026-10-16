@@ -80,7 +80,7 @@ jobs:
           CLAUDE_MODEL: "claude-sonnet-5-5"
           CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
-          TTS_ENGINE: "edge"
+          TTS_ENGINE: "vox"
           EDGE_VOICE_BEN: "th-TH-NiwatNeural"
           EDGE_VOICE_SMART: "th-TH-PremwadeeNeural"
           MIN_RATING: "4.0"
