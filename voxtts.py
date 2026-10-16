@@ -22,6 +22,7 @@ TRIES = int(os.getenv("VOX_TRIES", "4"))
 MAX_CER = float(os.getenv("VOX_MAX_CER", "0.08"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 8% ของตัวอักษร
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 240
+BUDGET = int(os.getenv("VOX_BUDGET_SEC", "900"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
 SPEAK_FIX = [
@@ -160,7 +161,11 @@ def synthesize(text: str, out_path: str) -> Optional[str]:
         _annotate("warning", "VOX fail", f"upload ref: {str(e)[:200]}")
         return None
     files, report = [], []
+    t0 = time.time()
     for i, line in enumerate(lines):
+        if time.time() - t0 > BUDGET:
+            _annotate("warning", "VOX fail", "\n".join(report) + "\n(ใช้เวลานานเกิน -> ใช้เสียงสำรอง)")
+            return None
         path, score, heard = gen_line(line, ref, work, i)
         report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if not path or score > MAX_CER:

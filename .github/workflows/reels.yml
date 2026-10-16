@@ -29,7 +29,7 @@ concurrency:
 jobs:
   reels:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 50
     env:
       ACTION: ${{ inputs.action || 'post' }}
     permissions:
