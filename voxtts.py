@@ -18,8 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VOX = os.getenv("VOX_SPACE", "https://openbmb-voxcpm-demo.hf.space").rstrip("/")
 ASR = os.getenv("ASR_SPACE", "https://biodatlab-whisper-thai-demo.hf.space").rstrip("/")
 REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.ogg"))
-TRIES = int(os.getenv("VOX_TRIES", "3"))
-MAX_CER = float(os.getenv("VOX_MAX_CER", "0.25"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 25% ของตัวอักษร
+TRIES = int(os.getenv("VOX_TRIES", "4"))
+MAX_CER = float(os.getenv("VOX_MAX_CER", "0.2"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 20% ของตัวอักษร
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 240
 
@@ -29,11 +29,20 @@ SPEAK_FIX = [
     (re.compile(r"เหมือน(?!กับ)"), "เหมือนกับ"),
 ]
 # คำที่เขียนแทนแล้ว ต้องแปลงกลับตอนเทียบผลถอดเสียง
-CHECK_FIX = [("สะหรุบ", "สรุป")]
+CHECK_FIX = [("สะหรุบ", "สรุป"), ("WiFi", "ไวไฟ"), ("Wi-Fi", "ไวไฟ"), ("wifi", "ไวไฟ"), ("USB", "ยูเอสบี"),
+             ("ลิงค์", "ลิงก์"), ("โซลาร์", "โซล่า")]
 
 
 def log(*a):
     print("VOX:", *a, flush=True)
+
+
+def _annotate(level: str, title: str, msg: str):
+    try:
+        import engine
+        engine.annotate(level, title, msg)
+    except Exception:
+        pass
 
 
 def speak_text(text: str) -> str:
@@ -43,6 +52,7 @@ def speak_text(text: str) -> str:
 
 
 def thai_only(s: str) -> str:
+    s = s.replace("โซล่าร์", "โซล่า")
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
@@ -126,7 +136,7 @@ def gen_line(line: str, ref: dict, work: str, idx: int) -> Tuple[Optional[str], 
         log(f"line {idx} try {k}: cer={score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if score < best[1]:
             best = (path, score, heard)
-        if heard and score <= 0.12:
+        if heard and score <= 0.06:
             break
     return best
 
@@ -142,15 +152,17 @@ def synthesize(text: str, out_path: str) -> Optional[str]:
         ref = upload_ref()
     except Exception as e:
         log("upload ref error:", str(e)[:200])
+        _annotate("warning", "VOX fail", f"upload ref: {str(e)[:200]}")
         return None
     files, report = [], []
     for i, line in enumerate(lines):
         path, score, heard = gen_line(line, ref, work, i)
+        report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if not path or score > MAX_CER:
             log(f"line {i} ไม่ผ่าน (cer={score:.2f}) -> ใช้เสียงสำรอง")
+            _annotate("warning", "VOX fail", "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ: เว็บ VoxCPM ไม่ตอบ)"))
             return None
         files.append(path)
-        report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
     # ต่อท่อนด้วยช่วงเงียบ 0.2 วินาที
     inputs, filt = [], []
     for i, p in enumerate(files):
@@ -166,9 +178,5 @@ def synthesize(text: str, out_path: str) -> Optional[str]:
         log("concat error:", e)
         return None
     log("OK", " / ".join(report))
-    try:
-        import engine
-        engine.annotate("notice", "VOX check", "\n".join(report))
-    except Exception:
-        pass
+    _annotate("notice", "VOX check", "\n".join(report))
     return out_path if os.path.getsize(out_path) > 1000 else None
