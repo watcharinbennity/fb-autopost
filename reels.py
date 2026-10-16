@@ -47,7 +47,7 @@ def make_script(product: Dict, mode: str) -> Dict:
 ทำสคริปต์คลิป Reels ภาษาไทย ยาวประมาณ 12-15 วินาที สำหรับเพจ {page}
 
 สินค้า: {product['title']}
-คะแนนรีวิว: {product['rating']:.1f}
+คะแนนรีวิว: {product['rating']:.2f} (ถ้าใส่คะแนน ให้ใช้ตัวเลขนี้ตรง ๆ ห้ามปัดขึ้น)
 ขายแล้ว: {int(product['sold']):,} ชิ้น
 
 ตอบเป็น JSON อย่างเดียว ตามรูปแบบนี้:
@@ -114,11 +114,11 @@ def fallback_script(product: Dict, mode: str) -> Dict:
         "slides": [
             "ของดีที่ควรมีติดบ้าน" if mode == "ben" else "ของใช้สมาร์ทโฮมน่าใช้",
             short,
-            f"รีวิว {product['rating']:.1f} ขายแล้ว {int(product['sold']):,} ชิ้น",
+            f"รีวิว {product['rating']:.2f} ขายแล้ว {int(product['sold']):,} ชิ้น",
             "กดดูลิงก์ในคอมเมนต์",
         ],
         "voiceover": f"ตัวนี้คือ {short} รีวิวดี คนซื้อเยอะ สนใจกดดูลิงก์ในคอมเมนต์ได้เลย",
-        "caption": f"{product['title']}\n⭐ รีวิว {product['rating']:.1f} | ขายแล้ว {int(product['sold']):,} ชิ้น",
+        "caption": f"{product['title']}\n⭐ รีวิว {product['rating']:.2f} | ขายแล้ว {int(product['sold']):,} ชิ้น",
     }
 
 
