@@ -19,10 +19,10 @@ VOX = os.getenv("VOX_SPACE", "https://openbmb-voxcpm-demo.hf.space").rstrip("/")
 ASR = os.getenv("ASR_SPACE", "https://biodatlab-whisper-thai-demo.hf.space").rstrip("/")
 REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.ogg"))
 TRIES = int(os.getenv("VOX_TRIES", "4"))
-MAX_CER = float(os.getenv("VOX_MAX_CER", "0.08"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 8% ของตัวอักษร
+MAX_CER = float(os.getenv("VOX_MAX_CER", "0"))  # 0 = ถอดเสียงแล้วต้องตรงบททุกคำ (หลังปรับรูปแบบการเขียน)
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 240
-BUDGET = int(os.getenv("VOX_BUDGET_SEC", "900"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
+BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
 SPEAK_FIX = [
@@ -55,14 +55,30 @@ def speak_text(text: str) -> str:
 THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
 
 
+LETTERS = {"A": "เอ", "B": "บี", "C": "ซี", "D": "ดี", "E": "อี", "F": "เอฟ", "G": "จี", "H": "เอช", "I": "ไอ",
+           "J": "เจ", "K": "เค", "L": "แอล", "M": "เอ็ม", "N": "เอ็น", "O": "โอ", "P": "พี", "Q": "คิว", "R": "อาร์",
+           "S": "เอส", "T": "ที", "U": "ยู", "V": "วี", "W": "ดับเบิลยู", "X": "เอ็กซ์", "Y": "วาย", "Z": "แซด"}
+WORDS = {"solar cell": "โซล่าเซลล์", "solar": "โซล่า", "wifi": "ไวไฟ", "wi-fi": "ไวไฟ", "usb": "ยูเอสบี",
+         "led": "แอลอีดี", "cctv": "ซีซีทีวี", "bluetooth": "บลูทูธ", "app": "แอป", "smart": "สมาร์ท",
+         "online": "ออนไลน์", "battery": "แบตเตอรี่", "ok": "โอเค"}
+
+
 def thai_only(s: str) -> str:
-    s = s.replace("โซล่าร์", "โซล่า")
+    # ระบบถอดเสียงชอบเขียนคำทับศัพท์เป็นภาษาอังกฤษ แปลงกลับเป็นคำไทยก่อนเทียบ
+    low = s.lower()
+    for en, th in WORDS.items():
+        low = re.sub(rf"(?<![a-z]){re.escape(en)}(?![a-z])", th, low)
+    s = re.sub(r"(?<![A-Za-z])([A-Za-z]{1,3})(?![A-Za-z])",
+               lambda m: "".join(LETTERS.get(c.upper(), c) for c in m.group(1)), low)
+    s = s.replace("โซล่าร์", "โซล่า").replace("โซลาร์", "โซล่า").replace("ลิงค์", "ลิงก์")
     # ระบบถอดเสียงมักเขียนตัวเลขเป็นเลขอารบิก: แปลงทีละหลักเป็นคำไทย ทั้งบทและที่ได้ยิน
     s = re.sub(r"\d", lambda m: THAI_DIGITS[int(m.group())], s)
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
-    return s.replace("ๆ", "").replace("์", "")
+    # ตัวการันต์ไม่ออกเสียง (เลนส์ = เลน, ลิงก์ = ลิง) ตัดทิ้งทั้งตัวอักษรและเครื่องหมาย
+    s = re.sub("[ก-ฮ][ัิุ]?์", "", s)
+    return s.replace("ๆ", "")
 
 
 def lev(a: str, b: str) -> int:
@@ -111,66 +127,125 @@ def upload_ref() -> dict:
     return {"path": r.json()[0], "meta": {"_type": "gradio.FileData"}, "orig_name": "ref.ogg"}
 
 
-def transcribe(url: str) -> str:
-    try:
-        res = call(ASR, "transcribe", [None, {"path": url, "url": url, "meta": {"_type": "gradio.FileData"},
-                                              "orig_name": "a.mp3"}])
-        return str(res[0])
-    except Exception as e:
-        log("ASR error:", str(e)[:200])
-        return ""
+def upload_asr(path: str) -> str:
+    with open(path, "rb") as f:
+        r = requests.post(f"{ASR}/gradio_api/upload", files={"files": (os.path.basename(path), f, "audio/mpeg")},
+                          timeout=60)
+    r.raise_for_status()
+    return r.json()[0]
 
 
-def gen_line(line: str, ref: dict, work: str, idx: int) -> Tuple[Optional[str], float, str]:
-    """คืน (ไฟล์เสียง, ค่าคลาดเคลื่อน, ข้อความที่ถอดได้) ของตัวที่ดีที่สุด"""
-    best: Tuple[Optional[str], float, str] = (None, 9.0, "")
-    settings = [(2, False), (2.5, True), (3, False)]
-    for k in range(TRIES):
-        cfg, norm = settings[k % len(settings)]
+def transcribe(url: str = "", path: str = "") -> str:
+    """ถอดเสียงเป็นข้อความ (url = ไฟล์ที่อยู่บนเว็บแล้ว, path = ไฟล์ในเครื่อง จะอัปโหลดให้)"""
+    for attempt in range(2):
         try:
-            g = call(VOX, "generate", [speak_text(line), "", ref, False, "", cfg, norm, False])
-            url = g[0]["url"]
-            path = os.path.join(work, f"l{idx}_{k}.wav")
-            with open(path, "wb") as f:
-                f.write(requests.get(url, timeout=120).content)
+            if url:
+                fd = {"path": url, "url": url, "meta": {"_type": "gradio.FileData"}, "orig_name": "a.mp3"}
+            else:
+                fd = {"path": upload_asr(path), "meta": {"_type": "gradio.FileData"}, "orig_name": "a.mp3"}
+            res = call(ASR, "transcribe", [None, fd])
+            return str(res[0])
         except Exception as e:
-            log(f"gen error line {idx} try {k}:", str(e)[:200])
+            log("ASR error:", str(e)[:200])
             time.sleep(5)
+    return ""
+
+
+# ---------------------------------------------------------------- ตัวสร้างเสียงแต่ละแบบ (ทีละท่อน)
+EDGE_VOICES = {"ben": os.getenv("EDGE_VOICE_BEN", "th-TH-NiwatNeural"),
+               "smart": os.getenv("EDGE_VOICE_SMART", "th-TH-PremwadeeNeural")}
+ENGINE_TRIES = {"vox": TRIES, "edge": 3, "gtts": 1}
+ENGINE_TEMPO = {"vox": TEMPO, "edge": "1.0", "gtts": os.getenv("GTTS_TEMPO", "1.35")}
+
+
+def make_vox(ref: dict):
+    settings = [(2, False), (2.5, True), (3, False)]
+
+    def gen(line: str, k: int, path: str) -> str:
+        cfg, norm = settings[k % len(settings)]
+        g = call(VOX, "generate", [speak_text(line), "", ref, False, "", cfg, norm, False])
+        url = g[0]["url"]
+        with open(path, "wb") as f:
+            f.write(requests.get(url, timeout=120).content)
+        return url
+    return gen
+
+
+def make_edge(mode: str):
+    import asyncio
+    import edge_tts
+    voice = EDGE_VOICES.get(mode, EDGE_VOICES["ben"])
+    rates = ["+0%", "-8%", "-15%"]
+
+    def gen(line: str, k: int, path: str) -> str:
+        async def run():
+            await edge_tts.Communicate(line, voice, rate=rates[k % len(rates)]).save(path)
+        asyncio.run(run())
+        if os.path.getsize(path) < 1000:
+            raise RuntimeError("edge empty")
+        return ""
+    return gen
+
+
+def make_gtts():
+    from gtts import gTTS
+
+    def gen(line: str, k: int, path: str) -> str:
+        gTTS(text=line, lang="th").save(path)
+        return ""
+    return gen
+
+
+def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[str], float, str]:
+    """สร้างเสียงท่อนเดียว แล้วถอดเสียงตรวจ คืน (ไฟล์, ค่าคลาดเคลื่อน, ข้อความที่ได้ยิน) ของตัวที่ดีที่สุด"""
+    best: Tuple[Optional[str], float, str] = (None, 9.0, "")
+    for k in range(ENGINE_TRIES.get(name, 1)):
+        path = os.path.join(work, f"{name}_{idx}_{k}.mp3")
+        try:
+            url = gen(line, k, path)
+        except Exception as e:
+            log(f"{name} gen error line {idx} try {k}:", str(e)[:200])
+            time.sleep(3)
             continue
-        heard = transcribe(url)
-        score = cer(line, heard) if heard else 0.5  # ASR ล่ม: ให้ผ่านแบบมีเงื่อนไข
-        log(f"line {idx} try {k}: cer={score:.2f} | บท: {line} | ได้ยิน: {heard}")
+        heard = transcribe(url=url) if url else transcribe(path=path)
+        score = cer(line, heard) if heard else 9.0  # ถอดเสียงไม่ได้ = ตรวจไม่ได้ = ไม่ผ่าน
+        log(f"{name} line {idx} try {k}: cer={score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if score < best[1]:
             best = (path, score, heard)
-        if heard and score <= 0.06:
+        if score <= MAX_CER:
             break
     return best
 
 
-def synthesize(text: str, out_path: str) -> Optional[str]:
-    if not os.path.exists(REF_PATH):
-        return None
+def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -> Optional[str]:
+    """สร้างเสียงทั้งบทด้วยเครื่องยนต์ name ทุกท่อนต้องผ่านการถอดเสียงตรวจ ไม่งั้นคืน None"""
     lines = split_lines(text)
     if not lines:
         return None
-    work = tempfile.mkdtemp(prefix="vox_")
+    work = tempfile.mkdtemp(prefix=f"{name}_")
     try:
-        ref = upload_ref()
+        if name == "vox":
+            if not os.path.exists(REF_PATH):
+                return None
+            gen = make_vox(upload_ref())
+        elif name == "edge":
+            gen = make_edge(mode)
+        else:
+            gen = make_gtts()
     except Exception as e:
-        log("upload ref error:", str(e)[:200])
-        _annotate("warning", "VOX fail", f"upload ref: {str(e)[:200]}")
+        _annotate("warning", f"VOICE fail {name}", f"เริ่มไม่ได้: {str(e)[:200]}")
         return None
     files, report = [], []
     t0 = time.time()
     for i, line in enumerate(lines):
         if time.time() - t0 > BUDGET:
-            _annotate("warning", "VOX fail", "\n".join(report) + "\n(ใช้เวลานานเกิน -> ใช้เสียงสำรอง)")
+            _annotate("warning", f"VOICE fail {name}", "\n".join(report) + "\n(ใช้เวลานานเกิน)")
             return None
-        path, score, heard = gen_line(line, ref, work, i)
+        path, score, heard = gen_line(gen, line, work, i, name)
         report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if not path or score > MAX_CER:
-            log(f"line {i} ไม่ผ่าน (cer={score:.2f}) -> ใช้เสียงสำรอง")
-            _annotate("warning", "VOX fail", "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ: เว็บ VoxCPM ไม่ตอบ)"))
+            _annotate("warning", f"VOICE fail {name}",
+                      "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ)"))
             return None
         files.append(path)
     # ต่อท่อนด้วยช่วงเงียบ 0.2 วินาที
@@ -180,13 +255,13 @@ def synthesize(text: str, out_path: str) -> Optional[str]:
         filt.append(f"[{i}:a]aresample=44100,aformat=channel_layouts=mono,silenceremove=start_periods=1:"
                     f"start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,"
                     f"areverse,apad=pad_dur=0.2[a{i}]")
-    filt.append("".join(f"[a{i}]" for i in range(len(files))) + f"concat=n={len(files)}:v=0:a=1,atempo={TEMPO}[out]")
+    tempo = ENGINE_TEMPO.get(name, "1.0")
+    filt.append("".join(f"[a{i}]" for i in range(len(files))) + f"concat=n={len(files)}:v=0:a=1,atempo={tempo}[out]")
     try:
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(filt),
                         "-map", "[out]", "-ar", "44100", "-b:a", "160k", out_path], check=True)
     except Exception as e:
         log("concat error:", e)
         return None
-    log("OK", " / ".join(report))
-    _annotate("notice", "VOX check", "\n".join(report))
+    _annotate("notice", f"VOICE check {name}", "\n".join(report))
     return out_path if os.path.getsize(out_path) > 1000 else None

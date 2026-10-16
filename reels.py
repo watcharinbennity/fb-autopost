@@ -47,7 +47,7 @@ def make_script(product: Dict, mode: str) -> Dict:
 ทำสคริปต์คลิป Reels ภาษาไทย ยาวประมาณ 12-15 วินาที สำหรับเพจ {page}
 
 สินค้า: {product['title']}
-คะแนนรีวิว: {product['rating']:.1f}
+คะแนนรีวิว: {product['rating']:.2f} (ถ้าใส่คะแนน ให้ใช้ตัวเลขนี้ตรง ๆ ห้ามปัดขึ้น)
 ขายแล้ว: {int(product['sold']):,} ชิ้น
 
 ตอบเป็น JSON อย่างเดียว ตามรูปแบบนี้:
@@ -59,25 +59,45 @@ def make_script(product: Dict, mode: str) -> Dict:
   ฉาก 2-3 = จุดเด่นจากชื่อสินค้า ฉากละไม่เกิน 28 ตัวอักษร / ฉาก 4 = ชวนกดลิงก์ในคอมเมนต์
 - voiceover = บทพากย์ต่อเนื่อง 2-3 ประโยค อ่านจบใน 12 วินาที ประโยคแรกต้องเป็น hook เดียวกับฉาก 1 (พูดทันที ไม่ทักทาย)
   ภาษาพูดเป็นกันเอง ไม่มีอีโมจิ ไม่อ่านตัวเลขยาว ๆ
+  เขียนด้วยตัวอักษรไทยล้วน ห้ามมีตัวอักษรภาษาอังกฤษ ชื่อยี่ห้อ หรือรหัสรุ่น (เรียกว่า "ตัวนี้" แทน) ตัวเลขเขียนเป็นคำไทย เช่น "สองก้อน"
+  เว้นวรรคระหว่างวลี/ประโยค และแต่ละประโยคต้องต่อจากประโยคก่อนอย่างเป็นเหตุเป็นผล
 - caption = แคปชันโพสต์ 3-4 บรรทัด มีอีโมจิได้ ปิดด้วยแฮชแท็ก 2-3 อัน ห้ามใส่ลิงก์
 - ห้ามแต่งสเปกหรือคุณสมบัติที่ไม่มีในชื่อสินค้า ห้ามใส่ราคา ห้ามเร่งให้รีบซื้อ ห้ามชวนทักแชท
 - ภาษาไทยถูกต้อง เป็นธรรมชาติ
 """.strip()
-    raw = engine.ai_write(
-        "คุณเป็นครีเอเตอร์ทำคลิปรีวิวสินค้าสั้น ๆ ภาษาไทย ตอบเป็น JSON ที่ถูกต้องเท่านั้น",
-        prompt,
-        temperature=0.8,
-        max_tokens=1200,
-    )
-    data = None
-    if raw:
-        m = re.search(r"\{.*\}", raw, re.S)
+    data, feedback = None, ""
+    for rnd in range(engine.QA_ROUNDS):
+        raw = engine.ai_write(
+            "คุณเป็นครีเอเตอร์ทำคลิปรีวิวสินค้าสั้น ๆ ภาษาไทย ตอบเป็น JSON ที่ถูกต้องเท่านั้น",
+            prompt + feedback,
+            temperature=0.8,
+            max_tokens=1200,
+        )
+        cand = None
+        m = re.search(r"\{.*\}", raw or "", re.S)
         if m:
             try:
-                data = json.loads(m.group(0))
+                cand = json.loads(m.group(0))
             except Exception as e:
                 print("REELS SCRIPT JSON ERROR:", e, flush=True)
-    if not (isinstance(data, dict) and isinstance(data.get("slides"), list) and len(data["slides"]) >= 2):
+        if not (isinstance(cand, dict) and isinstance(cand.get("slides"), list) and len(cand["slides"]) >= 2):
+            continue
+        vo = EMOJI_RE.sub("", str(cand.get("voiceover", ""))).strip()
+        issues = []
+        if re.search(r"[A-Za-z0-9]", vo):
+            issues.append("บทพากย์มีตัวอักษรภาษาอังกฤษหรือตัวเลขอารบิก ต้องเป็นตัวอักษรไทยล้วน")
+        else:
+            review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(cand["slides"])) + \
+                     f"\n\nบทพากย์ (voiceover):\n{vo}\n\nแคปชัน:\n{cand.get('caption', '')}"
+            ok, issues = engine.qa_review(product, "reel", review, page)
+        engine.annotate("notice" if not issues else "warning", f"QA reel {mode}",
+                        f"รอบ {rnd + 1}: {'ผ่าน' if not issues else 'ไม่ผ่าน'}" + ("" if not issues else "\n" + "\n".join(issues)))
+        if not issues:
+            data = cand
+            break
+        feedback = "\n\nฉบับก่อนหน้าไม่ผ่านการตรวจ เพราะ:\n- " + "\n- ".join(issues) + "\nเขียนใหม่ให้แก้ทุกข้อ"
+    if data is None:
+        # ไม่มีสคริปต์ที่ผ่านการตรวจ: คลิปนี้จะไม่ถูกโพสต์
         data = fallback_script(product, mode)
         data["source"] = "template"
     else:
@@ -94,11 +114,11 @@ def fallback_script(product: Dict, mode: str) -> Dict:
         "slides": [
             "ของดีที่ควรมีติดบ้าน" if mode == "ben" else "ของใช้สมาร์ทโฮมน่าใช้",
             short,
-            f"รีวิว {product['rating']:.1f} ขายแล้ว {int(product['sold']):,} ชิ้น",
+            f"รีวิว {product['rating']:.2f} ขายแล้ว {int(product['sold']):,} ชิ้น",
             "กดดูลิงก์ในคอมเมนต์",
         ],
         "voiceover": f"ตัวนี้คือ {short} รีวิวดี คนซื้อเยอะ สนใจกดดูลิงก์ในคอมเมนต์ได้เลย",
-        "caption": f"{product['title']}\n⭐ รีวิว {product['rating']:.1f} | ขายแล้ว {int(product['sold']):,} ชิ้น",
+        "caption": f"{product['title']}\n⭐ รีวิว {product['rating']:.2f} | ขายแล้ว {int(product['sold']):,} ชิ้น",
     }
 
 
@@ -134,22 +154,16 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
     if TTS_ENGINE == "none":
         return None
     global LAST_TTS
-    # เสียงหลัก: VoxCPM เสียงเดียวกับคลิป TikTok (ตรวจคำด้วยการถอดเสียง)
-    if TTS_ENGINE in ("vox", "voxcpm"):
-        import voxtts
-        got = voxtts.synthesize(text, out_path)
+    import voxtts
+    # ทุกเสียงต้องผ่านการถอดเสียงตรวจทุกท่อน: VoxCPM (เสียงเดียวกับ TikTok) -> Edge -> Google Translate
+    order = ["vox", "edge", "gtts"] if TTS_ENGINE in ("vox", "voxcpm") else ["edge", "gtts"]
+    for name in order:
+        got = voxtts.synthesize(text, out_path, name, mode)
         if got:
-            LAST_TTS = "vox"
+            LAST_TTS = name
             return got
-        engine.annotate("warning", "TTS", "VoxCPM ใช้ไม่ได้/คำไม่ตรงบท -> ใช้เสียงสำรอง")
-    # Edge ก่อน (เสียงดีกว่า) ถ้าใช้ไม่ได้ (เช่น Microsoft บล็อก 403) สำรองด้วย Google Translate TTS (gTTS)
-    if TTS_ENGINE in ("edge", "vox", "voxcpm"):
-        got = synthesize_edge(text, out_path, mode)
-        if got:
-            LAST_TTS = "edge"
-            return got
-    LAST_TTS = "gtts"
-    return synthesize_gtts(text, out_path)
+    engine.annotate("error", "TTS", "ไม่มีเสียงที่ผ่านการตรวจคำ -> ไม่โพสต์คลิปนี้")
+    return None
 
 
 GTTS_TEMPO = os.getenv("GTTS_TEMPO", "1.35")
@@ -452,7 +466,9 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
             print("IMGPICK SKIP:", e, flush=True)
     script = make_script(product, mode)
 
-    voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
+    voice = None
+    if script["source"] == "claude":  # สคริปต์ที่ไม่ผ่านการตรวจจะไม่ถูกโพสต์ จึงไม่ต้องสร้างเสียง
+        voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
     voice_sec = media_duration(voice) if voice else 0.0
     total = min(30.0, max(10.0, voice_sec + 1.2))
 
