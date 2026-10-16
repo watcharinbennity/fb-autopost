@@ -89,7 +89,7 @@ def make_script(product: Dict, mode: str) -> Dict:
         else:
             review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(cand["slides"])) + \
                      f"\n\nบทพากย์ (voiceover):\n{vo}\n\nแคปชัน:\n{cand.get('caption', '')}"
-            ok, issues = engine.qa_review(product, "reel", review)
+            ok, issues = engine.qa_review(product, "reel", review, page)
         engine.annotate("notice" if not issues else "warning", f"QA reel {mode}",
                         f"รอบ {rnd + 1}: {'ผ่าน' if not issues else 'ไม่ผ่าน'}" + ("" if not issues else "\n" + "\n".join(issues)))
         if not issues:

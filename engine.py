@@ -751,7 +751,7 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
 QA_ROUNDS = int(os.getenv("QA_ROUNDS", "3"))
 
 
-def qa_review(product: Dict, kind: str, content: str) -> Tuple[bool, List[str]]:
+def qa_review(product: Dict, kind: str, content: str, page_name: str = "") -> Tuple[bool, List[str]]:
     """ให้ Claude ตรวจงานก่อนโพสต์ทุกครั้ง คืน (ผ่านไหม, รายการปัญหา); ตรวจไม่ได้ = ไม่ผ่าน"""
     extra = ""
     if kind == "reel":
@@ -766,6 +766,7 @@ def qa_review(product: Dict, kind: str, content: str) -> Tuple[bool, List[str]]:
 ชื่อสินค้า: {product['title']}
 คะแนนรีวิว: {float(product['rating']):.1f}
 ขายแล้ว: {int(product['sold']):,} ชิ้น
+ชื่อเพจที่โพสต์: {page_name or "-"} (ใช้ชื่อเพจเป็นแฮชแท็กได้ แฮชแท็กหมวดสินค้าทั่วไปใช้ได้)
 
 งานที่ต้องตรวจ:
 {content}
@@ -829,7 +830,8 @@ def generate_caption(product: Dict, page_mode: str) -> str:
         )
         if not content:
             break
-        ok, issues = qa_review(product, "caption", content)
+        ok, issues = qa_review(product, "caption", content,
+                               "SmartHome Thailand" if page_mode == "smart" else "BEN Home & Electrical")
         annotate("notice" if ok else "warning", f"QA caption {page_mode}",
                  f"รอบ {rnd + 1}: {'ผ่าน' if ok else 'ไม่ผ่าน'}" + ("" if ok else "\n" + "\n".join(issues)))
         if ok:

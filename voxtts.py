@@ -19,7 +19,7 @@ VOX = os.getenv("VOX_SPACE", "https://openbmb-voxcpm-demo.hf.space").rstrip("/")
 ASR = os.getenv("ASR_SPACE", "https://biodatlab-whisper-thai-demo.hf.space").rstrip("/")
 REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.ogg"))
 TRIES = int(os.getenv("VOX_TRIES", "4"))
-MAX_CER = float(os.getenv("VOX_MAX_CER", "0.08"))  # ยอมให้ถอดเสียงคลาดได้ไม่เกิน 8% ของตัวอักษร
+MAX_CER = float(os.getenv("VOX_MAX_CER", "0"))  # 0 = ถอดเสียงแล้วต้องตรงบททุกคำ (หลังปรับรูปแบบการเขียน)
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 240
 BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
@@ -55,14 +55,30 @@ def speak_text(text: str) -> str:
 THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
 
 
+LETTERS = {"A": "เอ", "B": "บี", "C": "ซี", "D": "ดี", "E": "อี", "F": "เอฟ", "G": "จี", "H": "เอช", "I": "ไอ",
+           "J": "เจ", "K": "เค", "L": "แอล", "M": "เอ็ม", "N": "เอ็น", "O": "โอ", "P": "พี", "Q": "คิว", "R": "อาร์",
+           "S": "เอส", "T": "ที", "U": "ยู", "V": "วี", "W": "ดับเบิลยู", "X": "เอ็กซ์", "Y": "วาย", "Z": "แซด"}
+WORDS = {"solar cell": "โซล่าเซลล์", "solar": "โซล่า", "wifi": "ไวไฟ", "wi-fi": "ไวไฟ", "usb": "ยูเอสบี",
+         "led": "แอลอีดี", "cctv": "ซีซีทีวี", "bluetooth": "บลูทูธ", "app": "แอป", "smart": "สมาร์ท",
+         "online": "ออนไลน์", "battery": "แบตเตอรี่", "ok": "โอเค"}
+
+
 def thai_only(s: str) -> str:
-    s = s.replace("โซล่าร์", "โซล่า")
+    # ระบบถอดเสียงชอบเขียนคำทับศัพท์เป็นภาษาอังกฤษ แปลงกลับเป็นคำไทยก่อนเทียบ
+    low = s.lower()
+    for en, th in WORDS.items():
+        low = re.sub(rf"(?<![a-z]){re.escape(en)}(?![a-z])", th, low)
+    s = re.sub(r"(?<![A-Za-z])([A-Za-z]{1,3})(?![A-Za-z])",
+               lambda m: "".join(LETTERS.get(c.upper(), c) for c in m.group(1)), low)
+    s = s.replace("โซล่าร์", "โซล่า").replace("โซลาร์", "โซล่า").replace("ลิงค์", "ลิงก์")
     # ระบบถอดเสียงมักเขียนตัวเลขเป็นเลขอารบิก: แปลงทีละหลักเป็นคำไทย ทั้งบทและที่ได้ยิน
     s = re.sub(r"\d", lambda m: THAI_DIGITS[int(m.group())], s)
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
-    return s.replace("ๆ", "").replace("์", "")
+    # ตัวการันต์ไม่ออกเสียง (เลนส์ = เลน, ลิงก์ = ลิง) ตัดทิ้งทั้งตัวอักษรและเครื่องหมาย
+    s = re.sub("[ก-ฮ][ัิุ]?์", "", s)
+    return s.replace("ๆ", "")
 
 
 def lev(a: str, b: str) -> int:
@@ -138,7 +154,7 @@ def transcribe(url: str = "", path: str = "") -> str:
 # ---------------------------------------------------------------- ตัวสร้างเสียงแต่ละแบบ (ทีละท่อน)
 EDGE_VOICES = {"ben": os.getenv("EDGE_VOICE_BEN", "th-TH-NiwatNeural"),
                "smart": os.getenv("EDGE_VOICE_SMART", "th-TH-PremwadeeNeural")}
-ENGINE_TRIES = {"vox": TRIES, "edge": 2, "gtts": 1}
+ENGINE_TRIES = {"vox": TRIES, "edge": 3, "gtts": 1}
 ENGINE_TEMPO = {"vox": TEMPO, "edge": "1.0", "gtts": os.getenv("GTTS_TEMPO", "1.35")}
 
 
@@ -159,11 +175,11 @@ def make_edge(mode: str):
     import asyncio
     import edge_tts
     voice = EDGE_VOICES.get(mode, EDGE_VOICES["ben"])
-    rates = ["+0%", "-8%"]
+    rates = ["+0%", "-8%", "-15%"]
 
     def gen(line: str, k: int, path: str) -> str:
         async def run():
-            await edge_tts.Communicate(line, voice, rate=rates[k % 2]).save(path)
+            await edge_tts.Communicate(line, voice, rate=rates[k % len(rates)]).save(path)
         asyncio.run(run())
         if os.path.getsize(path) < 1000:
             raise RuntimeError("edge empty")
@@ -196,7 +212,7 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
         log(f"{name} line {idx} try {k}: cer={score:.2f} | บท: {line} | ได้ยิน: {heard}")
         if score < best[1]:
             best = (path, score, heard)
-        if score <= 0.03:
+        if score <= MAX_CER:
             break
     return best
 
