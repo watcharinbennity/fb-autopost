@@ -149,6 +149,10 @@ def main(action: str) -> None:
                          "slides": reel["script"]["slides"], "voiceover": reel["script"]["voiceover"],
                          "caption": caption, "seconds": reel["seconds"], "voice": reel["voice"]})
 
+        if reel["script"].get("source") != "claude":
+            engine.annotate("error", f"Reel {mode}", "สคริปต์ไม่ผ่านการตรวจ — ไม่โพสต์")
+            results[mode] = "qa_fail"
+            continue
         if not reel["voice"] and os.getenv("ALLOW_SILENT_REELS", "") != "1":
             # ไม่โพสต์คลิปเงียบ: ปล่อยให้รอบถัดไปลองใหม่
             engine.annotate("error", f"Reel {mode}", "ไม่มีเสียงพากย์ (TTS ใช้ไม่ได้ทุกตัว) — ไม่โพสต์")

@@ -6,7 +6,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Generator, Optional
+from typing import Dict, Generator, List, Optional, Tuple
 from urllib.parse import quote
 
 import requests
@@ -748,6 +748,49 @@ def fallback_caption(product: Dict, page_mode: str) -> str:
     ])
 
 
+QA_ROUNDS = int(os.getenv("QA_ROUNDS", "3"))
+
+
+def qa_review(product: Dict, kind: str, content: str) -> Tuple[bool, List[str]]:
+    """ให้ Claude ตรวจงานก่อนโพสต์ทุกครั้ง คืน (ผ่านไหม, รายการปัญหา); ตรวจไม่ได้ = ไม่ผ่าน"""
+    extra = ""
+    if kind == "reel":
+        extra = """
+- บทพากย์ (voiceover) ต้องเป็นตัวอักษรไทยล้วน ห้ามมีตัวอักษรภาษาอังกฤษ รหัสรุ่น หรือตัวเลขอารบิก (ตัวเลขต้องเขียนเป็นคำไทย)
+- ประโยคแรกของบทพากย์ต้องตรงกับฉากที่ 1
+- ข้อความบนจอแต่ละฉากต้องสอดคล้องกับบทพากย์ช่วงเดียวกัน"""
+    prompt = f"""
+ตรวจงานโพสต์ Facebook ก่อนเผยแพร่ ตรวจละเอียดทีละบรรทัด
+
+ข้อมูลสินค้าที่เป็นความจริง (ใช้ได้เท่านี้):
+ชื่อสินค้า: {product['title']}
+คะแนนรีวิว: {float(product['rating']):.1f}
+ขายแล้ว: {int(product['sold']):,} ชิ้น
+
+งานที่ต้องตรวจ:
+{content}
+
+เกณฑ์ (ผิดข้อใดข้อหนึ่ง = ไม่ผ่าน):
+- ทุกข้อความเกี่ยวกับสินค้าต้องมีที่มาจากข้อมูลด้านบน ห้ามมีสเปก คุณสมบัติ หรือคำรับรองที่แต่งเพิ่ม
+- อ่านทีละบรรทัด แต่ละบรรทัดต้องต่อจากบรรทัดก่อนอย่างมีเหตุผล ไม่กระโดด ไม่ขัดกันเอง
+- ภาษาไทยสะกดถูก ไวยากรณ์ถูก เป็นธรรมชาติ ไม่มีคำแปลกหรือคำที่ไม่มีความหมาย
+- ห้ามมีราคา ห้ามเร่งให้รีบซื้อ ห้ามชวนทักแชท ห้ามมีลิงก์ในเนื้อหา{extra}
+
+ตอบเป็น JSON อย่างเดียว: {{"ok": true/false, "issues": ["ปัญหาที่เจอ ระบุคำหรือบรรทัด", ...]}}
+""".strip()
+    raw = ai_write("คุณเป็นบรรณาธิการตรวจคุณภาพเนื้อหาภาษาไทยที่เข้มงวด ตอบเป็น JSON เท่านั้น", prompt,
+                   temperature=0.0, max_tokens=800)
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return False, ["ตรวจงานไม่ได้ (Claude ไม่ตอบ)"]
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return False, ["ตรวจงานไม่ได้ (อ่านผลไม่ออก)"]
+    issues = [str(x) for x in (data.get("issues") or [])]
+    return bool(data.get("ok")) and not issues, issues
+
+
 def generate_caption(product: Dict, page_mode: str) -> str:
     sold_text = f"{int(product['sold']):,}"
     if page_mode == "smart":
@@ -777,11 +820,22 @@ def generate_caption(product: Dict, page_mode: str) -> str:
 - ตอบเฉพาะตัวแคปชัน ไม่ต้องมีคำอธิบายอื่น
 """.strip()
 
-    content = ai_write(
-        "คุณเป็นแอดมินเพจขายของออนไลน์ชาวไทย เขียนแคปชันกระชับ เป็นกันเอง และซื่อสัตย์ต่อข้อมูลสินค้า",
-        prompt,
-        temperature=0.9,
-    )
+    content, feedback = "", ""
+    for rnd in range(QA_ROUNDS):
+        content = ai_write(
+            "คุณเป็นแอดมินเพจขายของออนไลน์ชาวไทย เขียนแคปชันกระชับ เป็นกันเอง และซื่อสัตย์ต่อข้อมูลสินค้า",
+            prompt + feedback,
+            temperature=0.9,
+        )
+        if not content:
+            break
+        ok, issues = qa_review(product, "caption", content)
+        annotate("notice" if ok else "warning", f"QA caption {page_mode}",
+                 f"รอบ {rnd + 1}: {'ผ่าน' if ok else 'ไม่ผ่าน'}" + ("" if ok else "\n" + "\n".join(issues)))
+        if ok:
+            break
+        feedback = "\n\nฉบับก่อนหน้าไม่ผ่านการตรวจ เพราะ:\n- " + "\n- ".join(issues) + "\nเขียนใหม่ให้แก้ทุกข้อ"
+        content = ""
     if not content:
         return fallback_caption(product, page_mode)
 
