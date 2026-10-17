@@ -21,7 +21,11 @@ REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.o
 TRIES = int(os.getenv("VOX_TRIES", "4"))
 MAX_CER = float(os.getenv("VOX_MAX_CER", "0"))  # 0 = ถอดเสียงแล้วต้องตรงบททุกคำ (หลังปรับรูปแบบการเขียน)
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
-TIMEOUT = 240
+TIMEOUT = 180
+DEADLINE = 0.0
+LAST_ERROR = ""
+LAST_FAIL = ("", "")  # (ท่อนที่ไม่ผ่าน, ที่ระบบได้ยิน)
+FAILS: list = []  # ทุกท่อนที่ไม่ผ่าน จากทุกเสียง: (เสียง, บท, ที่ได้ยิน)
 BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
@@ -63,6 +67,39 @@ WORDS = {"solar cell": "โซล่าเซลล์", "solar": "โซล่�
          "online": "ออนไลน์", "battery": "แบตเตอรี่", "ok": "โอเค"}
 
 
+def thai_number(num: str) -> str:
+    """อ่านจำนวนเต็มเป็นคำไทย เช่น 30000 -> สามหมื่น, 21 -> ยี่สิบเอ็ด (เลขขึ้นต้นด้วย 0 อ่านทีละหลัก)"""
+    if not num.isdigit():
+        return num
+    if len(num) > 1 and num.startswith("0") or len(num) > 12:
+        return "".join(THAI_DIGITS[int(c)] for c in num)
+    n = int(num)
+    if n == 0:
+        return "ศูนย์"
+    units = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"]
+
+    def below_million(x: int) -> str:
+        out, digits = "", str(x)
+        for i, ch in enumerate(digits):
+            d, pos = int(ch), len(digits) - i - 1
+            if d == 0:
+                continue
+            if pos == 1 and d == 1:
+                w = "สิบ"
+            elif pos == 1 and d == 2:
+                w = "ยี่สิบ"
+            elif pos == 0 and d == 1 and len(digits) > 1:
+                w = "เอ็ด"
+            else:
+                w = THAI_DIGITS[d] + units[pos]
+            out += w
+        return out
+
+    if n >= 1_000_000:
+        return below_million(n // 1_000_000) + "ล้าน" + (below_million(n % 1_000_000) if n % 1_000_000 else "")
+    return below_million(n)
+
+
 def thai_only(s: str) -> str:
     # ระบบถอดเสียงชอบเขียนคำทับศัพท์เป็นภาษาอังกฤษ แปลงกลับเป็นคำไทยก่อนเทียบ
     low = s.lower()
@@ -72,12 +109,14 @@ def thai_only(s: str) -> str:
                lambda m: "".join(LETTERS.get(c.upper(), c) for c in m.group(1)), low)
     s = s.replace("โซล่าร์", "โซล่า").replace("โซลาร์", "โซล่า").replace("ลิงค์", "ลิงก์")
     # ระบบถอดเสียงมักเขียนตัวเลขเป็นเลขอารบิก: แปลงทีละหลักเป็นคำไทย ทั้งบทและที่ได้ยิน
-    s = re.sub(r"\d", lambda m: THAI_DIGITS[int(m.group())], s)
+    s = re.sub(r"\d[\d,]*", lambda m: thai_number(m.group().replace(",", "")), s)
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
     # ตัวการันต์ไม่ออกเสียง (เลนส์ = เลน, ลิงก์ = ลิง) ตัดทิ้งทั้งตัวอักษรและเครื่องหมาย
     s = re.sub("[ก-ฮ][ัิุ]?์", "", s)
+    # วรรณยุกต์: ระบบถอดเสียงสะกดไม่แน่นอน (ปลั๊ก/ปลัก) จึงไม่นับ ตัวอักษรและสระยังต้องตรงทุกตัว
+    s = re.sub("[\u0E48-\u0E4B]", "", s)
     return s.replace("ๆ", "")
 
 
@@ -114,7 +153,15 @@ def call(base: str, api: str, data: list) -> list:
     r = requests.post(f"{base}/gradio_api/call/{api}", json={"data": data}, timeout=60)
     r.raise_for_status()
     eid = r.json()["event_id"]
-    t = requests.get(f"{base}/gradio_api/call/{api}/{eid}", timeout=TIMEOUT).text
+    # อ่านผลแบบสตรีม และตัดจบเมื่อเกินเวลา (คิวเว็บค้างจะส่ง heartbeat มาเรื่อย ๆ จน timeout ปกติไม่ทำงาน)
+    deadline, t = time.time() + TIMEOUT, ""
+    with requests.get(f"{base}/gradio_api/call/{api}/{eid}", timeout=60, stream=True) as resp:
+        for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+            t += chunk if isinstance(chunk, str) else chunk.decode("utf-8", "ignore")
+            if "event: complete" in t and t.rstrip().endswith("]") or "event: error" in t:
+                break
+            if time.time() > deadline:
+                raise RuntimeError(f"timeout {TIMEOUT}s (queue stuck)")
     if "event: complete" not in t:
         raise RuntimeError(t[-300:].replace("\n", " "))
     return json.loads(t.split("data: ")[-1])
@@ -200,10 +247,15 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
     """สร้างเสียงท่อนเดียว แล้วถอดเสียงตรวจ คืน (ไฟล์, ค่าคลาดเคลื่อน, ข้อความที่ได้ยิน) ของตัวที่ดีที่สุด"""
     best: Tuple[Optional[str], float, str] = (None, 9.0, "")
     for k in range(ENGINE_TRIES.get(name, 1)):
+        if k and time.time() > DEADLINE:
+            log("time budget used up")
+            break
         path = os.path.join(work, f"{name}_{idx}_{k}.mp3")
         try:
             url = gen(line, k, path)
         except Exception as e:
+            global LAST_ERROR
+            LAST_ERROR = str(e)[:200]
             log(f"{name} gen error line {idx} try {k}:", str(e)[:200])
             time.sleep(3)
             continue
@@ -215,6 +267,28 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
         if score <= MAX_CER:
             break
     return best
+
+
+def asr_bias(line: str, heard: str, work: str, idx: int, mode: str, name: str) -> bool:
+    """ท่อนที่คลาดเล็กน้อย: ลองให้เสียงอื่นอีก 2 แบบพูดประโยคเดียวกัน ถ้าระบบถอดเสียงได้คำเดียวกันเป๊ะทุกตัว
+    แปลว่าระบบถอดเสียงฟังผิดเอง (เช่น "ความจุ สาม" -> "ความจุดสาม") ไม่ใช่เสียงพูดผิด"""
+    if not heard or lev(thai_only(line), thai_only(heard)) > 2:
+        return False
+    others = [n for n in ("vox", "edge", "gtts") if n != name][:2]
+    target = thai_only(heard)
+    for other in others:
+        try:
+            gen = make_edge(mode) if other == "edge" else make_gtts() if other == "gtts" else make_vox(upload_ref())
+            path = os.path.join(work, f"bias_{other}_{idx}.mp3")
+            url = gen(line, 0, path)
+            h2 = transcribe(url=url) if url else transcribe(path=path)
+        except Exception as e:
+            log("bias check error:", other, str(e)[:150])
+            return False
+        log(f"bias check {other}: {h2}")
+        if thai_only(h2) != target:
+            return False
+    return True
 
 
 def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -> Optional[str]:
@@ -237,15 +311,24 @@ def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -
         return None
     files, report = [], []
     t0 = time.time()
+    global DEADLINE
+    DEADLINE = t0 + BUDGET
     for i, line in enumerate(lines):
         if time.time() - t0 > BUDGET:
             _annotate("warning", f"VOICE fail {name}", "\n".join(report) + "\n(ใช้เวลานานเกิน)")
             return None
         path, score, heard = gen_line(gen, line, work, i, name)
         report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
+        if path and score > MAX_CER and asr_bias(line, heard, work, i, mode, name):
+            report[-1] += " | ✓ เสียงอื่นอีก 2 แบบถูกถอดเป็นคำเดียวกันทุกตัว = ระบบถอดเสียงฟังผิดเอง ไม่ใช่เสียงพูดผิด"
+            score = 0.0
         if not path or score > MAX_CER:
+            global LAST_FAIL
+            if path:
+                LAST_FAIL = (line, heard)
+                FAILS.append((name, line, heard))
             _annotate("warning", f"VOICE fail {name}",
-                      "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ)"))
+                      "\n".join(report) + ("" if path else f"\n(สร้างเสียงไม่สำเร็จ: {LAST_ERROR})"))
             return None
         files.append(path)
     # ต่อท่อนด้วยช่วงเงียบ 0.2 วินาที

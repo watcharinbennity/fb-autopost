@@ -28,8 +28,22 @@ def reels_history(posted: Dict) -> Dict:
     return hist
 
 
+def today_th() -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 7 * 3600))
+
+
+def done_today(posted: Dict) -> list:
+    return posted.get("reels_done", {}).get(today_th(), [])
+
+
 def mark_reel_posted(mode: str, product: Dict) -> None:
     posted = engine.load_posted()
+    log = posted.setdefault("reels_done", {})
+    for d in list(log):
+        if d < time.strftime("%Y-%m-%d", time.gmtime(time.time() - 7 * 86400)):
+            del log[d]
+    if mode not in log.setdefault(today_th(), []):
+        log[today_th()].append(mode)
     h = reels_history(posted)[mode]
     for key, val in (("items", product["itemid"]), ("images", product["image_key"]), ("titles", product["title"][:100])):
         if val and val not in h[key]:
@@ -118,6 +132,15 @@ def main(action: str) -> None:
         sys.exit(1)
 
     posted = engine.load_posted()
+    if os.getenv("VIA_CRON", "").lower() == "true":
+        # รอบอัตโนมัติที่ลองซ้ำ: ข้ามเพจที่ลงคลิปวันนี้ไปแล้ว ลงเฉพาะเพจที่ยังขาด
+        already = done_today(posted)
+        if already:
+            print("REELS: already posted today:", already, flush=True)
+        pages = [p for p in pages if p["mode"] not in already]
+        if not pages:
+            engine.annotate("notice", "Reels summary", "ทุกเพจลงคลิปวันนี้แล้ว")
+            return
     products = engine.choose_products([p["mode"] for p in pages], history=reels_history(posted))
 
     results, manifest = {}, []

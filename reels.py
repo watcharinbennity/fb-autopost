@@ -66,7 +66,7 @@ def make_script(product: Dict, mode: str) -> Dict:
 - ภาษาไทยถูกต้อง เป็นธรรมชาติ
 """.strip()
     data, feedback = None, ""
-    for rnd in range(engine.QA_ROUNDS):
+    for rnd in range(int(os.getenv("REEL_QA_ROUNDS", "5"))):
         raw = engine.ai_write(
             "คุณเป็นครีเอเตอร์ทำคลิปรีวิวสินค้าสั้น ๆ ภาษาไทย ตอบเป็น JSON ที่ถูกต้องเท่านั้น",
             prompt + feedback,
@@ -162,6 +162,52 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
         if got:
             LAST_TTS = name
             return got
+    return None
+
+
+def rephrase_voiceover(product: Dict, mode: str, script: Dict, fails: list) -> str:
+    """ท่อนที่ระบบตรวจฟังไม่ตรง: ให้ Claude เรียบเรียงท่อนนั้นใหม่ (ความหมายเดิม) แล้วตรวจเนื้อหาซ้ำ"""
+    voiceover = script["voiceover"]
+    probs = "\n".join(f"- บท: {b} | ระบบได้ยินเป็น: {h}" for _, b, h in fails[-6:])
+    prompt = f"""บทพากย์คลิปนี้มีบางท่อนที่เสียงอ่านแล้วฟังไม่ชัด ระบบถอดเสียงได้ยินผิด
+บทพากย์เดิม: {voiceover}
+ท่อนที่มีปัญหา:
+{probs}
+
+เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิม ประโยคแรกยังตรงกับฉาก 1 "{script['slides'][0]}"
+เปลี่ยนคำที่ถูกได้ยินผิดเป็นคำอื่นที่ความหมายเดียวกันและออกเสียงชัด (เช่น ความจุ -> บรรจุ / เก็บไฟได้) ให้คำที่ติดกันไม่กลืนเสียงกัน
+(เช่น เติมคำเชื่อม หรือย้ายตัวเลขไปไว้ที่อื่น) ตัวอักษรไทยล้วน ตัวเลขเขียนเป็นคำไทย ห้ามเพิ่มข้อมูลใหม่
+ตอบเฉพาะบทพากย์ใหม่ บรรทัดเดียว"""
+    new = engine.ai_write("คุณเป็นนักเขียนบทพากย์ภาษาไทย ตอบเฉพาะบทพากย์", prompt, temperature=0.7, max_tokens=400)
+    new = EMOJI_RE.sub("", (new or "").strip().strip('"')).strip()
+    if not new or re.search(r"[A-Za-z0-9]", new):
+        return ""
+    review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(script["slides"])) + \
+             f"\n\nบทพากย์ (voiceover):\n{new}"
+    ok, issues = engine.qa_review(product, "reel", review, PAGE_STYLE[mode]["name"])
+    engine.annotate("notice" if ok else "warning", f"QA rephrase {mode}",
+                    f"{'ผ่าน' if ok else 'ไม่ผ่าน'}: {new}" + ("" if ok else "\n" + "\n".join(issues)))
+    return new if ok else ""
+
+
+def synthesize_checked(product: Dict, mode: str, script: Dict, out_path: str) -> Optional[str]:
+    """สร้างเสียงที่ผ่านการตรวจคำ ถ้าไม่ผ่านเพราะบางท่อนฟังไม่ชัด ให้เรียบเรียงใหม่แล้วลองอีก (สูงสุด 3 ครั้ง)"""
+    import voxtts
+    for attempt in range(4):
+        voxtts.FAILS = []
+        got = synthesize(script["voiceover"], out_path, mode)
+        if got:
+            return got
+        if attempt == 3 or not voxtts.FAILS:
+            break
+        new = ""
+        for _ in range(2):  # ถ้าบทใหม่ไม่ผ่านการตรวจเนื้อหา ให้ลองเขียนอีกครั้ง
+            new = rephrase_voiceover(product, mode, script, voxtts.FAILS)
+            if new:
+                break
+        if not new:
+            break
+        script["voiceover"] = new
     engine.annotate("error", "TTS", "ไม่มีเสียงที่ผ่านการตรวจคำ -> ไม่โพสต์คลิปนี้")
     return None
 
@@ -468,7 +514,7 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
 
     voice = None
     if script["source"] == "claude":  # สคริปต์ที่ไม่ผ่านการตรวจจะไม่ถูกโพสต์ จึงไม่ต้องสร้างเสียง
-        voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
+        voice = synthesize_checked(product, mode, script, os.path.join(work, "voice.mp3"))
     voice_sec = media_duration(voice) if voice else 0.0
     total = min(30.0, max(10.0, voice_sec + 1.2))
 
