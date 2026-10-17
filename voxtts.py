@@ -63,6 +63,39 @@ WORDS = {"solar cell": "โซล่าเซลล์", "solar": "โซล่�
          "online": "ออนไลน์", "battery": "แบตเตอรี่", "ok": "โอเค"}
 
 
+def thai_number(num: str) -> str:
+    """อ่านจำนวนเต็มเป็นคำไทย เช่น 30000 -> สามหมื่น, 21 -> ยี่สิบเอ็ด (เลขขึ้นต้นด้วย 0 อ่านทีละหลัก)"""
+    if not num.isdigit():
+        return num
+    if len(num) > 1 and num.startswith("0") or len(num) > 12:
+        return "".join(THAI_DIGITS[int(c)] for c in num)
+    n = int(num)
+    if n == 0:
+        return "ศูนย์"
+    units = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"]
+
+    def below_million(x: int) -> str:
+        out, digits = "", str(x)
+        for i, ch in enumerate(digits):
+            d, pos = int(ch), len(digits) - i - 1
+            if d == 0:
+                continue
+            if pos == 1 and d == 1:
+                w = "สิบ"
+            elif pos == 1 and d == 2:
+                w = "ยี่สิบ"
+            elif pos == 0 and d == 1 and len(digits) > 1:
+                w = "เอ็ด"
+            else:
+                w = THAI_DIGITS[d] + units[pos]
+            out += w
+        return out
+
+    if n >= 1_000_000:
+        return below_million(n // 1_000_000) + "ล้าน" + (below_million(n % 1_000_000) if n % 1_000_000 else "")
+    return below_million(n)
+
+
 def thai_only(s: str) -> str:
     # ระบบถอดเสียงชอบเขียนคำทับศัพท์เป็นภาษาอังกฤษ แปลงกลับเป็นคำไทยก่อนเทียบ
     low = s.lower()
@@ -72,7 +105,7 @@ def thai_only(s: str) -> str:
                lambda m: "".join(LETTERS.get(c.upper(), c) for c in m.group(1)), low)
     s = s.replace("โซล่าร์", "โซล่า").replace("โซลาร์", "โซล่า").replace("ลิงค์", "ลิงก์")
     # ระบบถอดเสียงมักเขียนตัวเลขเป็นเลขอารบิก: แปลงทีละหลักเป็นคำไทย ทั้งบทและที่ได้ยิน
-    s = re.sub(r"\d", lambda m: THAI_DIGITS[int(m.group())], s)
+    s = re.sub(r"\d[\d,]*", lambda m: thai_number(m.group().replace(",", "")), s)
     for a, b in CHECK_FIX:
         s = s.replace(a, b)
     s = re.sub(r"[^฀-๿]", "", s)
@@ -217,6 +250,28 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
     return best
 
 
+def asr_bias(line: str, heard: str, work: str, idx: int, mode: str, name: str) -> bool:
+    """ท่อนที่คลาดเล็กน้อย: ลองให้เสียงอื่นอีก 2 แบบพูดประโยคเดียวกัน ถ้าระบบถอดเสียงได้คำเดียวกันเป๊ะทุกตัว
+    แปลว่าระบบถอดเสียงฟังผิดเอง (เช่น "ความจุ สาม" -> "ความจุดสาม") ไม่ใช่เสียงพูดผิด"""
+    if not heard or lev(thai_only(line), thai_only(heard)) > 2:
+        return False
+    others = [n for n in ("vox", "edge", "gtts") if n != name][:2]
+    target = thai_only(heard)
+    for other in others:
+        try:
+            gen = make_edge(mode) if other == "edge" else make_gtts() if other == "gtts" else make_vox(upload_ref())
+            path = os.path.join(work, f"bias_{other}_{idx}.mp3")
+            url = gen(line, 0, path)
+            h2 = transcribe(url=url) if url else transcribe(path=path)
+        except Exception as e:
+            log("bias check error:", other, str(e)[:150])
+            return False
+        log(f"bias check {other}: {h2}")
+        if thai_only(h2) != target:
+            return False
+    return True
+
+
 def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -> Optional[str]:
     """สร้างเสียงทั้งบทด้วยเครื่องยนต์ name ทุกท่อนต้องผ่านการถอดเสียงตรวจ ไม่งั้นคืน None"""
     lines = split_lines(text)
@@ -243,6 +298,9 @@ def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -
             return None
         path, score, heard = gen_line(gen, line, work, i, name)
         report.append(f"{score:.2f} | บท: {line} | ได้ยิน: {heard}")
+        if path and score > MAX_CER and asr_bias(line, heard, work, i, mode, name):
+            report[-1] += " | ✓ เสียงอื่นอีก 2 แบบถูกถอดเป็นคำเดียวกันทุกตัว = ระบบถอดเสียงฟังผิดเอง ไม่ใช่เสียงพูดผิด"
+            score = 0.0
         if not path or score > MAX_CER:
             _annotate("warning", f"VOICE fail {name}",
                       "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ)"))
