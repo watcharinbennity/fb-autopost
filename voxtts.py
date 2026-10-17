@@ -23,6 +23,8 @@ MAX_CER = float(os.getenv("VOX_MAX_CER", "0"))  # 0 = ถอดเสียง�
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
 TIMEOUT = 180
 DEADLINE = 0.0
+LAST_ERROR = ""
+LAST_FAIL = ("", "")  # (ท่อนที่ไม่ผ่าน, ที่ระบบได้ยิน)
 BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
@@ -249,6 +251,8 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
         try:
             url = gen(line, k, path)
         except Exception as e:
+            global LAST_ERROR
+            LAST_ERROR = str(e)[:200]
             log(f"{name} gen error line {idx} try {k}:", str(e)[:200])
             time.sleep(3)
             continue
@@ -316,8 +320,11 @@ def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -
             report[-1] += " | ✓ เสียงอื่นอีก 2 แบบถูกถอดเป็นคำเดียวกันทุกตัว = ระบบถอดเสียงฟังผิดเอง ไม่ใช่เสียงพูดผิด"
             score = 0.0
         if not path or score > MAX_CER:
+            global LAST_FAIL
+            if path:
+                LAST_FAIL = (line, heard)
             _annotate("warning", f"VOICE fail {name}",
-                      "\n".join(report) + ("" if path else "\n(สร้างเสียงไม่สำเร็จ)"))
+                      "\n".join(report) + ("" if path else f"\n(สร้างเสียงไม่สำเร็จ: {LAST_ERROR})"))
             return None
         files.append(path)
     # ต่อท่อนด้วยช่วงเงียบ 0.2 วินาที

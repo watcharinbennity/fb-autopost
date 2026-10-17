@@ -162,6 +162,44 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
         if got:
             LAST_TTS = name
             return got
+    return None
+
+
+def rephrase_voiceover(product: Dict, mode: str, voiceover: str, bad_line: str, heard: str) -> str:
+    """ท่อนที่ระบบตรวจฟังไม่ตรง: ให้ Claude เรียบเรียงท่อนนั้นใหม่ (ความหมายเดิม) แล้วตรวจเนื้อหาซ้ำ"""
+    prompt = f"""บทพากย์คลิปนี้มีท่อนหนึ่งที่เสียงอ่านแล้วฟังไม่ชัด ระบบถอดเสียงได้ยินผิด
+บทพากย์เดิม: {voiceover}
+ท่อนที่มีปัญหา: {bad_line}
+ระบบได้ยินเป็น: {heard}
+
+เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิมทุกอย่าง แต่เปลี่ยนคำหรือลำดับคำในท่อนที่มีปัญหา ให้คำที่ติดกันไม่กลืนเสียงกัน
+(เช่น เติมคำเชื่อม หรือย้ายตัวเลขไปไว้ที่อื่น) ตัวอักษรไทยล้วน ตัวเลขเขียนเป็นคำไทย ห้ามเพิ่มข้อมูลใหม่
+ตอบเฉพาะบทพากย์ใหม่ บรรทัดเดียว"""
+    new = engine.ai_write("คุณเป็นนักเขียนบทพากย์ภาษาไทย ตอบเฉพาะบทพากย์", prompt, temperature=0.7, max_tokens=400)
+    new = EMOJI_RE.sub("", (new or "").strip().strip('"')).strip()
+    if not new or re.search(r"[A-Za-z0-9]", new):
+        return ""
+    ok, issues = engine.qa_review(product, "reel", f"บทพากย์ (voiceover):\n{new}", PAGE_STYLE[mode]["name"])
+    engine.annotate("notice" if ok else "warning", f"QA rephrase {mode}",
+                    f"{'ผ่าน' if ok else 'ไม่ผ่าน'}: {new}" + ("" if ok else "\n" + "\n".join(issues)))
+    return new if ok else ""
+
+
+def synthesize_checked(product: Dict, mode: str, script: Dict, out_path: str) -> Optional[str]:
+    """สร้างเสียงที่ผ่านการตรวจคำ ถ้าไม่ผ่านเพราะบางท่อนฟังไม่ชัด ให้เรียบเรียงท่อนนั้นใหม่แล้วลองอีก (สูงสุด 2 ครั้ง)"""
+    import voxtts
+    for attempt in range(3):
+        voxtts.LAST_FAIL = ("", "")
+        got = synthesize(script["voiceover"], out_path, mode)
+        if got:
+            return got
+        bad, heard = voxtts.LAST_FAIL
+        if attempt == 2 or not bad:
+            break
+        new = rephrase_voiceover(product, mode, script["voiceover"], bad, heard)
+        if not new:
+            break
+        script["voiceover"] = new
     engine.annotate("error", "TTS", "ไม่มีเสียงที่ผ่านการตรวจคำ -> ไม่โพสต์คลิปนี้")
     return None
 
@@ -468,7 +506,7 @@ def make_reel(product: Dict, mode: str, out_dir: str, image_path: Optional[str] 
 
     voice = None
     if script["source"] == "claude":  # สคริปต์ที่ไม่ผ่านการตรวจจะไม่ถูกโพสต์ จึงไม่ต้องสร้างเสียง
-        voice = synthesize(script["voiceover"], os.path.join(work, "voice.mp3"), mode)
+        voice = synthesize_checked(product, mode, script, os.path.join(work, "voice.mp3"))
     voice_sec = media_duration(voice) if voice else 0.0
     total = min(30.0, max(10.0, voice_sec + 1.2))
 
