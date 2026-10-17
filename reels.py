@@ -165,38 +165,46 @@ def synthesize(text: str, out_path: str, mode: str = "ben") -> Optional[str]:
     return None
 
 
-def rephrase_voiceover(product: Dict, mode: str, voiceover: str, bad_line: str, heard: str) -> str:
+def rephrase_voiceover(product: Dict, mode: str, script: Dict, fails: list) -> str:
     """ท่อนที่ระบบตรวจฟังไม่ตรง: ให้ Claude เรียบเรียงท่อนนั้นใหม่ (ความหมายเดิม) แล้วตรวจเนื้อหาซ้ำ"""
-    prompt = f"""บทพากย์คลิปนี้มีท่อนหนึ่งที่เสียงอ่านแล้วฟังไม่ชัด ระบบถอดเสียงได้ยินผิด
+    voiceover = script["voiceover"]
+    probs = "\n".join(f"- บท: {b} | ระบบได้ยินเป็น: {h}" for _, b, h in fails[-6:])
+    prompt = f"""บทพากย์คลิปนี้มีบางท่อนที่เสียงอ่านแล้วฟังไม่ชัด ระบบถอดเสียงได้ยินผิด
 บทพากย์เดิม: {voiceover}
-ท่อนที่มีปัญหา: {bad_line}
-ระบบได้ยินเป็น: {heard}
+ท่อนที่มีปัญหา:
+{probs}
 
-เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิมทุกอย่าง แต่เปลี่ยนคำหรือลำดับคำในท่อนที่มีปัญหา ให้คำที่ติดกันไม่กลืนเสียงกัน
+เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิม ประโยคแรกยังตรงกับฉาก 1 "{script['slides'][0]}"
+เปลี่ยนคำที่ถูกได้ยินผิดเป็นคำอื่นที่ความหมายเดียวกันและออกเสียงชัด (เช่น ความจุ -> บรรจุ / เก็บไฟได้) ให้คำที่ติดกันไม่กลืนเสียงกัน
 (เช่น เติมคำเชื่อม หรือย้ายตัวเลขไปไว้ที่อื่น) ตัวอักษรไทยล้วน ตัวเลขเขียนเป็นคำไทย ห้ามเพิ่มข้อมูลใหม่
 ตอบเฉพาะบทพากย์ใหม่ บรรทัดเดียว"""
     new = engine.ai_write("คุณเป็นนักเขียนบทพากย์ภาษาไทย ตอบเฉพาะบทพากย์", prompt, temperature=0.7, max_tokens=400)
     new = EMOJI_RE.sub("", (new or "").strip().strip('"')).strip()
     if not new or re.search(r"[A-Za-z0-9]", new):
         return ""
-    ok, issues = engine.qa_review(product, "reel", f"บทพากย์ (voiceover):\n{new}", PAGE_STYLE[mode]["name"])
+    review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(script["slides"])) + \
+             f"\n\nบทพากย์ (voiceover):\n{new}"
+    ok, issues = engine.qa_review(product, "reel", review, PAGE_STYLE[mode]["name"])
     engine.annotate("notice" if ok else "warning", f"QA rephrase {mode}",
                     f"{'ผ่าน' if ok else 'ไม่ผ่าน'}: {new}" + ("" if ok else "\n" + "\n".join(issues)))
     return new if ok else ""
 
 
 def synthesize_checked(product: Dict, mode: str, script: Dict, out_path: str) -> Optional[str]:
-    """สร้างเสียงที่ผ่านการตรวจคำ ถ้าไม่ผ่านเพราะบางท่อนฟังไม่ชัด ให้เรียบเรียงท่อนนั้นใหม่แล้วลองอีก (สูงสุด 2 ครั้ง)"""
+    """สร้างเสียงที่ผ่านการตรวจคำ ถ้าไม่ผ่านเพราะบางท่อนฟังไม่ชัด ให้เรียบเรียงใหม่แล้วลองอีก (สูงสุด 3 ครั้ง)"""
     import voxtts
-    for attempt in range(3):
-        voxtts.LAST_FAIL = ("", "")
+    for attempt in range(4):
+        voxtts.FAILS = []
         got = synthesize(script["voiceover"], out_path, mode)
         if got:
             return got
-        bad, heard = voxtts.LAST_FAIL
-        if attempt == 2 or not bad:
+        if attempt == 3 or not voxtts.FAILS:
             break
-        new = rephrase_voiceover(product, mode, script["voiceover"], bad, heard)
+        new = ""
+        for _ in range(2):  # ถ้าบทใหม่ไม่ผ่านการตรวจเนื้อหา ให้ลองเขียนอีกครั้ง
+            new = rephrase_voiceover(product, mode, script, voxtts.FAILS)
+            if new:
+                break
         if not new:
             break
         script["voiceover"] = new

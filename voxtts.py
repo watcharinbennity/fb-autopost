@@ -25,6 +25,7 @@ TIMEOUT = 180
 DEADLINE = 0.0
 LAST_ERROR = ""
 LAST_FAIL = ("", "")  # (ท่อนที่ไม่ผ่าน, ที่ระบบได้ยิน)
+FAILS: list = []  # ทุกท่อนที่ไม่ผ่าน จากทุกเสียง: (เสียง, บท, ที่ได้ยิน)
 BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
@@ -323,6 +324,7 @@ def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -
             global LAST_FAIL
             if path:
                 LAST_FAIL = (line, heard)
+                FAILS.append((name, line, heard))
             _annotate("warning", f"VOICE fail {name}",
                       "\n".join(report) + ("" if path else f"\n(สร้างเสียงไม่สำเร็จ: {LAST_ERROR})"))
             return None
