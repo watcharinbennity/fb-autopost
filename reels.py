@@ -66,7 +66,7 @@ def make_script(product: Dict, mode: str) -> Dict:
 - ภาษาไทยถูกต้อง เป็นธรรมชาติ
 """.strip()
     data, feedback = None, ""
-    for rnd in range(engine.QA_ROUNDS):
+    for rnd in range(int(os.getenv("REEL_QA_ROUNDS", "5"))):
         raw = engine.ai_write(
             "คุณเป็นครีเอเตอร์ทำคลิปรีวิวสินค้าสั้น ๆ ภาษาไทย ตอบเป็น JSON ที่ถูกต้องเท่านั้น",
             prompt + feedback,
