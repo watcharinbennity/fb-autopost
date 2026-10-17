@@ -21,7 +21,8 @@ REF_PATH = os.getenv("VOX_REF", os.path.join(HERE, "assets", "voice", "ben_ref.o
 TRIES = int(os.getenv("VOX_TRIES", "4"))
 MAX_CER = float(os.getenv("VOX_MAX_CER", "0"))  # 0 = ถอดเสียงแล้วต้องตรงบททุกคำ (หลังปรับรูปแบบการเขียน)
 TEMPO = os.getenv("VOX_TEMPO", "1.0")
-TIMEOUT = 240
+TIMEOUT = 180
+DEADLINE = 0.0
 BUDGET = int(os.getenv("VOX_BUDGET_SEC", "600"))  # ใช้เวลาเกินนี้ต่อคลิป = เลิกแล้วใช้เสียงสำรอง
 
 # คำที่ VoxCPM อ่านไม่ชัด (เรียนรู้จากคลิป TikTok ตอน 1-01/1-02): เขียนบทเสียงให้อ่านถูก
@@ -147,7 +148,15 @@ def call(base: str, api: str, data: list) -> list:
     r = requests.post(f"{base}/gradio_api/call/{api}", json={"data": data}, timeout=60)
     r.raise_for_status()
     eid = r.json()["event_id"]
-    t = requests.get(f"{base}/gradio_api/call/{api}/{eid}", timeout=TIMEOUT).text
+    # อ่านผลแบบสตรีม และตัดจบเมื่อเกินเวลา (คิวเว็บค้างจะส่ง heartbeat มาเรื่อย ๆ จน timeout ปกติไม่ทำงาน)
+    deadline, t = time.time() + TIMEOUT, ""
+    with requests.get(f"{base}/gradio_api/call/{api}/{eid}", timeout=60, stream=True) as resp:
+        for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+            t += chunk if isinstance(chunk, str) else chunk.decode("utf-8", "ignore")
+            if "event: complete" in t and t.rstrip().endswith("]") or "event: error" in t:
+                break
+            if time.time() > deadline:
+                raise RuntimeError(f"timeout {TIMEOUT}s (queue stuck)")
     if "event: complete" not in t:
         raise RuntimeError(t[-300:].replace("\n", " "))
     return json.loads(t.split("data: ")[-1])
@@ -233,6 +242,9 @@ def gen_line(gen, line: str, work: str, idx: int, name: str) -> Tuple[Optional[s
     """สร้างเสียงท่อนเดียว แล้วถอดเสียงตรวจ คืน (ไฟล์, ค่าคลาดเคลื่อน, ข้อความที่ได้ยิน) ของตัวที่ดีที่สุด"""
     best: Tuple[Optional[str], float, str] = (None, 9.0, "")
     for k in range(ENGINE_TRIES.get(name, 1)):
+        if k and time.time() > DEADLINE:
+            log("time budget used up")
+            break
         path = os.path.join(work, f"{name}_{idx}_{k}.mp3")
         try:
             url = gen(line, k, path)
@@ -292,6 +304,8 @@ def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -
         return None
     files, report = [], []
     t0 = time.time()
+    global DEADLINE
+    DEADLINE = t0 + BUDGET
     for i, line in enumerate(lines):
         if time.time() - t0 > BUDGET:
             _annotate("warning", f"VOICE fail {name}", "\n".join(report) + "\n(ใช้เวลานานเกิน)")
