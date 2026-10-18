@@ -512,7 +512,8 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "cctv", "ip camera", "security camera", "กล้องวงจรปิด", "wifi camera", "กล้อง wifi",
         "dash cam", "กล้องติดรถ", "doorbell", "กริ่งประตู", "smart lock", "กลอนดิจิตอล",
         "robot vacuum", "หุ่นยนต์ดูดฝุ่น", "air purifier", "เครื่องฟอกอากาศ",
-        "router", "เราเตอร์", "mesh wifi", "access point", "motion sensor", "เซ็นเซอร์",
+        "router", "เราเตอร์", "mesh wifi", "access point", "motion sensor", "door sensor", "smoke detector",
+        "เซ็นเซอร์ประตู", "เซ็นเซอร์ตรวจจับ", "เซ็นเซอร์จับความเคลื่อนไหว", "เครื่องตรวจจับควัน",
         "tuya", "google home", "alexa", "homekit", "zigbee",
     ]
 
@@ -526,7 +527,8 @@ def is_smarthome_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
         "frying pan", "pan", "cookware", "kitchenware", "kitchen",
         "ผ้า", "microfiber", "ไมโครไฟเบอร์", "lens cloth", "ฟิล์ม", "film",
         "เคส", "case", "strap", "สายนาฬิกา", "ที่วางมือถือ",
-        "แฟชั่น", "fashion", "เครื่องประดับ", "jewelry", "ห่วงโซ่", "สายคล้อง", "พวงกุญแจ"
+        "แฟชั่น", "fashion", "เครื่องประดับ", "jewelry", "ห่วงโซ่", "สายคล้อง", "พวงกุญแจ",
+        "เครื่องยนต์", "engine", "แรงม้า", "น้ำมันเครื่อง", "เครื่องตัดหญ้า", "ปั๊มน้ำ"
     ]
 
     if has_kw(text, block_keywords):

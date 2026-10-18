@@ -42,7 +42,8 @@ def mark_reel_posted(mode: str, product: Dict) -> None:
     for d in list(log):
         if d < time.strftime("%Y-%m-%d", time.gmtime(time.time() - 7 * 86400)):
             del log[d]
-    if mode not in log.setdefault(today_th(), []):
+    # นับเฉพาะคลิปของรอบอัตโนมัติ (คลิปที่สั่งลงเองนอกรอบ ไม่ทำให้รอบเย็นถูกข้าม)
+    if os.getenv("VIA_CRON", "").lower() == "true" and mode not in log.setdefault(today_th(), []):
         log[today_th()].append(mode)
     h = reels_history(posted)[mode]
     for key, val in (("items", product["itemid"]), ("images", product["image_key"]), ("titles", product["title"][:100])):
