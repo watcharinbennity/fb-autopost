@@ -23,9 +23,9 @@
     "date": "2026-10-19",
     "slots": {
       "1930": {
-        "attempts": 1,
+        "attempts": 2,
         "result": "failure",
-        "at": "19:47"
+        "at": "19:54"
       }
     }
   }
