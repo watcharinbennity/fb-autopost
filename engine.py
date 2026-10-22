@@ -626,7 +626,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
         if not headers_logged:
             print("CSV COLUMNS:", ", ".join(list(row.keys())[:40]), flush=True)
             img_cols = [k for k in row.keys() if k and "image" in k.lower()]
-            if FEED_DIAG:
+            if os.getenv("FEED_DIAG") == "true":
                 annotate("notice", "CSV columns", ", ".join(list(row.keys())[:60]) + f"\nimage columns: {img_cols}\nsample: " +
                          " | ".join(f"{k}={str(row.get(k))[:120]}" for k in img_cols))
             headers_logged = True
