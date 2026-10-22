@@ -168,7 +168,7 @@ def check_page_token(page: Dict) -> bool:
         return False
 
     print(f"✅ TOKEN OK ({page['mode']}): {data.get('name')}", flush=True)
-    annotate("notice", f"Token {page['mode']}", f"OK: {data.get('name')}")
+    print(f"Token {page['mode']} OK: {data.get('name')}", flush=True)  # ไม่ annotate: GitHub แสดงได้ไม่เกิน 10 notice
     return True
 
 
@@ -626,8 +626,9 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
         if not headers_logged:
             print("CSV COLUMNS:", ", ".join(list(row.keys())[:40]), flush=True)
             img_cols = [k for k in row.keys() if k and "image" in k.lower()]
-            annotate("notice", "CSV columns", ", ".join(list(row.keys())[:60]) + f"\nimage columns: {img_cols}\nsample: " +
-                     " | ".join(f"{k}={str(row.get(k))[:120]}" for k in img_cols))
+            if FEED_DIAG:
+                annotate("notice", "CSV columns", ", ".join(list(row.keys())[:60]) + f"\nimage columns: {img_cols}\nsample: " +
+                         " | ".join(f"{k}={str(row.get(k))[:120]}" for k in img_cols))
             headers_logged = True
         count += 1
         if os.getenv("FEED_DIAG") == "true":
