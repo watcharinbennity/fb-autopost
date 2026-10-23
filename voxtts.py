@@ -277,8 +277,8 @@ def asr_bias(line: str, heard: str, work: str, idx: int, mode: str, name: str) -
     แปลว่าระบบถอดเสียงฟังผิดเอง (เช่น "ความจุ สาม" -> "ความจุดสาม") ไม่ใช่เสียงพูดผิด"""
     if not heard or lev(thai_only(line), thai_only(heard)) > 2:
         return False
-    others = [n for n in ("vox", "edge", "gtts") if n != name][:2]
-    target = thai_only(heard)
+    others = [n for n in ("vox", "edge", "gtts") if n != name]
+    target, agreed = thai_only(heard), 0
     for other in others:
         try:
             gen = make_edge(mode) if other == "edge" else make_gtts() if other == "gtts" else make_vox(upload_ref())
@@ -286,12 +286,14 @@ def asr_bias(line: str, heard: str, work: str, idx: int, mode: str, name: str) -
             url = gen(line, 0, path)
             h2 = transcribe(url=url) if url else transcribe(path=path)
         except Exception as e:
-            log("bias check error:", other, str(e)[:150])
-            return False
+            log("bias check skip:", other, str(e)[:150])  # เสียงนี้ใช้ไม่ได้ตอนนี้ ข้ามไป
+            continue
         log(f"bias check {other}: {h2}")
-        if thai_only(h2) != target:
-            return False
-    return True
+        if not h2 or thai_only(h2) != target:
+            return False  # เสียงอื่นถูกถอดต่างออกไป = อาจเป็นเสียงพูดผิดจริง
+        agreed += 1
+    # ต้องมีเสียงอื่นอย่างน้อย 1 แบบที่ถูกถอดเป็นคำผิดเดียวกันเป๊ะ
+    return agreed >= 1
 
 
 def synthesize(text: str, out_path: str, name: str = "vox", mode: str = "ben") -> Optional[str]:
