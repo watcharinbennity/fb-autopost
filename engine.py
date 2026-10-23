@@ -511,6 +511,8 @@ BEN_GROUPS = {
     ],
 }
 BEN_GROUP_WEIGHT = {"tool": 1.0, "appliance": 1.0, "electrical": 0.6}
+# ลำดับหมวดของโพสต์เพจ BEN (วนไปเรื่อย ๆ): เครื่องมือช่างกับเครื่องใช้ไฟฟ้าเท่ากัน อุปกรณ์ไฟฟ้าแทรก 1 ใน 5
+BEN_ROTATION = ["tool", "appliance", "tool", "appliance", "electrical"]
 # ไม่เอาเข้าเพจ BEN: อุปกรณ์มือถือ ของใช้ส่วนตัว (ไม่ใช่เครื่องมือช่าง/เครื่องใช้ไฟฟ้าในบ้าน)
 BEN_EXCLUDE = [
     "power bank", "powerbank", "พาวเวอร์แบงค์", "พาวเวอร์แบงก์", "แบตสำรอง", "สายชาร์จ", "หัวชาร์จ", "charger",
@@ -684,6 +686,8 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
     history: ประวัติกันซ้ำต่อเพจ (ค่าเริ่มต้น = ประวัติโพสต์รูป)"""
     posted = history if history is not None else load_posted()
     best = {m: (None, -1.0) for m in page_modes}
+    # เพจ BEN: เก็บสินค้าที่ดีที่สุดแยกตามหมวด แล้วสลับหมวดทีละโพสต์
+    best_group: Dict[str, tuple] = {}
     count = 0
     no_link_count = 0
     headers_logged = False
@@ -733,6 +737,11 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
                     del top[12:]
                 if score > best[mode][1]:
                     best[mode] = (row, score)
+                if mode == "ben":
+                    g = ben_group(title, norm_text(row.get("global_category1")),
+                                  norm_text(row.get("global_category2")), norm_text(row.get("global_category3")))
+                    if g and score > best_group.get(g, (None, -1.0))[1]:
+                        best_group[g] = (row, score)
         except Exception as e:
             if count < 5:
                 print("ROW ERROR:", e, flush=True)
@@ -744,6 +753,13 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             annotate("notice", f"Top {m}", "\n".join(f"{sc} | {t}" for sc, t in diag.get("top_" + m, [])))
     if count == 0:
         print("❌ CSV ว่างหรืออ่านไม่ได้ — ตรวจ SHOPEE_CSV_URL", flush=True)
+
+    if "ben" in page_modes and best_group:
+        n = len(posted["ben"].get("items", []))
+        want = BEN_ROTATION[n % len(BEN_ROTATION)]
+        pick = best_group.get(want) or best["ben"]
+        print(f"BEN ROTATION: #{n} -> {want} ({'ok' if best_group.get(want) else 'fallback'})", flush=True)
+        best["ben"] = pick
 
     result: Dict[str, Optional[Dict]] = {}
     for mode in page_modes:
@@ -776,6 +792,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             "cat1": norm_text(row.get("global_category1")),
             "cat2": norm_text(row.get("global_category2")),
             "cat3": norm_text(row.get("global_category3")),
+            "group": ben_group(norm_text(row.get("title"))) if mode == "ben" else "",
         }
         print(
             f"✅ CHOSEN ({mode}): {product['title']} | sold={product['sold']} | "
