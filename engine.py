@@ -479,6 +479,61 @@ def is_ben_target(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     return has_kw(text, allow_keywords)
 
 
+# ---------------------------------------------------------------- เพจ BEN: เน้นเครื่องมือช่าง + เครื่องใช้ไฟฟ้า
+BEN_GROUPS = {
+    # เครื่องมือช่าง
+    "tool": [
+        "เครื่องมือช่าง", "ชุดเครื่องมือ", "กล่องเครื่องมือ", "power tool", "hand tool", "tool set", "toolbox",
+        "สว่าน", "drill", "ไขควง", "screwdriver", "คีม", "plier", "ประแจ", "wrench", "บล็อก", "socket wrench",
+        "ค้อน", "hammer", "เลื่อย", "saw", "เครื่องเจียร", "หินเจียร", "เจียร", "grinder", "เครื่องตัด", "cutter",
+        "บล็อกไฟฟ้า", "บล็อกกระแทก", "impact", "เครื่องขัด", "sander", "ปืนกาว", "glue gun", "หัวแร้ง", "soldering",
+        "ตลับเมตร", "tape measure", "ระดับน้ำ", "เลเซอร์วัดระยะ", "เลเซอร์ระดับ", "laser level",
+        "มัลติมิเตอร์", "multimeter", "เทสเตอร์", "tester", "แคลมป์มิเตอร์", "clamp meter", "ไขควงวัดไฟ",
+        "ปั๊มลม", "air compressor", "เครื่องฉีดน้ำแรงดันสูง", "pressure washer", "เครื่องเป่าลม", "blower",
+        "ปืนเป่าลมร้อน", "heat gun", "เครื่องเชื่อม", "ตู้เชื่อม", "welding", "แท่นสว่าน", "ปากกาจับชิ้นงาน",
+        "คัตเตอร์", "กรรไกรตัดสาย", "คีมย้ำ", "crimping", "บันได", "ladder",
+    ],
+    # เครื่องใช้ไฟฟ้าในบ้าน
+    "appliance": [
+        "เครื่องใช้ไฟฟ้า", "home appliance", "พัดลม", "fan", "เตารีด", "iron", "เครื่องรีดผ้า", "steamer",
+        "เครื่องดูดฝุ่น", "vacuum", "กาต้มน้ำ", "kettle", "หม้อทอดไร้น้ำมัน", "air fryer", "หม้อหุงข้าว",
+        "rice cooker", "ไมโครเวฟ", "microwave", "เตาอบ", "oven", "เครื่องปั่น", "blender", "เตาไฟฟ้า",
+        "เตาแม่เหล็กไฟฟ้า", "induction", "หม้อไฟฟ้า", "กระทะไฟฟ้า", "เครื่องทำน้ำอุ่น", "water heater",
+        "เครื่องทำความร้อน", "heater", "พัดลมไอเย็น", "air cooler", "เครื่องลดความชื้น", "dehumidifier",
+        "ตู้เย็น", "เครื่องซักผ้า", "เครื่องอบผ้า", "เครื่องชงกาแฟ", "coffee maker", "เครื่องบดกาแฟ",
+        "แปรงขัดไฟฟ้า", "ไม้ถูพื้นไฟฟ้า", "เครื่องถูพื้น", "ไฟฉาย", "ไฟโซล่าเซลล์", "โซล่าเซลล์", "solar",
+    ],
+    # อุปกรณ์ไฟฟ้าในบ้าน (ลำดับรองลงมา)
+    "electrical": [
+        "ปลั๊กพ่วง", "รางปลั๊ก", "ปลั๊กไฟ", "power strip", "extension cord", "เต้ารับ", "เบรกเกอร์", "breaker",
+        "ตู้คอนซูมเมอร์", "consumer unit", "สายไฟ", "หลอดไฟ", "โคมไฟ", "led bulb", "สวิตช์ไฟ",
+        "เทปพันสายไฟ", "หม้อแปลง", "transformer", "กันไฟกระชาก", "surge", "ups", "ปลั๊กกันน้ำ",
+    ],
+}
+BEN_GROUP_WEIGHT = {"tool": 1.0, "appliance": 1.0, "electrical": 0.6}
+# ลำดับหมวดของโพสต์เพจ BEN (วนไปเรื่อย ๆ): เครื่องมือช่างกับเครื่องใช้ไฟฟ้าเท่ากัน อุปกรณ์ไฟฟ้าแทรก 1 ใน 5
+BEN_ROTATION = ["tool", "appliance", "tool", "appliance", "electrical"]
+# ไม่เอาเข้าเพจ BEN: อุปกรณ์มือถือ ของใช้ส่วนตัว (ไม่ใช่เครื่องมือช่าง/เครื่องใช้ไฟฟ้าในบ้าน)
+BEN_EXCLUDE = [
+    "power bank", "powerbank", "พาวเวอร์แบงค์", "พาวเวอร์แบงก์", "แบตสำรอง", "สายชาร์จ", "หัวชาร์จ", "charger",
+    "adapter", "อะแดปเตอร์", "gan", "usb hub", "หูฟัง", "earphone", "headphone", "ลำโพง", "speaker",
+    "แปรงสีฟัน", "toothbrush", "ไดร์เป่าผม", "hair dryer", "เครื่องหนีบผม", "ที่โกนหนวด", "shaver", "razor",
+    "เครื่องนวด", "massage", "ตัดขน", "clipper", "smart watch", "นาฬิกา", "mouse", "keyboard", "เมาส์", "คีย์บอร์ด",
+]
+COOKWARE_ONLY = ["กระทะ", "หม้อ", "pan", "cookware", "kitchenware"]
+
+
+def ben_group(title: str, cat1: str = "", cat2: str = "", cat3: str = "") -> Optional[str]:
+    """จัดกลุ่มสินค้าสำหรับเพจ BEN: tool / appliance / electrical หรือ None ถ้าไม่เข้าเพจ"""
+    text = f"{title} {cat1} {cat2} {cat3}".lower()
+    if has_kw(text, BEN_EXCLUDE):
+        return None
+    for g in ("tool", "appliance", "electrical"):
+        if has_kw(text, BEN_GROUPS[g]):
+            return g
+    return None
+
+
 def is_hard_block_for_ben(title: str, cat1: str, cat2: str, cat3: str) -> bool:
     text = f"{title} {cat1} {cat2} {cat3}".lower()
     hard_blocks = [
@@ -564,8 +619,11 @@ def score_product(row: Dict, page_mode: str) -> float:
     if page_mode == "smart" and any(k in title for k in ["camera", "smart", "wifi", "led", "filter"]):
         score += 25
 
-    if page_mode == "ben" and any(k in title for k in ["ปลั๊ก", "adapter", "gan", "กาว", "พุก", "น็อต", "สกรู", "กาวร้อน"]):
-        score += 25
+    if page_mode == "ben":
+        # เน้นเครื่องมือช่าง + เครื่องใช้ไฟฟ้า: อุปกรณ์ไฟฟ้าทั่วไปได้คะแนนน้อยกว่า
+        g = ben_group(norm_text(row.get("title")), norm_text(row.get("global_category1")),
+                      norm_text(row.get("global_category2")), norm_text(row.get("global_category3")))
+        score *= BEN_GROUP_WEIGHT.get(g or "", 0.0)
 
     return score
 
@@ -577,8 +635,19 @@ def row_matches_page(row: Dict, page_mode: str) -> bool:
     cat3 = norm_text(row.get("global_category3"))
 
     if page_mode == "ben":
-        if is_hard_block_for_ben(title, cat1, cat2, cat3):
+        group = ben_group(title, cat1, cat2, cat3)
+        if not group:
             return False
+        if is_hard_block_for_ben(title, cat1, cat2, cat3):
+            # เครื่องครัวไฟฟ้า (หม้อทอดไร้น้ำมัน หม้อหุงข้าว) ให้ผ่านได้ แต่อย่างอื่นที่โดนบล็อกไม่ผ่าน
+            text = f"{title} {cat1} {cat2} {cat3}".lower()
+            electric = group == "appliance" and has_kw(text, ["ไฟฟ้า", "electric", "air fryer", "หม้อทอดไร้น้ำมัน",
+                                                             "หม้อหุงข้าว", "rice cooker", "kettle", "กาต้มน้ำ"])
+            hard = [k for k in ["bra", "บรา", "เสื้อ", "กางเกง", "รองเท้า", "กระเป๋า", "กล้อง", "camera", "cctv",
+                                "ฟิล์ม", "เคส", "ถุง", "ซอง", "food", "อาหาร", "ของเล่น", "toy"] if has_kw(text, [k])]
+            if not electric or hard:
+                return False
+        return True
         ben_required_keywords = [
             "ปลั๊ก", "ปลั๊กไฟ", "รางปลั๊ก", "ปลั๊กพ่วง",
             "สายไฟ", "สายชาร์จ", "charger", "adapter", "gan",
@@ -617,6 +686,8 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
     history: ประวัติกันซ้ำต่อเพจ (ค่าเริ่มต้น = ประวัติโพสต์รูป)"""
     posted = history if history is not None else load_posted()
     best = {m: (None, -1.0) for m in page_modes}
+    # เพจ BEN: เก็บสินค้าที่ดีที่สุดแยกตามหมวด แล้วสลับหมวดทีละโพสต์
+    best_group: Dict[str, tuple] = {}
     count = 0
     no_link_count = 0
     headers_logged = False
@@ -659,8 +730,18 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
                 if not row_matches_page(row, mode):
                     continue
                 score = score_product(row, mode)
+                if os.getenv("FEED_DIAG") == "true":
+                    top = diag.setdefault("top_" + mode, [])
+                    top.append((round(score), title[:60]))
+                    top.sort(reverse=True)
+                    del top[12:]
                 if score > best[mode][1]:
                     best[mode] = (row, score)
+                if mode == "ben":
+                    g = ben_group(title, norm_text(row.get("global_category1")),
+                                  norm_text(row.get("global_category2")), norm_text(row.get("global_category3")))
+                    if g and score > best_group.get(g, (None, -1.0))[1]:
+                        best_group[g] = (row, score)
         except Exception as e:
             if count < 5:
                 print("ROW ERROR:", e, flush=True)
@@ -668,9 +749,17 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
 
     print(f"SCAN DONE: {count} rows | no_link={no_link_count}", flush=True)
     if os.getenv("FEED_DIAG") == "true":
-        annotate("notice", "Feed diag", json.dumps(diag, ensure_ascii=False)[:900])
+        for m in page_modes:
+            annotate("notice", f"Top {m}", "\n".join(f"{sc} | {t}" for sc, t in diag.get("top_" + m, [])))
     if count == 0:
         print("❌ CSV ว่างหรืออ่านไม่ได้ — ตรวจ SHOPEE_CSV_URL", flush=True)
+
+    if "ben" in page_modes and best_group:
+        n = len(posted["ben"].get("items", []))
+        want = BEN_ROTATION[n % len(BEN_ROTATION)]
+        pick = best_group.get(want) or best["ben"]
+        print(f"BEN ROTATION: #{n} -> {want} ({'ok' if best_group.get(want) else 'fallback'})", flush=True)
+        best["ben"] = pick
 
     result: Dict[str, Optional[Dict]] = {}
     for mode in page_modes:
@@ -703,6 +792,7 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             "cat1": norm_text(row.get("global_category1")),
             "cat2": norm_text(row.get("global_category2")),
             "cat3": norm_text(row.get("global_category3")),
+            "group": ben_group(norm_text(row.get("title"))) if mode == "ben" else "",
         }
         print(
             f"✅ CHOSEN ({mode}): {product['title']} | sold={product['sold']} | "
@@ -775,6 +865,7 @@ def qa_review(product: Dict, kind: str, content: str, page_name: str = "") -> Tu
 {content}
 
 เกณฑ์ (ผิดข้อใดข้อหนึ่ง = ไม่ผ่าน):
+- การใช้งานพื้นฐานที่ชัดเจนจากประเภทสินค้า (เช่น สว่านใช้เจาะ พัดลมให้ลม กล้องวงจรปิดใช้ดูบ้าน) ไม่นับว่าแต่งเพิ่ม
 - ทุกข้อความเกี่ยวกับสินค้าต้องมีที่มาจากข้อมูลด้านบน ห้ามมีสเปก คุณสมบัติ คำรับรอง หรือคำชมเกินจริงที่แต่งเพิ่ม (เช่น "ความจุเต็มที่" "ใช้ได้ทุกรุ่น" ถ้าชื่อสินค้าไม่ได้บอก)
 - ตัวเลข (คะแนนรีวิว ยอดขาย สเปก) ต้องตรงกับข้อมูลทุกตัว ห้ามปัดขึ้น
 - อ่านทีละบรรทัด แต่ละบรรทัดต้องต่อจากบรรทัดก่อนอย่างมีเหตุผล ไม่กระโดด ไม่ขัดกันเอง
