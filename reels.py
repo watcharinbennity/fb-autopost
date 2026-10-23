@@ -170,23 +170,35 @@ def rephrase_voiceover(product: Dict, mode: str, script: Dict, fails: list) -> s
     voiceover = script["voiceover"]
     probs = "\n".join(f"- บท: {b} | ระบบได้ยินเป็น: {h}" for _, b, h in fails[-6:])
     prompt = f"""บทพากย์คลิปนี้มีบางท่อนที่เสียงอ่านแล้วฟังไม่ชัด ระบบถอดเสียงได้ยินผิด
+ข้อความบนจอฉาก 1 เดิม: {script['slides'][0]}
 บทพากย์เดิม: {voiceover}
 ท่อนที่มีปัญหา:
 {probs}
 
-เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิม ประโยคแรกยังตรงกับฉาก 1 "{script['slides'][0]}"
-เปลี่ยนคำที่ถูกได้ยินผิดเป็นคำอื่นที่ความหมายเดียวกันและออกเสียงชัด (เช่น ความจุ -> บรรจุ / เก็บไฟได้) ให้คำที่ติดกันไม่กลืนเสียงกัน
-(เช่น เติมคำเชื่อม หรือย้ายตัวเลขไปไว้ที่อื่น) ตัวอักษรไทยล้วน ตัวเลขเขียนเป็นคำไทย ห้ามเพิ่มข้อมูลใหม่
-ตอบเฉพาะบทพากย์ใหม่ บรรทัดเดียว"""
-    new = engine.ai_write("คุณเป็นนักเขียนบทพากย์ภาษาไทย ตอบเฉพาะบทพากย์", prompt, temperature=0.7, max_tokens=400)
-    new = EMOJI_RE.sub("", (new or "").strip().strip('"')).strip()
+เรียบเรียงบทพากย์ใหม่ทั้งบท ความหมายเดิม เปลี่ยนคำที่ถูกได้ยินผิดเป็นคำอื่นที่ความหมายเดียวกันและออกเสียงชัด
+ให้คำที่ติดกันไม่กลืนเสียงกัน ถ้าคำที่มีปัญหาอยู่ในประโยคแรก ให้เปลี่ยนประโยคแรกได้ และเขียนข้อความบนจอฉาก 1 ใหม่ให้ตรงกัน (ไม่เกิน 18 ตัวอักษร)
+บทพากย์: ตัวอักษรไทยล้วน ตัวเลขเขียนเป็นคำไทย ห้ามเพิ่มข้อมูลหรือคำรับรองที่ไม่มีในข้อมูลสินค้า
+ข้อมูลสินค้า: {product['title']}
+
+ตอบเป็น JSON อย่างเดียว: {{"slide1": "...", "voiceover": "..."}}"""
+    raw = engine.ai_write("คุณเป็นนักเขียนบทพากย์ภาษาไทย ตอบเป็น JSON เท่านั้น", prompt, temperature=0.7, max_tokens=600)
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    try:
+        data = json.loads(m.group(0)) if m else {}
+    except Exception:
+        data = {}
+    new = EMOJI_RE.sub("", str(data.get("voiceover", "")).strip().strip('"')).strip()
+    slide1 = EMOJI_RE.sub("", str(data.get("slide1", "")).strip()).strip() or script["slides"][0]
     if not new or re.search(r"[A-Za-z0-9]", new):
         return ""
-    review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(script["slides"])) + \
+    slides = [slide1] + list(script["slides"][1:])
+    review = "ข้อความบนจอ:\n" + "\n".join(f"ฉาก {i + 1}: {x}" for i, x in enumerate(slides)) + \
              f"\n\nบทพากย์ (voiceover):\n{new}"
     ok, issues = engine.qa_review(product, "reel", review, PAGE_STYLE[mode]["name"])
     engine.annotate("notice" if ok else "warning", f"QA rephrase {mode}",
                     f"{'ผ่าน' if ok else 'ไม่ผ่าน'}: {new}" + ("" if ok else "\n" + "\n".join(issues)))
+    if ok:
+        script["slides"] = slides
     return new if ok else ""
 
 
