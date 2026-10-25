@@ -20,12 +20,12 @@
     }
   },
   "reels": {
-    "date": "2026-10-24",
+    "date": "2026-10-25",
     "slots": {
       "1930": {
-        "attempts": 2,
+        "attempts": 1,
         "result": "success",
-        "at": "19:55"
+        "at": "19:39"
       }
     }
   }
