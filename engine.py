@@ -681,10 +681,20 @@ def product_images(row: Dict, limit: int = 10) -> list:
                 out.append(url)
     return out[:limit]
 
-def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[str, Optional[Dict]]:
+def recent_history(h: Dict, n: int = 40) -> Dict:
+    """ประวัติล่าสุด n รายการ (ใช้กันโพสต์รูปกับคลิปซ้ำสินค้าเดียวกันในช่วงใกล้ ๆ กัน)"""
+    h = h or {}
+    return {k: list(h.get(k, []))[-n:] for k in ("items", "images", "titles")}
+
+
+def choose_products(page_modes: list, history: Optional[Dict] = None, also: Optional[Dict] = None) -> Dict[str, Optional[Dict]]:
     """อ่าน CSV รอบเดียว แล้วเลือกสินค้าที่ดีที่สุดให้ทุกเพจพร้อมกัน
     history: ประวัติกันซ้ำต่อเพจ (ค่าเริ่มต้น = ประวัติโพสต์รูป)"""
     posted = history if history is not None else load_posted()
+    if also is None and history is None:
+        # โพสต์รูป: กันซ้ำกับคลิป Reels ล่าสุดด้วย
+        allp = load_posted()
+        also = {m: recent_history(allp.get(f"reels_{m}", {})) for m in page_modes}
     best = {m: (None, -1.0) for m in page_modes}
     # เพจ BEN: เก็บสินค้าที่ดีที่สุดแยกตามหมวด แล้วสลับหมวดทีละโพสต์
     best_group: Dict[str, tuple] = {}
@@ -726,6 +736,8 @@ def choose_products(page_modes: list, history: Optional[Dict] = None) -> Dict[st
             image_key = normalize_image_key(image)
             for mode in page_modes:
                 if is_duplicate(posted[mode], itemid, image_key, title):
+                    continue
+                if also and also.get(mode) and is_duplicate(also[mode], itemid, image_key, title):
                     continue
                 if not row_matches_page(row, mode):
                     continue

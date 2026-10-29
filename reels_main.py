@@ -142,7 +142,9 @@ def main(action: str) -> None:
         if not pages:
             engine.annotate("notice", "Reels summary", "ทุกเพจลงคลิปวันนี้แล้ว")
             return
-    products = engine.choose_products([p["mode"] for p in pages], history=reels_history(posted))
+    # กันคลิปซ้ำกับสินค้าที่เพิ่งโพสต์รูปไป
+    also = {p["mode"]: engine.recent_history(posted.get(p["mode"], {})) for p in pages}
+    products = engine.choose_products([p["mode"] for p in pages], history=reels_history(posted), also=also)
 
     results, manifest = {}, []
     for page in pages:
