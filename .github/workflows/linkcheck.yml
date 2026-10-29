@@ -24,10 +24,17 @@ jobs:
           PAGE_ID_2: ${{ secrets.PAGE_ID_2 }}
           PAGE_ACCESS_TOKEN_2: ${{ secrets.PAGE_ACCESS_TOKEN_2 }}
         run: python linkcheck.py
+      - name: Open links in a real mobile browser
+        if: always()
+        continue-on-error: true
+        run: |
+          pip install -q playwright && python -m playwright install --with-deps chromium >/dev/null
+          python linkcheck_browser.py
       - name: Save results to branch linkcheck-results
         if: always()
         run: |
           mkdir -p /tmp/out && cp linkcheck_result.json /tmp/out/ 2>/dev/null || exit 0
+          cp linkcheck_browser.json shot_*.png /tmp/out/ 2>/dev/null || true
           cd /tmp/out && git init -q -b linkcheck-results && git add -A
           git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -q -m "linkcheck ${GITHUB_RUN_ID}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" linkcheck-results
