@@ -49,7 +49,13 @@ def check_link(url):
         chain = " ".join([h.headers.get("location", "") for h in r.history] + [r.url, url])
         out["aff"] = ("affiliate_id=" in chain) or ("mmp_pid=an_" in chain) or ("an_redir" in chain and "affiliate_id" in url)
         host = urlparse(r.url).netloc
-        body = r.text[:200000] if r.ok else ""
+        body = r.text[:300000] if r.ok else ""
+        out["title"] = (re.search(r"<title[^>]*>(.*?)</title>", body, re.S | re.I) or [None, ""])[1].strip()[:120] if body else ""
+        out["snippet"] = re.sub(r"\s+", " ", body[:600])
+        # หน้า an_redir มักพาไปต่อด้วย JavaScript/meta refresh: หา URL ปลายทางในหน้า
+        js = re.findall(r"""(?:location(?:\.href)?\s*=\s*|location\.replace\(|http-equiv=["']refresh["'][^>]*url=)["']?([^"'\s>)]+)""", body, re.I)
+        out["js_targets"] = js[:3]
+        out["mentions_opaanlp"] = "opaanlp" in body or "mmp_pid" in body
         if "shopee" not in host:
             out["note"] = f"ไปจบที่ {host} ไม่ใช่ Shopee"
         elif r.status_code >= 400:
@@ -71,15 +77,23 @@ def mask(url):
     return re.sub(r"(affiliate_id=)\d+", r"\1***", url)
 
 
+INSIGHT_METRICS = ["post_impressions_unique", "post_impressions", "post_clicks", "post_clicks_by_type",
+                   "post_reactions_by_type_total", "post_video_views", "blue_reels_play_count",
+                   "post_impressions_organic_unique", "post_media_view", "post_total_media_view_unique"]
+
+
 def post_insights(pid, token):
-    res = g(f"{pid}/insights", token, metric="post_impressions_unique,post_clicks,post_clicks_by_type")
-    if "error" in res:
-        return f"insights: {res['error'].get('message', '')[:100]}"
     vals = {}
-    for m in res.get("data", []):
-        v = (m.get("values") or [{}])[0].get("value")
-        vals[m.get("name")] = v
-    return json.dumps(vals, ensure_ascii=False)
+    for m in INSIGHT_METRICS:
+        res = g(f"{pid}/insights", token, metric=m)
+        if "error" in res:
+            continue
+        for d in res.get("data", []):
+            vals[d.get("name")] = (d.get("values") or [{}])[0].get("value")
+    return vals
+
+
+RESULT = {}
 
 
 def main():
@@ -88,6 +102,7 @@ def main():
             continue
         mode, token = page["mode"], page["token"]
         lines, bad = [], 0
+        rec = RESULT.setdefault(mode, [])
         items = []
         posts = g(f"{page['id']}/posts", token, fields="id,message,created_time", limit=N_POSTS)
         if "error" in posts:
@@ -116,12 +131,17 @@ def main():
             all_links = list(dict.fromkeys(links + com_links))
             when = it.get("created_time", "")[:16].replace("T", " ")
             head = f"[{kind} {when} UTC] {(text.splitlines() or [''])[0][:50]}"
+            entry = {"kind": kind, "id": pid, "time": when, "text": text[:300], "where": where, "links": []}
+            rec.append(entry)
+            if kind == "โพสต์" or kind == "คลิป":
+                entry["insights"] = post_insights(pid, token)
             if not all_links:
                 lines.append(f"❌ {head}\n   ไม่มีลิงก์เลย")
                 bad += 1
                 continue
             for u in all_links[:2]:
                 r = check_link(u)
+                entry["links"].append({"url": mask(u), **{k: (mask(v) if isinstance(v, str) else v) for k, v in r.items()}})
                 mark = "✅" if r["ok"] and r["aff"] else "❌"
                 if mark == "❌":
                     bad += 1
@@ -130,10 +150,11 @@ def main():
                     f"   -> {r['status']} {mask(r['final'])[:110]} | redirect {r['hops']} ครั้ง | affiliate={'มี' if r['aff'] else 'ไม่มี'}"
                     + (f" | {r['note']}" if r["note"] else "")
                 )
-            if kind == "โพสต์":
-                lines.append("   สถิติ: " + post_insights(pid, token))
-        annotate("notice" if bad == 0 else "warning", f"Linkcheck {mode}",
-                 f"ตรวจ {len(items)} รายการ มีปัญหา {bad}\n" + "\n".join(lines))
+        annotate("notice" if bad == 0 else "warning", f"Linkcheck {mode}", f"ตรวจ {len(items)} รายการ มีปัญหา {bad}")
+        page_info = g(page["id"], token, fields="name,followers_count,fan_count")
+        RESULT[mode + "_page"] = page_info
+    with open("linkcheck_result.json", "w", encoding="utf-8") as f:
+        json.dump(RESULT, f, ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":
