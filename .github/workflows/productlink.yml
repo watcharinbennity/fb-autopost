@@ -8,6 +8,10 @@ on:
         description: "ข้อความ/หัวข้อคลิป (เว้นว่าง = อ่านจากคลิปล่าสุดในเพจ)"
         required: false
         default: ""
+      brand:
+        description: "แบรนด์ที่ต้องการ คั่นด้วย , (เช่น schneider,ชไนเดอร์) เว้นว่าง = ทุกแบรนด์"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -33,6 +37,7 @@ jobs:
           CLAUDE_MODEL: "claude-sonnet-5-5"
           CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
           CLIP_TEXT: ${{ inputs.clip_text }}
+          BRAND: ${{ inputs.brand }}
         run: python productlink.py
       - name: Save results to branch productlink-results
         if: always()

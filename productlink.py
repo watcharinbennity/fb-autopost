@@ -14,7 +14,8 @@ import requests
 import engine
 
 N_REELS = int(os.getenv("N_REELS", "10"))
-ONLY_TEXT = os.getenv("CLIP_TEXT", "").strip()  # ถ้าใส่ข้อความเอง จะหาลิงก์ให้ข้อความนี้แทนการอ่านจากเพจ
+ONLY_TEXT = os.getenv("CLIP_TEXT", "").strip()
+BRAND = [b.strip().lower() for b in os.getenv("BRAND", "").split(",") if b.strip()]  # เช่น "schneider,ชไนเดอร์"  # ถ้าใส่ข้อความเอง จะหาลิงก์ให้ข้อความนี้แทนการอ่านจากเพจ
 
 
 # ไม่ใช่อุปกรณ์ไฟฟ้า (กันคำพ้อง เช่น "wind breaker" = เสื้อแจ็กเก็ต)
@@ -74,6 +75,8 @@ def main():
         for c in clips:
             w = c["want"]
             if not engine.has_kw(low, w["must"]) or engine.has_kw(low, w["avoid"] + NOT_TOOLS):
+                continue
+            if BRAND and not any(b in low for b in BRAND):
                 continue
             score = sold * rating
             c["cands"].append((score, row))
