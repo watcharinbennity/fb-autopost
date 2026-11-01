@@ -1,0 +1,43 @@
+name: CLIP-PRODUCT-LINK
+
+# หาลิงก์สินค้า Shopee ให้คลิปที่ลงเองในเพจ BEN (อ่านอย่างเดียว ไม่โพสต์อะไร)
+on:
+  workflow_dispatch:
+    inputs:
+      clip_text:
+        description: "ข้อความ/หัวข้อคลิป (เว้นว่าง = อ่านจากคลิปล่าสุดในเพจ)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q requests pillow
+      - name: Find product links
+        env:
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          SHOPEE_CSV_URL: ${{ secrets.SHOPEE_CSV_URL }}
+          SHOPEE_AFFILIATE_ID: ${{ secrets.SHOPEE_AFFILIATE_ID }}
+          SHOPEE_SUB_ID_PREFIX: "fbbot"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: "claude-sonnet-5-5"
+          CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
+          CLIP_TEXT: ${{ inputs.clip_text }}
+        run: python productlink.py
+      - name: Save results to branch productlink-results
+        if: always()
+        run: |
+          mkdir -p /tmp/out && cp productlink_result.json /tmp/out/ 2>/dev/null || exit 0
+          cd /tmp/out && git init -q -b productlink-results && git add -A
+          git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -q -m "productlink ${GITHUB_RUN_ID}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" productlink-results
