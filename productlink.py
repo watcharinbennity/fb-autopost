@@ -17,6 +17,10 @@ N_REELS = int(os.getenv("N_REELS", "10"))
 ONLY_TEXT = os.getenv("CLIP_TEXT", "").strip()  # ถ้าใส่ข้อความเอง จะหาลิงก์ให้ข้อความนี้แทนการอ่านจากเพจ
 
 
+# ไม่ใช่อุปกรณ์ไฟฟ้า (กันคำพ้อง เช่น "wind breaker" = เสื้อแจ็กเก็ต)
+NOT_TOOLS = ["เสื้อ", "แจ็คเก็ต", "แจ๊คเก็ต", "jacket", "windbreaker", "wind breaker", "กางเกง", "รองเท้า", "หมวก"]
+
+
 def clips_without_link():
     page = engine.PAGES[0]  # BEN
     res = requests.get(f"{engine.GRAPH}/{page['id']}/video_reels",
@@ -69,7 +73,7 @@ def main():
             continue
         for c in clips:
             w = c["want"]
-            if not engine.has_kw(low, w["must"]) or (w["avoid"] and engine.has_kw(low, w["avoid"])):
+            if not engine.has_kw(low, w["must"]) or engine.has_kw(low, w["avoid"] + NOT_TOOLS):
                 continue
             score = sold * rating
             c["cands"].append((score, row))
