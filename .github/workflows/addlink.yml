@@ -1,0 +1,23 @@
+name: ADD-CLIP-LINK
+
+# เพิ่มลิงก์สินค้าให้คลิปที่ลงเองในเพจ BEN (ต่อท้ายแคปชัน + คอมเมนต์)
+on:
+  workflow_dispatch:
+    inputs:
+      jobs_json:
+        description: 'JSON: [{"video_id":"...","link":"https://s.shopee.co.th/an_redir?...","label":"..."}]'
+        required: true
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q requests
+      - name: Add links
+        env:
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
+          JOBS: ${{ inputs.jobs_json }}
+        run: python addlink.py
