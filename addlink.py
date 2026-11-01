@@ -30,6 +30,17 @@ for job in JOBS:
         continue
     desc = info.get("description") or ""
     done = []
+    # เปลี่ยนสินค้า: เอาลิงก์เดิมที่บอทเคยใส่ (sub_id=fbclip-) ออกก่อน ทั้งในแคปชันและคอมเมนต์
+    old_block = re.compile(r"\n*🛒[^\n]*\n👉 https://s\.shopee\.co\.th/an_redir\?[^\s]*sub_id=fbclip-[^\s]*")
+    if link not in desc and old_block.search(desc):
+        desc = old_block.sub("", desc)
+        done.append("ลบลิงก์เดิมในแคปชัน")
+    for c in requests.get(f"{GRAPH}/{vid}/comments", params={"fields": "id,message,from", "limit": 50,
+                                                             "access_token": TOKEN}, timeout=30).json().get("data", []):
+        msg = c.get("message") or ""
+        if (c.get("from") or {}).get("id") == PAGE_ID and "sub_id=fbclip-" in msg and link not in msg:
+            r = requests.delete(f"{GRAPH}/{c['id']}", params={"access_token": TOKEN}, timeout=30).json()
+            done.append("ลบคอมเมนต์ลิงก์เดิม: " + ("OK" if r.get("success") else str(r)[:100]))
     if link not in desc:
         new_desc = desc.rstrip() + f"\n\n🛒 {label}\n👉 {link}"
         r = requests.post(f"{GRAPH}/{vid}", data={"description": new_desc, "access_token": TOKEN}, timeout=30).json()
