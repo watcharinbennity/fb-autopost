@@ -57,7 +57,7 @@ def keywords_for(text):
 
 def main():
     if ONLY_TEXT:
-        clips = [{"id": "manual", "time": "", "text": ONLY_TEXT}]
+        clips = [{"id": f"manual{i}", "time": "", "text": t.strip()} for i, t in enumerate(ONLY_TEXT.split("||")) if t.strip()]
     else:
         clips = clips_without_link()
     for c in clips:
@@ -70,7 +70,7 @@ def main():
         low = title.lower()
         rating = engine.to_float(row.get("item_rating"))
         sold = engine.to_float(row.get("item_sold"))
-        if rating < 4.5 or sold < 20:
+        if rating < float(os.getenv("LINK_MIN_RATING", "4.5")) or sold < float(os.getenv("LINK_MIN_SOLD", "20")):
             continue
         for c in clips:
             w = c["want"]

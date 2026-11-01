@@ -38,6 +38,7 @@ jobs:
           CLAUDE_REPLY_MODEL: "claude-haiku-4-5-20251001"
           CLIP_TEXT: ${{ inputs.clip_text }}
           BRAND: ${{ inputs.brand }}
+          LINK_MIN_SOLD: "5"
         run: python productlink.py
       - name: Save results to branch productlink-results
         if: always()
