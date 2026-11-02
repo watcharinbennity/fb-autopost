@@ -93,7 +93,7 @@ def main():
                           "rating": engine.to_float(row.get("item_rating")),
                           "sold": int(engine.to_float(row.get("item_sold"))),
                           "link": link})
-        result.append({"clip": c["text"][:200], "time": c["time"], "id": c["id"],
+        result.append({"clip": c["text"][:1500], "time": c["time"], "id": c["id"],
                        "product": c["want"].get("product"), "must": c["want"].get("must"), "picks": picks})
         engine.annotate("notice" if picks else "warning", "Clip link",
                         f"{c['text'][:60]} -> {c['want'].get('product')} : {len(picks)} ตัวเลือก")
