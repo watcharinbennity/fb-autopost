@@ -1,26 +1,11 @@
 {
   "posts": {
-    "date": "2026-11-03",
+    "date": "2026-11-04",
     "slots": {
       "0900": {
-        "attempts": 2,
-        "result": "failure",
-        "at": "09:16"
-      },
-      "1200": {
         "attempts": 1,
         "result": "success",
-        "at": "12:03"
-      },
-      "1830": {
-        "attempts": 1,
-        "result": "success",
-        "at": "18:33"
-      },
-      "2100": {
-        "attempts": 1,
-        "result": "success",
-        "at": "21:03"
+        "at": "09:04"
       }
     }
   },
